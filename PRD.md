@@ -1,4 +1,4 @@
-# adaptive-lp-vault (Staking) 协议需求规格说明书 (v1.0 Final)
+# ERC20 (Staking) 协议需求规格说明书 v1.0
 
 ## 1. 文档概览
 
