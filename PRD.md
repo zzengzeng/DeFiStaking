@@ -188,7 +188,7 @@ uint256 public unpauseAt;          // 最早允许 unpause 的时间戳
 uint256 public shutdownAt;         // 停机时间戳
 uint256 public badDebtA;           // Pool A 坏账缺口
 uint256 public badDebtB;           // Pool B 坏账缺口
-uint256 public minClaimAmount = 1e15; // 最小领取量防攻击，初始缺省 1e15 wei
+uint256 public minClaimAmount = 1e15; // 最小领取量防攻击，初始缺省 1e15 wei Admin 可通过 setMinClaimAmount 调整，上限 MAX_MIN_CLAIM_AMOUNT
 address public forfeitedRecipient; // 仅接收 TokenA 类型本金罚金的地址
 
 ```
@@ -781,7 +781,25 @@ emit RewardNotified(Pool.X, actualAmount, duration, newRate);
 * `setTVLCapX(uint256 cap)`: 触发 `TVLCapUpdated`。
 * `setMinStakeAmountX(uint256 amt)`: 触发 `MinStakeAmountUpdated`。
 * `setRewardDurationX(uint256 duration)`: 触发 `RewardDurationUpdated`。
+* `setMinClaimAmount(uint256 newAmount)`  
+  - Admin Only，≥48h Timelock  
+  - `require(newAmount <= MAX_MIN_CLAIM_AMOUNT)`  
+  - 用于调整 Claim 的最小金额限制，防止 dust 攻击或 gas griefing  
+  - 触发 `MinClaimAmountUpdated(oldValue, newValue, timestamp)`
+```solidity
+function setMinClaimAmount(uint256 newAmount)
+    external
+    onlyAdmin
+    timelocked(48 hours)
+{
+    require(newAmount <= MAX_MIN_CLAIM_AMOUNT, "EXCEEDS_MAX");
+    
+    uint256 old = minClaimAmount;
+    minClaimAmount = newAmount;
 
+    emit MinClaimAmountUpdated(old, newAmount, block.timestamp);
+}
+```
 ---
 
 ## 7. 暂停与紧急操作
@@ -800,6 +818,20 @@ emit RewardNotified(Pool.X, actualAmount, duration, newRate);
 
 > **状态覆写规则**：
 > Emergency 优先级最高。只要 `emergencyMode == true`，`emergencyWithdraw` 就必须可用，完全无视 `paused` 状态。
+
+**Withdraw 状态逻辑说明**
+
+Withdraw 操作的内部校验为：
+
+require(!paused, "PAUSED");
+require(!emergencyMode || shutdownMode, "EMERGENCY_MODE");
+
+其语义等价于：
+
+- Normal 状态：允许 Withdraw
+- Paused 状态：禁止 Withdraw
+- Emergency 状态：禁止 Withdraw，必须使用 emergencyWithdraw
+- Shutdown 状态：允许 Withdraw（用于系统清算退出）
 
 ### 7.2 Pause / Unpause
 
