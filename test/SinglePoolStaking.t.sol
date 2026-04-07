@@ -20,9 +20,10 @@ contract SinglePoolStakingTest is Test {
         singlePoolStaking = new SinglePoolStaking(address(stakingToken), address(rewardToken));
 
         stakingToken.mint(user, 1000 * 1e18);
-        rewardToken.mint(address(singlePoolStaking), 1000 * 1e18);
+        rewardToken.mint(address(this), 1000 * 1e18);
 
-        singlePoolStaking.setRewardRate(1 ether);
+        rewardToken.approve(address(singlePoolStaking), 1000 ether);
+        singlePoolStaking.notifyRewardAmount(1000 ether, 1000);
     }
 
     function testStake() public {
