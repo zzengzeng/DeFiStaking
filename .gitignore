@@ -1,16 +1,35 @@
-# Compiler files
+# Compiler / Foundry artifacts
 cache/
 out/
+broadcast/
 
-# Ignores development broadcast logs
-!/broadcast
-/broadcast/*/31337/
-/broadcast/**/dry-run/
+# Docs and local notes
 
-/lib
+md/
+xmind/
 
-# Docs
-docs/
+# forge install output (submodule lib/forge-std remains tracked as a gitlink)
+lib/
 
-# Dotenv file
+# Env and package manager caches
 .env
+.env.*
+!.env.example
+# pnpm store when store-dir lives inside the repo (root + nested workspaces)
+/.pnpm-store/
+**/.pnpm-store/
+
+.gas-snapshot
+
+# Frontend build and test artifacts (see also frontend/.gitignore)
+frontend/node_modules/
+frontend/.next/
+frontend/test-results/
+frontend/tests/
+
+src/DualPoolStakingAdminOld.sol
+src/DualPoolStakingOld.sol
+
+script/acceptance.sh
+script/sync_frontend_addresses.py
+

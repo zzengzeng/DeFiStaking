@@ -5,4 +5,15 @@ libs = ["lib"]
 
 remappings = ['@openzeppelin/=lib/openzeppelin-contracts/','forge-std/=lib/forge-std/src/']
 
+# 固定编译器：避开 0.8.28–0.8.33 在区块浏览器上提示的 IR 相关已知缺陷（含 TransientStorageClearingHelperCollision 等），见 https://soliditylang.org/blog/
+solc_version = "0.8.34"
+
+# optimizer = true
+# optimizer_runs = 200
+# via_ir = true
+
+# # 可选：减小 artifact / 部署字节尾（验证页元数据）；不影响链上 runtime EIP-170 计数方式时仍以 solc 为准
+# bytecode_hash = "none"
+# cbor_metadata = false
+
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options

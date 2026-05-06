@@ -1,0 +1,60 @@
+/** OpenZeppelin TimelockController（与 `lib/openzeppelin-contracts/.../TimelockController.sol` 对齐的最小子集）。 */
+export const timelockControllerAbi = [
+  { type: "function", name: "PROPOSER_ROLE", stateMutability: "view", inputs: [], outputs: [{ type: "bytes32" }] },
+  { type: "function", name: "EXECUTOR_ROLE", stateMutability: "view", inputs: [], outputs: [{ type: "bytes32" }] },
+  { type: "function", name: "CANCELLER_ROLE", stateMutability: "view", inputs: [], outputs: [{ type: "bytes32" }] },
+  {
+    type: "function",
+    name: "hasRole",
+    stateMutability: "view",
+    inputs: [
+      { name: "role", type: "bytes32" },
+      { name: "account", type: "address" },
+    ],
+    outputs: [{ type: "bool" }],
+  },
+  { type: "function", name: "getMinDelay", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
+  {
+    type: "function",
+    name: "hashOperation",
+    stateMutability: "pure",
+    inputs: [
+      { name: "target", type: "address" },
+      { name: "value", type: "uint256" },
+      { name: "data", type: "bytes" },
+      { name: "predecessor", type: "bytes32" },
+      { name: "salt", type: "bytes32" },
+    ],
+    outputs: [{ type: "bytes32" }],
+  },
+  { type: "function", name: "getOperationState", stateMutability: "view", inputs: [{ name: "id", type: "bytes32" }], outputs: [{ type: "uint8" }] },
+  { type: "function", name: "getTimestamp", stateMutability: "view", inputs: [{ name: "id", type: "bytes32" }], outputs: [{ type: "uint256" }] },
+  {
+    type: "function",
+    name: "schedule",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "target", type: "address" },
+      { name: "value", type: "uint256" },
+      { name: "data", type: "bytes" },
+      { name: "predecessor", type: "bytes32" },
+      { name: "salt", type: "bytes32" },
+      { name: "delay", type: "uint256" },
+    ],
+    outputs: [],
+  },
+  {
+    type: "function",
+    name: "execute",
+    stateMutability: "payable",
+    inputs: [
+      { name: "target", type: "address" },
+      { name: "value", type: "uint256" },
+      { name: "payload", type: "bytes" },
+      { name: "predecessor", type: "bytes32" },
+      { name: "salt", type: "bytes32" },
+    ],
+    outputs: [],
+  },
+  { type: "function", name: "cancel", stateMutability: "nonpayable", inputs: [{ name: "id", type: "bytes32" }], outputs: [] },
+] as const;
