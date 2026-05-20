@@ -120,6 +120,10 @@ abstract contract DualPoolStorageLayout is Ownable, AccessControl, ReentrancyGua
     address public adminModule;
     /// @dev Immutable cap for `MAX_REWARD_RATE_*` derivation (PRD: deploy-time supply ceiling, not live `totalSupply()`).
     uint256 public maxTotalSupplyBForRewardRateCap;
+    /// @notice Running sum of all `userInfoA[*].rewards` (mirrored on every settle / claim / compound / forfeit / emergency path).
+    uint256 public bookedUserRewardsA;
+    /// @notice Running sum of all `userInfoB[*].rewards`.
+    uint256 public bookedUserRewardsB;
 
     /// @notice Satisfies `Ownable` construction for abstract layout; core contract supplies real `Ownable(msg.sender)` in its constructor.
     constructor() Ownable(msg.sender) {}

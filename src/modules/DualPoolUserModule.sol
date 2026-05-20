@@ -31,7 +31,9 @@ contract DualPoolUserModule is DualPoolStorageLayout {
     event ForceClaimed(
         address indexed user, uint256 paidA, uint256 paidB, uint256 unpaidA, uint256 unpaidB, uint256 timestamp
     );
-    event EmergencyWithdrawn(address indexed user, uint256 amount, Pool indexed pool, uint256 at);
+    event EmergencyWithdrawn(
+        address indexed user, uint256 principal, uint256 rewardsForfeited, Pool indexed pool, uint256 at
+    );
     event InvariantViolated(uint256 actual, uint256 required, uint256 timestamp);
     event InsufficientBudget(Pool pool, uint256 shortfall, uint256 timestamp);
     event DustAccumulated(Pool pool, uint256 dustAmount, uint256 timestamp);
@@ -51,7 +53,15 @@ contract DualPoolUserModule is DualPoolStorageLayout {
         _settleUserA(user);
 
         PoolAStakeLib.StakeAParams memory params = PoolAStakeLib.StakeAParams({
-            user: user, amountRequested: amount, maxTransferFeeBP: maxTransferFeeBP, basisPoints: BASIS_POINTS
+            user: user,
+            amountRequested: amount,
+            maxTransferFeeBP: maxTransferFeeBP,
+            basisPoints: BASIS_POINTS,
+            minRewardRateDuration: MIN_REWARD_RATE_DURATION,
+            maxRewardDuration: MAX_DURATION,
+            maxAprBp: MAX_APR_BP,
+            secondsPerYear: SECONDS_PER_YEAR,
+            maxTotalSupplyBForRewardRateCap: maxTotalSupplyBForRewardRateCap
         });
 
         uint256 actualReceived = PoolAStakeLib.executeStakeA(poolAState, userInfoA, params);
@@ -75,7 +85,12 @@ contract DualPoolUserModule is DualPoolStorageLayout {
             amountRequested: amount,
             lockDuration: lockDuration,
             maxTransferFeeBP: maxTransferFeeBP,
-            basisPoints: BASIS_POINTS
+            basisPoints: BASIS_POINTS,
+            minRewardRateDuration: MIN_REWARD_RATE_DURATION,
+            maxRewardDuration: MAX_DURATION,
+            maxAprBp: MAX_APR_BP,
+            secondsPerYear: SECONDS_PER_YEAR,
+            maxTotalSupplyBForRewardRateCap: maxTotalSupplyBForRewardRateCap
         });
         PoolBStakeLib.StakeBResult memory sb =
             PoolBStakeLib.executeStakeB(poolBState, userInfoB, unlockTimeB, stakeTimestampB, params);
@@ -103,6 +118,7 @@ contract DualPoolUserModule is DualPoolStorageLayout {
 
         PoolBWithdrawLib.WithdrawBResult memory res =
             PoolBWithdrawLib.executeWithdrawB(poolBState, userInfoB, stakeTimestampB, unlockTimeB, params);
+        bookedUserRewardsB -= res.forfeitedRewardsB;
         unclaimedFeesB += res.feeAddedToUnclaimed;
         _assertInvariantB();
         emit Withdrawn(user, amount, res.feeOrPenaltyForEvent, res.isEarlyForEvent, Pool.B);
@@ -138,6 +154,7 @@ contract DualPoolUserModule is DualPoolStorageLayout {
             badDebtPoolB: poolBState.badDebt
         });
         uint256 reward = PoolSingleClaimLib.executeClaim(poolAState, userInfoA[user], lastClaimTime, claimParamsA);
+        bookedUserRewardsA -= reward;
         _assertInvariantB();
         emit Claimed(user, reward, 0, block.timestamp);
     }
@@ -160,12 +177,13 @@ contract DualPoolUserModule is DualPoolStorageLayout {
             badDebtPoolB: poolBState.badDebt
         });
         uint256 reward = PoolSingleClaimLib.executeClaim(poolBState, userInfoB[user], lastClaimTime, claimParamsB);
+        bookedUserRewardsB -= reward;
         _assertInvariantB();
         emit Claimed(user, 0, reward, block.timestamp);
     }
 
-    /// @notice Force-claim-all entrypoint for delegatecall from the core.
-    /// @param user Claimant whose Pool A + B rewards are settled under shutdown / liquidity rules.
+    /// @notice Force-claim-all entrypoint for delegatecall from the core (partial pay when liquidity is insufficient).
+    /// @param user Claimant whose Pool A + B rewards are settled; per-pool `minClaimAmount` applies when not shutdown and no bad debt.
     function executeForceClaimAll(address user) external {
         if (emergencyMode && !shutdown) revert EmergencyModeActive();
         // M-2: cooldown parity with standard claim — first use still allowed when `lastClaimTime[user] == 0`.
@@ -188,6 +206,8 @@ contract DualPoolUserModule is DualPoolStorageLayout {
 
         ForceClaimAllLib.ForceClaimResult memory fc =
             ForceClaimAllLib.executeForceClaimAll(poolAState, poolBState, userInfoA, userInfoB, lastClaimTime, params);
+        bookedUserRewardsA -= fc.payA + fc.unpaidA;
+        bookedUserRewardsB -= fc.payB + fc.unpaidB;
 
         _assertInvariantB();
         emit ForceClaimed(user, fc.payA, fc.payB, fc.unpaidA, fc.unpaidB, block.timestamp);
@@ -210,11 +230,21 @@ contract DualPoolUserModule is DualPoolStorageLayout {
         _settleUserA(user);
         _settleUserB(user);
 
-        PoolBCompoundLib.CompoundBParams memory params =
-            PoolBCompoundLib.CompoundBParams({user: user, lockDuration: lockDuration});
+        PoolBCompoundLib.CompoundBParams memory params = PoolBCompoundLib.CompoundBParams({
+            user: user,
+            lockDuration: lockDuration,
+            minRewardRateDuration: MIN_REWARD_RATE_DURATION,
+            maxRewardDuration: MAX_DURATION,
+            maxAprBp: MAX_APR_BP,
+            basisPoints: BASIS_POINTS,
+            secondsPerYear: SECONDS_PER_YEAR,
+            maxTotalSupplyBForRewardRateCap: maxTotalSupplyBForRewardRateCap
+        });
         PoolBCompoundLib.CompoundBResult memory res = PoolBCompoundLib.executeCompoundB(
             poolAState, poolBState, userInfoA, userInfoB, unlockTimeB, stakeTimestampB, lastClaimTime, params
         );
+        bookedUserRewardsA -= res.rewardA;
+        bookedUserRewardsB -= res.rewardB;
 
         _assertInvariantB();
         emit Compounded(user, res.rewardA, res.rewardB, res.newUserStakedB, res.newUnlockTimeB);
@@ -223,22 +253,35 @@ contract DualPoolUserModule is DualPoolStorageLayout {
     /// @notice Emergency Pool A principal exit for delegatecall from the core.
     /// @param user Account whose Pool A position is force-closed to zero.
     function executeEmergencyWithdrawA(address user) external {
+        // Accrue through `now` and settle so `userInfoA.rewards` / `totalPending` match the index (avoids ghost pending).
+        _updateGlobalA();
+        _updateGlobalB();
+        _settleUserA(user);
+        _settleUserB(user);
+        uint256 rewardSnapA = userInfoA[user].rewards;
         StakingAdminLib.EmergencyWithdrawAParams memory params =
             StakingAdminLib.EmergencyWithdrawAParams({emergencyMode: emergencyMode, shutdown: shutdown, user: user});
         uint256 stakedAmount = StakingAdminLib.executeEmergencyWithdrawA(poolAState, poolBState, userInfoA, params);
+        bookedUserRewardsA -= rewardSnapA;
         _checkInvariantBNoRevert();
-        emit EmergencyWithdrawn(user, stakedAmount, Pool.A, block.timestamp);
+        emit EmergencyWithdrawn(user, stakedAmount, rewardSnapA, Pool.A, block.timestamp);
     }
 
     /// @notice Emergency Pool B principal exit for delegatecall from the core.
     /// @param user Account whose Pool B position is force-closed to zero.
     function executeEmergencyWithdrawB(address user) external {
+        _updateGlobalA();
+        _updateGlobalB();
+        _settleUserA(user);
+        _settleUserB(user);
+        uint256 rewardSnapB = userInfoB[user].rewards;
         StakingAdminLib.EmergencyWithdrawBParams memory params =
             StakingAdminLib.EmergencyWithdrawBParams({emergencyMode: emergencyMode, shutdown: shutdown, user: user});
         uint256 stakedAmount =
             StakingAdminLib.executeEmergencyWithdrawB(poolBState, userInfoB, unlockTimeB, stakeTimestampB, params);
+        bookedUserRewardsB -= rewardSnapB;
         _checkInvariantBNoRevert();
-        emit EmergencyWithdrawn(user, stakedAmount, Pool.B, block.timestamp);
+        emit EmergencyWithdrawn(user, stakedAmount, rewardSnapB, Pool.B, block.timestamp);
     }
 
     /// @dev Advances Pool A global reward index; emits `InsufficientBudget` / `DustAccumulated` when the library reports signals.
@@ -260,13 +303,13 @@ contract DualPoolUserModule is DualPoolStorageLayout {
     /// @dev Settles Pool A rewards for `user` against `accRewardPerToken`.
     /// @param user Address whose `userInfoA` row is updated.
     function _settleUserA(address user) internal {
-        PoolAccrualLib.settleUser(poolAState, userInfoA, user, PRECISION);
+        bookedUserRewardsA += PoolAccrualLib.settleUser(poolAState, userInfoA, user, PRECISION);
     }
 
     /// @dev Settles Pool B rewards for `user` against `accRewardPerToken`.
     /// @param user Address whose `userInfoB` row is updated.
     function _settleUserB(address user) internal {
-        PoolAccrualLib.settleUser(poolBState, userInfoB, user, PRECISION);
+        bookedUserRewardsB += PoolAccrualLib.settleUser(poolBState, userInfoB, user, PRECISION);
     }
 
     /// @dev Liability leg (part 1) for TokenB balance invariant: principal plus promised pending rewards.

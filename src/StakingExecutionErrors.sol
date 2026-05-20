@@ -51,6 +51,10 @@ abstract contract StakingExecutionErrors {
     /// @param rate Newly computed `rewardRate` that exceeded the cap.
     /// @param maxRate Maximum rate allowed by `NotifyRewardLib` cap math.
     error RewardRateExceedsMax(uint256 rate, uint256 maxRate);
+    /// @notice `notifyReward*` merged budget (`actual + temporal leftover + stranded carry`) yields zero wei/sec rate under integer division — budget would sit in `availableRewards` without emission.
+    /// @param mergedBudgetWei Sum merged into the rate numerator before dividing by `duration`.
+    /// @param durationSeconds Scheduled emission duration (denominator).
+    error ZeroRewardRate(uint256 mergedBudgetWei, uint256 durationSeconds);
     /// @notice Operation requires emergency mode but it is not active.
     error NotInEmergency();
     /// @notice Operation forbidden while shutdown mode is active.
@@ -75,4 +79,6 @@ abstract contract StakingExecutionErrors {
     error GracePeriodNotMet();
     /// @notice Shutdown finalization blocked because principal remains staked before deadlock bypass.
     error StillStaked();
+    /// @notice `bookedUserRewards*` aggregate exceeded `totalPending` for a pool (accounting invariant broken).
+    error BookedRewardsExceedPending();
 }

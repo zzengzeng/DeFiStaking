@@ -32,6 +32,7 @@ type Props = {
   executeRows?: () => { label: string; value: React.ReactNode }[];
   children: React.ReactNode;
   onAfterTx?: () => Promise<void>;
+  disabledReason?: string | null;
 };
 
 function mapOzToIndexedOp(
@@ -64,7 +65,7 @@ function mapOzToIndexedOp(
   };
 }
 
-export function GovernanceCard({ title, hint, payload, minDelay, canPropose, canExecute, canCancel, executeRows, children, onAfterTx }: Props) {
+export function GovernanceCard({ title, hint, payload, minDelay, canPropose, canExecute, canCancel, executeRows, children, onAfterTx, disabledReason }: Props) {
   const { address } = useAccount();
   const { writeContractAsync } = useWriteContract();
   const flow = useWriteWithStatus();
@@ -114,14 +115,14 @@ export function GovernanceCard({ title, hint, payload, minDelay, canPropose, can
 
   const status = useMemo(() => {
     if (ozState === OZ_UNSET) {
-      return { canSchedule: canPropose && minDelay > 0n, canExecute: false, canCancel: false };
+      return { canSchedule: canPropose && minDelay > 0n && !disabledReason, canExecute: false, canCancel: false };
     }
     if (ozState === OZ_DONE) return { canSchedule: false, canExecute: false, canCancel: false };
     const tsNum = tsRead.data !== undefined ? Number(tsRead.data) : Number.NaN;
     const ready = ozState === OZ_READY || (ozState === OZ_WAITING && Number.isFinite(tsNum) && now >= tsNum);
     const pending = ozState === OZ_WAITING || ozState === OZ_READY;
     return { canSchedule: false, canExecute: ready && canExecute, canCancel: pending && canCancel };
-  }, [canCancel, canExecute, canPropose, minDelay, now, ozState, tsRead.data]);
+  }, [canCancel, canExecute, canPropose, disabledReason, minDelay, now, ozState, tsRead.data]);
 
   const busy = flow.state !== "idle";
 
@@ -219,6 +220,7 @@ export function GovernanceCard({ title, hint, payload, minDelay, canPropose, can
       <fieldset disabled={formLocked} className="mb-3 min-w-0 space-y-2 disabled:opacity-60">
         {children}
       </fieldset>
+      {disabledReason ? <p className="mb-3 text-[11px] text-red-300/90">{disabledReason}</p> : null}
       {formLocked ? (
         <p className="mb-3 text-[11px] text-amber-200/90">该操作已排队或待执行：为避免 operationId 漂移，已暂时锁定表单输入。</p>
       ) : null}

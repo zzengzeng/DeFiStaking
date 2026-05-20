@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {PoolInfo, UserInfo} from "../StakeTypes.sol";
+import {PoolBWadpLib} from "./PoolBWadpLib.sol";
+import {RewardReanchorLib} from "./RewardReanchorLib.sol";
 import {StakingExecutionErrors} from "../StakingExecutionErrors.sol";
 
 /// @title PoolBStakeLib
@@ -26,6 +27,11 @@ library PoolBStakeLib {
         uint256 maxTransferFeeBP;
         /// @notice Basis-point denominator (typically `10_000`).
         uint256 basisPoints;
+        uint256 minRewardRateDuration;
+        uint256 maxRewardDuration;
+        uint256 maxAprBp;
+        uint256 secondsPerYear;
+        uint256 maxTotalSupplyBForRewardRateCap;
     }
 
     /// @notice Return data: received principal and updated unlock timestamp.
@@ -40,19 +46,6 @@ library PoolBStakeLib {
     function _updateRollingLock(uint256 oldUnlockTime, uint256 _lockDuration) private view returns (uint256) {
         uint256 newUnlockFromNow = block.timestamp + _lockDuration;
         return oldUnlockTime > newUnlockFromNow ? oldUnlockTime : newUnlockFromNow;
-    }
-
-    /// @dev Weighted-average “deposit time” used as Pool B holding-duration reference on non-early withdrawals.
-    /// @param oldStaked User stake before this deposit.
-    /// @param oldTimestamp Prior weighted timestamp (`0`/`unset` treated as fresh stake path).
-    /// @param addedAmount New principal credited this call.
-    /// @return New weighted timestamp in seconds (unix time scale).
-    function _updateWADP(uint256 oldStaked, uint256 oldTimestamp, uint256 addedAmount) private view returns (uint256) {
-        if (oldStaked == 0) return block.timestamp;
-        if (addedAmount == 0) return oldTimestamp;
-        uint256 weightedOld = oldStaked * oldTimestamp;
-        uint256 weightedNew = addedAmount * block.timestamp;
-        return Math.mulDiv((weightedOld + weightedNew), 1, (oldStaked + addedAmount));
     }
 
     /// @dev Pulls TokenB via `transferFrom` and enforces FOT bounds, `minStakeAmount`, and `tvlCap`.
@@ -100,12 +93,25 @@ library PoolBStakeLib {
         poolB.totalStaked += received;
 
         uint256 remainingTime = poolB.periodFinish > block.timestamp ? poolB.periodFinish - block.timestamp : 0;
-        if (isFirstDeposit && poolB.totalStaked > 0 && remainingTime > 0) {
-            poolB.rewardRate = poolB.availableRewards / remainingTime;
+        if (poolB.totalStaked > 0 && poolB.availableRewards > 0) {
+            if (remainingTime > 0 && isFirstDeposit) {
+                poolB.rewardRate = poolB.availableRewards / remainingTime;
+            } else if (remainingTime == 0) {
+                RewardReanchorLib.reanchorStaleSchedule(
+                    poolB,
+                    p.minRewardRateDuration,
+                    p.maxRewardDuration,
+                    p.maxAprBp,
+                    p.basisPoints,
+                    p.secondsPerYear,
+                    p.maxTotalSupplyBForRewardRateCap
+                );
+            }
         }
 
         unlockTimeB[p.user] = _updateRollingLock(unlockTimeB[p.user], p.lockDuration);
-        stakeTimestampB[p.user] = _updateWADP(oldStakedB, oldTimestampB, received);
+        stakeTimestampB[p.user] =
+            PoolBWadpLib.weightedAvgDepositTimestamp(oldStakedB, oldTimestampB, received, block.timestamp);
 
         r.received = received;
         r.newUnlockTime = unlockTimeB[p.user];

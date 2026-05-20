@@ -302,7 +302,9 @@ event ForceClaimed(
 ### EmergencyWithdrawn
 
 ```solidity
-event EmergencyWithdrawn(address indexed user, uint256 amount, Pool indexed pool, uint256 at);
+event EmergencyWithdrawn(
+    address indexed user, uint256 principal, uint256 rewardsForfeited, Pool indexed pool, uint256 at
+);
 ```
 
 ### InvariantViolated

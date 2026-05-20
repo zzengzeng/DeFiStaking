@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-
 import {PoolInfo, UserInfo} from "../StakeTypes.sol";
+import {PoolBWadpLib} from "./PoolBWadpLib.sol";
+import {RewardReanchorLib} from "./RewardReanchorLib.sol";
 import {StakingExecutionErrors} from "../StakingExecutionErrors.sol";
 
 /// @title PoolBCompoundLib
@@ -16,6 +16,12 @@ library PoolBCompoundLib {
         address user;
         /// @notice Rolling lock duration applied after compounding (same semantics as stake).
         uint256 lockDuration;
+        uint256 minRewardRateDuration;
+        uint256 maxRewardDuration;
+        uint256 maxAprBp;
+        uint256 basisPoints;
+        uint256 secondsPerYear;
+        uint256 maxTotalSupplyBForRewardRateCap;
     }
 
     /// @notice Result of a compound operation for events and UI.
@@ -36,42 +42,45 @@ library PoolBCompoundLib {
         return oldUnlockTime > newUnlockFromNow ? oldUnlockTime : newUnlockFromNow;
     }
 
-    /// @dev Same weighted-average timestamp rule as `PoolBStakeLib._updateWADP`.
-    function _updateWADP(uint256 oldStaked, uint256 oldTimestamp, uint256 addedAmount) private view returns (uint256) {
-        if (oldStaked == 0) return block.timestamp;
-        if (addedAmount == 0) return oldTimestamp;
-        uint256 weightedOld = oldStaked * oldTimestamp;
-        uint256 weightedNew = addedAmount * block.timestamp;
-        return Math.mulDiv((weightedOld + weightedNew), 1, (oldStaked + addedAmount));
-    }
-
     /// @dev Mutates Pool B stake, TVL, lock maps, and optionally recomputes `rewardRate` when Pool B was empty.
     function _applyCompoundIntoPoolB(
         PoolInfo storage poolB,
         UserInfo storage userB,
         mapping(address => uint256) storage unlockTimeB,
         mapping(address => uint256) storage stakeTimestampB,
-        address user,
-        uint256 lockDuration,
+        CompoundBParams memory p,
         uint256 compoundTotal
     ) private returns (uint256 newUserStakedB, uint256 newUnlockTimeB) {
         bool wasEmptyB = (poolB.totalStaked == 0);
         uint256 oldStakedB = userB.staked;
-        uint256 oldTimestampB = stakeTimestampB[user];
+        uint256 oldTimestampB = stakeTimestampB[p.user];
 
         userB.staked += compoundTotal;
         poolB.totalStaked += compoundTotal;
 
-        unlockTimeB[user] = _updateRollingLock(unlockTimeB[user], lockDuration);
-        stakeTimestampB[user] = _updateWADP(oldStakedB, oldTimestampB, compoundTotal);
+        unlockTimeB[p.user] = _updateRollingLock(unlockTimeB[p.user], p.lockDuration);
+        stakeTimestampB[p.user] =
+            PoolBWadpLib.weightedAvgDepositTimestamp(oldStakedB, oldTimestampB, compoundTotal, block.timestamp);
 
         uint256 remTime = poolB.periodFinish > block.timestamp ? poolB.periodFinish - block.timestamp : 0;
-        if (wasEmptyB && remTime > 0) {
-            poolB.rewardRate = poolB.availableRewards / remTime;
+        if (wasEmptyB && poolB.availableRewards > 0) {
+            if (remTime > 0) {
+                poolB.rewardRate = poolB.availableRewards / remTime;
+            } else {
+                RewardReanchorLib.reanchorStaleSchedule(
+                    poolB,
+                    p.minRewardRateDuration,
+                    p.maxRewardDuration,
+                    p.maxAprBp,
+                    p.basisPoints,
+                    p.secondsPerYear,
+                    p.maxTotalSupplyBForRewardRateCap
+                );
+            }
         }
 
         newUserStakedB = userB.staked;
-        newUnlockTimeB = unlockTimeB[user];
+        newUnlockTimeB = unlockTimeB[p.user];
     }
 
     /// @notice Converts settled rewards in Pool A and B for `p.user` into additional Pool B principal.
@@ -116,7 +125,7 @@ library PoolBCompoundLib {
         userB.rewardPaid = poolB.accRewardPerToken;
 
         (r.newUserStakedB, r.newUnlockTimeB) =
-            _applyCompoundIntoPoolB(poolB, userB, unlockTimeB, stakeTimestampB, p.user, p.lockDuration, compoundTotal);
+            _applyCompoundIntoPoolB(poolB, userB, unlockTimeB, stakeTimestampB, p, compoundTotal);
 
         lastClaimTime[p.user] = block.timestamp;
     }

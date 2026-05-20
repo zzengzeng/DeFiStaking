@@ -30,26 +30,29 @@ library PoolAccrualLib {
     /// @param users Per-address `UserInfo` mapping for the same pool.
     /// @param user Address to settle.
     /// @param precision Fixed-point scale (core uses `1e18`).
-    function settleUser(
-        PoolInfo storage pool,
-        mapping(address => UserInfo) storage users,
-        address user,
-        uint256 precision
-    ) external {
+    /// @return earnedAdded Reward wei credited to `users[user].rewards` by this call (`0` if none).
+    function settleUser(PoolInfo storage pool, mapping(address => UserInfo) storage users, address user, uint256 precision)
+        external
+        returns (uint256 earnedAdded)
+    {
         UserInfo storage u = users[user];
         if (u.staked == 0) {
             u.rewardPaid = pool.accRewardPerToken;
-            return;
+            return 0;
         }
         uint256 earned = Math.mulDiv(u.staked, pool.accRewardPerToken - u.rewardPaid, precision);
         if (earned > 0) {
             u.rewards += earned;
+            earnedAdded = earned;
         }
         u.rewardPaid = pool.accRewardPerToken;
     }
 
     /// @notice Advances global reward index up to `min(block.timestamp, periodFinish)` and updates pending, bad debt, and dust buckets.
-    /// @dev Uses `mulmod` remainder to increment `dust`; recycles dust into `availableRewards` once `dust >= dustTolerance`.
+    /// @dev `accRewardPerToken` uses `mulDiv(actualReward, precision, totalStaked)`; the index can only support
+    ///      `mulDiv(totalStaked, deltaAcc, precision) <= actualReward` as user-claimable pending. The gap is **not** owed
+    ///      to any staker—route it to `dust` (recycle to `availableRewards` at `dustTolerance`) and **do not** add it to
+    ///      `totalPending`, or the TokenB invariant’s `totalPending` leg overstates recoverable claims.
     /// @param pool Pool storage to mutate (`rewardRate`, `lastUpdateTime`, `accRewardPerToken`, buckets).
     /// @param maxDeltaTime Upper bound on elapsed seconds applied in one call (overflow / fairness guard).
     /// @param precision Fixed-point scale for index math (matches `settleUser`).
@@ -73,31 +76,37 @@ library PoolAccrualLib {
         uint256 actualReward;
         if (pool.availableRewards >= deltaReward) {
             pool.availableRewards -= deltaReward;
-            pool.totalPending += deltaReward;
             actualReward = deltaReward;
         } else {
             uint256 shortfall = deltaReward - pool.availableRewards;
             actualReward = pool.availableRewards;
-            pool.totalPending += actualReward;
             pool.badDebt += shortfall;
             pool.availableRewards = 0;
             ge.insufficient = true;
             ge.shortfall = shortfall;
         }
 
-        uint256 remainder = mulmod(actualReward, precision, pool.totalStaked);
-        uint256 truncatedWei = remainder / precision;
-        pool.dust += truncatedWei;
+        if (actualReward == 0) {
+            pool.lastUpdateTime += deltaTime;
+            return ge;
+        }
+
+        uint256 deltaAcc = Math.mulDiv(actualReward, precision, pool.totalStaked);
+        uint256 claimablePending = Math.mulDiv(pool.totalStaked, deltaAcc, precision);
+        uint256 roundingToDust = actualReward - claimablePending;
+
+        pool.totalPending += claimablePending;
+        pool.dust += roundingToDust;
 
         if (pool.dust >= dustTolerance) {
             pool.availableRewards += pool.dust;
             pool.dust = 0;
-        } else if (truncatedWei > 0) {
+        } else if (roundingToDust > 0) {
             ge.dust = true;
-            ge.dustWei = truncatedWei;
+            ge.dustWei = roundingToDust;
         }
 
-        pool.accRewardPerToken += Math.mulDiv(actualReward, precision, pool.totalStaked);
+        pool.accRewardPerToken += deltaAcc;
         pool.lastUpdateTime += deltaTime;
     }
 }

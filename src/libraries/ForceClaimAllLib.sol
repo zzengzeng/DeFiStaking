@@ -20,7 +20,7 @@ library ForceClaimAllLib {
         IERC20 rewardToken;
         /// @notice User whose both pools’ `rewards` fields are cleared.
         address user;
-        /// @notice Minimum total claimable to allow force path when no bad debt and not shutdown.
+        /// @notice Minimum claim threshold (wei); **per-pool** when `!shutdown` and no bad debt—same semantics as `claimA`/`claimB`.
         uint256 minClaimAmount;
         /// @notice Pool B fees reserved on-contract (reduces spendable remainder in liability calc).
         uint256 unclaimedFeesB;
@@ -63,7 +63,10 @@ library ForceClaimAllLib {
         }
     }
 
-    /// @notice Settles both pools’ rewards for `p.user` under shutdown / liquidity rules; may pay partially.
+    /// @notice Settles both pools’ rewards for `p.user`; may pay partially when liquidity is short.
+    /// @dev When **not** `shutdown` and both pools have zero `badDebt`, each pool with `rewards > 0` must be `>= minClaimAmount`
+    ///      (same anti-dust rule as single-pool claims—cannot sum two sub-threshold pools via this path). Shutdown or any pool
+    ///      bad debt relaxes that check so small balances can still be cleared with partial pay.
     /// @param poolA Pool A storage.
     /// @param poolB Pool B storage.
     /// @param userInfoA Pool A user mapping.
@@ -87,8 +90,13 @@ library ForceClaimAllLib {
         if (totalReward == 0) {
             revert StakingExecutionErrors.NoRewardsToClaim();
         }
-        if (totalReward < p.minClaimAmount && poolA.badDebt == 0 && poolB.badDebt == 0 && !p.shutdown) {
-            revert StakingExecutionErrors.BelowMinClaim(totalReward, p.minClaimAmount);
+        if (!p.shutdown && poolA.badDebt == 0 && poolB.badDebt == 0) {
+            if (rA > 0 && rA < p.minClaimAmount) {
+                revert StakingExecutionErrors.BelowMinClaim(rA, p.minClaimAmount);
+            }
+            if (rB > 0 && rB < p.minClaimAmount) {
+                revert StakingExecutionErrors.BelowMinClaim(rB, p.minClaimAmount);
+            }
         }
 
         uint256 balanceB = p.rewardToken.balanceOf(address(this));

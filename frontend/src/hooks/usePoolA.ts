@@ -39,7 +39,8 @@ export function usePoolA() {
     (staking.status === "NORMAL" || staking.status === "SHUTDOWN") &&
     staking.globalBadDebt === 0n &&
     claimCooldownRemainingSec === 0n &&
-    pendingRewardsA > staking.minClaimAmount;
+    pendingRewardsA > 0n &&
+    pendingRewardsA >= staking.minClaimAmount;
   const claimDisabledReason =
     canClaim
       ? null

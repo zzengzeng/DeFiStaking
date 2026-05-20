@@ -105,7 +105,11 @@ export default function Home() {
         )}
       </div>
 
-      <AirdropCard onClaimed={() => staking.refetchAll()} />
+      <AirdropCard
+        onClaimed={async () => {
+          await staking.refetchAll();
+        }}
+      />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="min-w-0 rounded-2xl border border-zinc-800 bg-gradient-to-b from-zinc-950 to-zinc-900/60 p-4 transition hover:border-zinc-700 sm:p-5">

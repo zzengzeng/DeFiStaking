@@ -7,9 +7,10 @@ broadcast/
 
 md/
 xmind/
+learn/
 
 # forge install output (submodule lib/forge-std remains tracked as a gitlink)
-lib/
+/lib/
 
 # Env and package manager caches
 .env
@@ -32,4 +33,3 @@ src/DualPoolStakingOld.sol
 
 script/acceptance.sh
 script/sync_frontend_addresses.py
-

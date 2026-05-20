@@ -68,61 +68,67 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
     event TimelockCancelled(bytes32 indexed opId, bytes32 indexed paramsHash, uint256 cancelledAt);
 
     /// @notice Funds Pool A rewards from `sender` and schedules emissions (`notifyRewardAmountA` delegate path).
+    /// @dev Reverts `ExcessiveTransferFee` if balance delta vs `amount` exceeds `maxTransferFeeBP` (same rule as `stakeB` on TokenB).
     /// @param sender Payer pulled via `rewardToken.transferFrom` (the core’s `msg.sender` in the parent call).
     /// @param amount Requested pull amount; actual uses balance delta after transfer.
-    /// @param duration New emission schedule length; bounded by `MIN_REWARD_RATE_DURATION` and `MAX_DURATION`.
+    /// @param duration Emission length in seconds, or `0` to use `poolAState.rewardDuration` (must be pre-set in bounds).
     function executeNotifyRewardAmountA(address sender, uint256 amount, uint256 duration) external {
         if (emergencyMode) revert EmergencyModeActive();
         if (shutdown) revert StakingExecutionErrors.ShutdownModeActive();
         if (amount == 0) revert StakingExecutionErrors.ZeroAmount();
-        if (duration < MIN_REWARD_RATE_DURATION || duration > MAX_DURATION) {
-            revert StakingExecutionErrors.InvalidRewardDuration();
-        }
+        if (maxTransferFeeBP > BASIS_POINTS) revert StakingExecutionErrors.InvalidMaxTransferFeeBp();
+        uint256 effectiveDuration = _effectiveNotifyDuration(poolAState, duration);
 
         _updateGlobalA();
         uint256 balBefore = rewardToken.balanceOf(address(this));
         rewardToken.safeTransferFrom(sender, address(this), amount);
         uint256 actualAmount = rewardToken.balanceOf(address(this)) - balBefore;
+        if (actualAmount * BASIS_POINTS < amount * (BASIS_POINTS - maxTransferFeeBP)) {
+            revert StakingExecutionErrors.ExcessiveTransferFee();
+        }
         NotifyRewardLib.NotifyResult memory nr = NotifyRewardLib.applyNotifyAccounting(
             poolAState,
             actualAmount,
-            duration,
+            effectiveDuration,
             MAX_APR_BP,
             BASIS_POINTS,
             SECONDS_PER_YEAR,
             maxTotalSupplyBForRewardRateCap
         );
         _assertInvariantB();
-        emit RewardNotified(Pool.A, nr.actualAmount, duration, nr.newRate);
+        emit RewardNotified(Pool.A, nr.actualAmount, effectiveDuration, nr.newRate);
     }
 
     /// @notice Funds Pool B rewards from `sender` and schedules emissions (`notifyRewardAmountB` delegate path).
+    /// @dev Same FOT / `maxTransferFeeBP` slippage check as `executeNotifyRewardAmountA` and `stakeB`.
     /// @param sender Payer pulled via `rewardToken.transferFrom`.
     /// @param amount Requested pull amount; actual uses balance delta after transfer.
-    /// @param duration New emission schedule length; bounded by min/max duration constants.
+    /// @param duration Emission length in seconds, or `0` to use `poolBState.rewardDuration` (must be pre-set in bounds).
     function executeNotifyRewardAmountB(address sender, uint256 amount, uint256 duration) external {
         if (emergencyMode) revert EmergencyModeActive();
         if (shutdown) revert StakingExecutionErrors.ShutdownModeActive();
         if (amount == 0) revert StakingExecutionErrors.ZeroAmount();
-        if (duration < MIN_REWARD_RATE_DURATION || duration > MAX_DURATION) {
-            revert StakingExecutionErrors.InvalidRewardDuration();
-        }
+        if (maxTransferFeeBP > BASIS_POINTS) revert StakingExecutionErrors.InvalidMaxTransferFeeBp();
+        uint256 effectiveDuration = _effectiveNotifyDuration(poolBState, duration);
 
         _updateGlobalB();
         uint256 balBefore = rewardToken.balanceOf(address(this));
         rewardToken.safeTransferFrom(sender, address(this), amount);
         uint256 actualAmount = rewardToken.balanceOf(address(this)) - balBefore;
+        if (actualAmount * BASIS_POINTS < amount * (BASIS_POINTS - maxTransferFeeBP)) {
+            revert StakingExecutionErrors.ExcessiveTransferFee();
+        }
         NotifyRewardLib.NotifyResult memory nr = NotifyRewardLib.applyNotifyAccounting(
             poolBState,
             actualAmount,
-            duration,
+            effectiveDuration,
             MAX_APR_BP,
             BASIS_POINTS,
             SECONDS_PER_YEAR,
             maxTotalSupplyBForRewardRateCap
         );
         _assertInvariantB();
-        emit RewardNotified(Pool.B, nr.actualAmount, duration, nr.newRate);
+        emit RewardNotified(Pool.B, nr.actualAmount, effectiveDuration, nr.newRate);
     }
 
     /// @notice Rebalances reward budgets between pools (`rebalanceBudgets` delegate path).
@@ -136,11 +142,18 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
     }
 
     /// @notice Sweeps Pool B fees to `feeRecipient` (`claimFees` delegate path).
+    /// @dev CEI: clears `unclaimedFeesB` and emits before `rewardToken` transfer so state does not depend on recipient hooks.
     function executeClaimFees() external {
         uint256 fees = unclaimedFeesB;
-        StakingAdminLib.executeClaimFees(rewardToken, feeRecipient, fees);
+        if (fees == 0) {
+            revert StakingExecutionErrors.NoFeesToClaim();
+        }
+        if (feeRecipient == address(0)) {
+            revert StakingExecutionErrors.NoFeeRecipient();
+        }
         unclaimedFeesB = 0;
         emit FeesClaimed(feeRecipient, fees, block.timestamp);
+        rewardToken.safeTransfer(feeRecipient, fees);
     }
 
     /// @notice Updates Pool B withdrawal-related fees (`setFees` delegate path).
@@ -225,13 +238,13 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
     }
 
     /// @notice Sets Pool A `rewardDuration` (`setRewardDurationA` delegate path).
-    /// @param duration Default notify duration parameter for Pool A (seconds).
+    /// @param duration Default notify duration when `notifyRewardAmountA(..., 0)` is used; `0` clears the default; otherwise must be within `[MIN_REWARD_RATE_DURATION, MAX_DURATION]`.
     function executeSetRewardDurationA(uint256 duration) external {
         _applyRewardDuration(poolAState, Pool.A, duration);
     }
 
     /// @notice Sets Pool B `rewardDuration` (`setRewardDurationB` delegate path).
-    /// @param duration Default notify duration parameter for Pool B (seconds).
+    /// @param duration Default notify duration when `notifyRewardAmountB(..., 0)` is used; `0` clears; otherwise in `[MIN_REWARD_RATE_DURATION, MAX_DURATION]`.
     function executeSetRewardDurationB(uint256 duration) external {
         _applyRewardDuration(poolBState, Pool.B, duration);
     }
@@ -300,7 +313,9 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
             shutdownAt: shutdownAt,
             gracePeriod: 365 days,
             deadlockBypass: SHUTDOWN_DEADLOCK_BYPASS,
-            unclaimedFeesAtCall: uf
+            unclaimedFeesAtCall: uf,
+            bookedUserRewardsA: bookedUserRewardsA,
+            bookedUserRewardsB: bookedUserRewardsB
         });
         StakingAdminLib.executeForceShutdownFinalize(poolAState, poolBState, params);
         unclaimedFeesB = 0;
@@ -398,9 +413,20 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
     /// @param p Pool enum for the event payload.
     /// @param duration New default notify duration (seconds).
     function _applyRewardDuration(PoolInfo storage pool, Pool p, uint256 duration) internal {
+        if (duration != 0 && (duration < MIN_REWARD_RATE_DURATION || duration > MAX_DURATION)) {
+            revert StakingExecutionErrors.InvalidRewardDuration();
+        }
         uint256 oldDuration = pool.rewardDuration;
         pool.rewardDuration = duration;
         emit RewardDurationUpdated(p, oldDuration, duration, block.timestamp);
+    }
+
+    /// @dev `duration == 0` selects `pool.rewardDuration` for operator convenience; must fall within notify bounds.
+    function _effectiveNotifyDuration(PoolInfo storage pool, uint256 duration) private view returns (uint256 t) {
+        t = duration == 0 ? pool.rewardDuration : duration;
+        if (t < MIN_REWARD_RATE_DURATION || t > MAX_DURATION) {
+            revert StakingExecutionErrors.InvalidRewardDuration();
+        }
     }
 
     /// @dev Advances Pool A global reward index.

@@ -50,6 +50,8 @@ library PoolBWithdrawLib {
         uint256 feeOrPenaltyForEvent;
         /// @notice Whether the withdraw used early-exit semantics.
         bool isEarlyForEvent;
+        /// @notice Pool B rewards moved from pending into `availableRewards` on early exit (`0` if not early / no rewards).
+        uint256 forfeitedRewardsB;
     }
 
     /// @dev Recomputes `rewardRate` as `availableRewards / remainingSeconds` for the **current** reward period.
@@ -66,13 +68,13 @@ library PoolBWithdrawLib {
     /// @dev Validates `minEarlyExitAmountB`, forfeits user rewards into `availableRewards`, and returns principal penalty.
     function _handleEarlyExit(PoolInfo storage poolB, UserInfo storage userB, WithdrawBParams memory p)
         private
-        returns (uint256 penalty)
+        returns (uint256 penalty, uint256 forfeitedReward)
     {
         if (p.amount < p.minEarlyExitAmountB) {
             revert StakingExecutionErrors.BelowMinEarlyExit(p.amount, p.minEarlyExitAmountB);
         }
 
-        uint256 forfeitedReward = userB.rewards;
+        forfeitedReward = userB.rewards;
         if (forfeitedReward > 0) {
             if (poolB.totalPending < forfeitedReward) {
                 revert StakingExecutionErrors.InsufficientPending(forfeitedReward, poolB.totalPending);
@@ -129,7 +131,7 @@ library PoolBWithdrawLib {
         WithdrawCalc memory calc;
 
         if (block.timestamp < unlockTimeB[p.user]) {
-            calc.penalty = _handleEarlyExit(poolB, userB, p);
+            (calc.penalty, r.forfeitedRewardsB) = _handleEarlyExit(poolB, userB, p);
             calc.isEarly = true;
         } else {
             calc.fee = _computeNormalFee(holdingDuration, p);

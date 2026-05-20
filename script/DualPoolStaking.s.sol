@@ -15,7 +15,7 @@ import {DualPoolAdminModule} from "../src/modules/DualPoolAdminModule.sol";
 /// @title DeployDualPoolStaking
 /// @notice Foundry broadcast script: deploys mock ERC20s, `DualPoolStaking`, delegate modules, admin facade, and a `TimelockController` wired as `DualPoolStakingAdmin` owner.
 /// @dev For production, replace `proposers` / `executors` with multisigs; Timelock `admin` is `address(0)` (self-administered timelock). `OPERATOR_ROLE` remains on the broadcaster from the core constructor for hot-path ops.
-/// @custom:security After `grantRole(ADMIN_ROLE, admin)` the script revokes `ADMIN_ROLE` from `deployer`; operator hot-path role intentionally remains on `deployer` until explicitly revoked elsewhere.
+/// @custom:security After wiring, `ADMIN_ROLE` and `DEFAULT_ADMIN_ROLE` on the core are held by `DualPoolStakingAdmin` (Timelock-owned); both are revoked from `deployer` so module swaps and role changes require Timelock delay. `OPERATOR_ROLE` remains on `deployer` until explicitly revoked elsewhere.
 contract DeployDualPoolStaking is Script {
     /// @notice Executes the full deployment graph inside `vm.startBroadcast()` / `vm.stopBroadcast()`.
     /// @dev Deployment order: tokens → core → modules → wire `setUserModule` / `setAdminModule` → admin facade → timelock → transfer admin facade ownership to timelock → role handover on core.
@@ -47,6 +47,9 @@ contract DeployDualPoolStaking is Script {
 
         dualPoolStaking.grantRole(dualPoolStaking.ADMIN_ROLE(), address(admin));
         dualPoolStaking.revokeRole(dualPoolStaking.ADMIN_ROLE(), deployer);
+        // Super paths (`setUserModule` / `setAdminModule` / `setAdmin` / `setOperator`) are `onlyRole(DEFAULT_ADMIN_ROLE)` on core; gate them via the facade + Timelock like other governance calls.
+        dualPoolStaking.grantRole(dualPoolStaking.DEFAULT_ADMIN_ROLE(), address(admin));
+        dualPoolStaking.revokeRole(dualPoolStaking.DEFAULT_ADMIN_ROLE(), deployer);
         // `OPERATOR_ROLE` remains on `deployer` from the core constructor (pause / notify / emergency).
 
         admin.transferOwnership(address(timelock));

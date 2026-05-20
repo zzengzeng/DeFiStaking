@@ -30,6 +30,18 @@ export const dualPoolStakingAbi = [
     ],
   },
   {
+    type: "event",
+    name: "EmergencyWithdrawn",
+    anonymous: false,
+    inputs: [
+      { indexed: true, name: "user", type: "address" },
+      { indexed: false, name: "principal", type: "uint256" },
+      { indexed: false, name: "rewardsForfeited", type: "uint256" },
+      { indexed: true, name: "pool", type: "uint8" },
+      { indexed: false, name: "at", type: "uint256" },
+    ],
+  },
+  {
     type: "function",
     name: "poolA",
     stateMutability: "view",

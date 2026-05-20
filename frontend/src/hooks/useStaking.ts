@@ -116,7 +116,15 @@ export function useStaking() {
     const unclaimedFeesB = pick<bigint>(d, 11, 0n);
 
     const status: ProtocolStatus = shutdown ? "SHUTDOWN" : emergencyMode ? "EMERGENCY" : paused ? "PAUSED" : "NORMAL";
-    const globalRequired = (poolA?.totalPending ?? 0n) + (poolB?.totalPending ?? 0n) + (poolA?.availableRewards ?? 0n) + (poolB?.availableRewards ?? 0n) + unclaimedFeesB + (poolA?.dust ?? 0n) + (poolB?.dust ?? 0n);
+    const globalRequired =
+      (poolB?.totalStaked ?? 0n) +
+      (poolA?.totalPending ?? 0n) +
+      (poolB?.totalPending ?? 0n) +
+      (poolA?.availableRewards ?? 0n) +
+      (poolB?.availableRewards ?? 0n) +
+      unclaimedFeesB +
+      (poolA?.dust ?? 0n) +
+      (poolB?.dust ?? 0n);
     const globalBadDebt = (poolA?.badDebt ?? 0n) + (poolB?.badDebt ?? 0n);
 
     const userA = address ? pick(d, 12, undefined) : undefined;

@@ -26,4 +26,26 @@ export const dualPoolStakingAdminAbi = [
     outputs: [],
   },
   { type: "function", name: "unpause", stateMutability: "nonpayable", inputs: [], outputs: [] },
+  { type: "function", name: "setUserModule", stateMutability: "nonpayable", inputs: [{ name: "newModule", type: "address" }], outputs: [] },
+  { type: "function", name: "setAdminModule", stateMutability: "nonpayable", inputs: [{ name: "newModule", type: "address" }], outputs: [] },
+  {
+    type: "function",
+    name: "setAdmin",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "newAdmin", type: "address" },
+      { name: "enabled", type: "bool" },
+    ],
+    outputs: [],
+  },
+  {
+    type: "function",
+    name: "setOperator",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "newOperator", type: "address" },
+      { name: "enabled", type: "bool" },
+    ],
+    outputs: [],
+  },
 ] as const;

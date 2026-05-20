@@ -15,7 +15,7 @@ function calcFeeBp(now: bigint, stakeTimestamp: bigint, unlockTime: bigint, with
   if (now < unlockTime) return 0n;
   const stakedFor = now - stakeTimestamp;
   if (stakedFor < 90n * DAY) return withdrawFeeBP;
-  if (stakedFor < 180n * DAY) return midTermFeeBP;
+  if (stakedFor <= 180n * DAY) return midTermFeeBP;
   return 0n;
 }
 
@@ -50,7 +50,8 @@ export function usePoolB() {
     (staking.status === "NORMAL" || staking.status === "SHUTDOWN") &&
     staking.globalBadDebt === 0n &&
     claimCooldownRemainingSec === 0n &&
-    userB.rewards > staking.minClaimAmount;
+    userB.rewards > 0n &&
+    userB.rewards >= staking.minClaimAmount;
   const canEmergencyWithdraw = staking.status === "EMERGENCY";
 
   const activeFeeBp = calcFeeBp(now, staking.stakeTimestampB, staking.unlockTimeB, staking.withdrawFeeBP, staking.midTermFeeBP);
@@ -70,7 +71,11 @@ export function usePoolB() {
     rewardBWei: userB.rewards,
     totalWei: userA.rewards + userB.rewards,
   };
-  const canCompound = staking.status === "NORMAL" && compoundPreview.totalWei > 0n;
+  const canCompound =
+    staking.status === "NORMAL" &&
+    staking.globalBadDebt === 0n &&
+    claimCooldownRemainingSec === 0n &&
+    compoundPreview.totalWei > 0n;
 
   const toAmount = (value: string) => parseUnits(value || "0", 18);
 

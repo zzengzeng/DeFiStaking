@@ -27,6 +27,29 @@ const TOOLTIP_PAUSE =
 const TOOLTIP_EMERGENCY =
   "Emergency mode narrows exit options: Pool B moves to emergency-withdraw only (rewards are forfeited; principal exits via the emergency path). Pool A follows contract rules under the same global flag. User funds remain on-chain but economic exposure changes — review before enabling.";
 
+const BASIS_POINTS = 10_000n;
+const MAX_WITHDRAW_BP = 500n;
+const MAX_MIDTERM_BP = 500n;
+const MAX_EARLY_EXIT_PENALTY_BP = 2_000n;
+const MAX_LOCK_DURATION = 90n * 24n * 60n * 60n;
+const MAX_TRANSFER_FEE_BP = BASIS_POINTS;
+
+function parseUintInput(raw: string): bigint | null {
+  const t = raw.trim();
+  if (!/^\d+$/.test(t)) return null;
+  return BigInt(t);
+}
+
+function parseTokenAmountInput(raw: string): bigint | null {
+  const t = raw.trim();
+  if (!/^\d*\.?\d+$/.test(t)) return null;
+  try {
+    return parseUnits(t, 18);
+  } catch {
+    return null;
+  }
+}
+
 function AddrRow({ chainId, label, addr }: { chainId: number; label: string; addr: string }) {
   const href = getAddressExplorerUrl(chainId, addr as `0x${string}`);
   return (
@@ -68,12 +91,6 @@ export function GovernancePanel() {
 
   const minDelay = minDelayOnChain ?? BigInt(sepoliaDeploymentMeta.timelockMinDelaySeconds);
 
-  const parseTokenAmount = (raw: string, name: string) => {
-    const parsed = parseUnits(raw || "0", 18);
-    if (parsed <= 0n) throw new Error(`${name} must be greater than 0`);
-    return parsed;
-  };
-
   const govBusy = flow.state !== "idle";
 
   const afterTx = async () => {
@@ -100,14 +117,61 @@ export function GovernancePanel() {
     flow.reset({ closeGlobal: true });
   };
 
+  const withdrawBpValue = parseUintInput(withdrawBp);
+  const midtermBpValue = parseUintInput(midtermBp);
+  const penaltyBpValue = parseUintInput(penaltyBp);
+  const lockDurationValue = parseUintInput(lockDuration);
+  const minEarlyExitAmountBValue = parseUintInput(minEarlyExitAmountB);
+  const maxTransferFeeBpValue = parseUintInput(maxTransferFeeBp);
+  const rebalanceAmountValue = parseTokenAmountInput(rebalanceAmount);
+
+  const feesError =
+    withdrawBpValue === null || midtermBpValue === null || penaltyBpValue === null
+      ? "费用参数必须是整数 bp"
+      : withdrawBpValue > MAX_WITHDRAW_BP
+        ? "withdrawFeeBP 不能超过 500 bp"
+        : midtermBpValue > MAX_MIDTERM_BP
+          ? "midTermFeeBP 不能超过 500 bp"
+          : penaltyBpValue > MAX_EARLY_EXIT_PENALTY_BP
+            ? "penaltyFeeBP 不能超过 2000 bp"
+            : null;
+
+  const lockError =
+    lockDurationValue === null
+      ? "lockDuration 必须是整数秒"
+      : lockDurationValue === 0n || lockDurationValue > MAX_LOCK_DURATION
+        ? `lockDuration 必须在 1～${MAX_LOCK_DURATION.toString()} 秒之间`
+        : null;
+
+  const minEarlyRequired =
+    penaltyBpValue && penaltyBpValue > 0n ? (BASIS_POINTS + penaltyBpValue - 1n) / penaltyBpValue : 0n;
+  const minEarlyError =
+    minEarlyExitAmountBValue === null
+      ? "minEarlyExitAmountB 必须是整数"
+      : minEarlyExitAmountBValue === 0n
+        ? "minEarlyExitAmountB 必须大于 0"
+        : minEarlyExitAmountBValue < minEarlyRequired
+          ? `minEarlyExitAmountB 当前至少应为 ${minEarlyRequired.toString()}`
+          : null;
+
+  const maxTransferError =
+    maxTransferFeeBpValue === null
+      ? "maxTransferFeeBP 必须是整数 bp"
+      : maxTransferFeeBpValue > MAX_TRANSFER_FEE_BP
+        ? "maxTransferFeeBP 不能超过 10000 bp"
+        : null;
+
+  const rebalanceError =
+    rebalanceAmountValue === null || rebalanceAmountValue <= 0n ? "rebalance amount 必须是大于 0 的 TokenB 数量" : null;
+
   const payloadSetFees = useMemo(
     () =>
       encodeFunctionData({
         abi: dualPoolStakingAdminAbi,
         functionName: "setFees",
-        args: [BigInt(withdrawBp.trim()), BigInt(midtermBp.trim()), BigInt(penaltyBp.trim())],
+        args: [withdrawBpValue ?? 0n, midtermBpValue ?? 0n, penaltyBpValue ?? 0n],
       }),
-    [withdrawBp, midtermBp, penaltyBp],
+    [withdrawBpValue, midtermBpValue, penaltyBpValue],
   );
 
   const payloadLock = useMemo(
@@ -115,9 +179,9 @@ export function GovernancePanel() {
       encodeFunctionData({
         abi: dualPoolStakingAdminAbi,
         functionName: "setLockDuration",
-        args: [BigInt(lockDuration.trim())],
+        args: [lockDurationValue ?? 0n],
       }),
-    [lockDuration],
+    [lockDurationValue],
   );
 
   const payloadMinEarly = useMemo(
@@ -125,9 +189,9 @@ export function GovernancePanel() {
       encodeFunctionData({
         abi: dualPoolStakingAdminAbi,
         functionName: "setMinEarlyExitAmountB",
-        args: [BigInt(minEarlyExitAmountB.trim())],
+        args: [minEarlyExitAmountBValue ?? 0n],
       }),
-    [minEarlyExitAmountB],
+    [minEarlyExitAmountBValue],
   );
 
   const payloadMaxTransfer = useMemo(
@@ -135,21 +199,20 @@ export function GovernancePanel() {
       encodeFunctionData({
         abi: dualPoolStakingAdminAbi,
         functionName: "setMaxTransferFeeBP",
-        args: [BigInt(maxTransferFeeBp.trim())],
+        args: [maxTransferFeeBpValue ?? 0n],
       }),
-    [maxTransferFeeBp],
+    [maxTransferFeeBpValue],
   );
 
   const payloadRebalance = useMemo(() => {
-    const amt = parseTokenAmount(rebalanceAmount, "rebalanceAmount");
     const from = rebalanceFrom === "A" ? 0 : 1;
     const to = rebalanceFrom === "A" ? 1 : 0;
     return encodeFunctionData({
       abi: dualPoolStakingAdminAbi,
       functionName: "rebalanceBudgets",
-      args: [from, to, amt],
+      args: [from, to, rebalanceAmountValue ?? 0n],
     });
-  }, [rebalanceAmount, rebalanceFrom]);
+  }, [rebalanceAmountValue, rebalanceFrom]);
 
   const payloadUnpause = useMemo(() => encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "unpause", args: [] }), []);
 
@@ -251,6 +314,7 @@ export function GovernancePanel() {
                 { label: "penaltyBp", value: penaltyBp },
               ]}
               onAfterTx={afterTx}
+              disabledReason={feesError}
             >
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                 <input value={withdrawBp} onChange={(e) => setWithdrawBp(e.target.value)} className="min-w-0 rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5" />
@@ -269,6 +333,7 @@ export function GovernancePanel() {
               canCancel={tl.canCancel}
               executeRows={() => [{ label: "lockDuration", value: lockDuration }]}
               onAfterTx={afterTx}
+              disabledReason={lockError}
             >
               <input value={lockDuration} onChange={(e) => setLockDuration(e.target.value)} className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1" />
             </GovernanceCard>
@@ -283,6 +348,7 @@ export function GovernancePanel() {
               canCancel={tl.canCancel}
               executeRows={() => [{ label: "minEarlyExitAmountB", value: minEarlyExitAmountB }]}
               onAfterTx={afterTx}
+              disabledReason={minEarlyError}
             >
               <input value={minEarlyExitAmountB} onChange={(e) => setMinEarlyExitAmountB(e.target.value)} className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1" />
             </GovernanceCard>
@@ -297,6 +363,7 @@ export function GovernancePanel() {
               canCancel={tl.canCancel}
               executeRows={() => [{ label: "maxTransferFeeBp", value: maxTransferFeeBp }]}
               onAfterTx={afterTx}
+              disabledReason={maxTransferError}
             >
               <input value={maxTransferFeeBp} onChange={(e) => setMaxTransferFeeBp(e.target.value)} className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1" />
             </GovernanceCard>
@@ -314,6 +381,7 @@ export function GovernancePanel() {
                 { label: "Amount (wei est.)", value: rebalanceAmount },
               ]}
               onAfterTx={afterTx}
+              disabledReason={rebalanceError}
             >
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <select value={rebalanceFrom} onChange={(e) => setRebalanceFrom(e.target.value as "A" | "B")} className="min-w-0 rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5">

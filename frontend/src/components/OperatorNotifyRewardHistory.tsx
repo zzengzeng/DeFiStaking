@@ -19,9 +19,6 @@ export function OperatorNotifyRewardHistory() {
   const chainId = useChainId();
   const { isOperator, isLoading: rolesLoading } = useProtocolRoles();
   const { data, isLoading, isError, refetch, isFetching } = useNotifyRewardLogs(isOperator);
-
-  if (rolesLoading || !isOperator) return null;
-
   const rows = data?.entries ?? [];
   const apiError = data?.error;
 
@@ -29,6 +26,8 @@ export function OperatorNotifyRewardHistory() {
     if (apiError) return `读链失败：${apiError}`;
     return "当前质押合约上暂无 RewardNotified 事件。若刚换过合约地址，请确认 `NEXT_PUBLIC_DUAL_STAKING_ADDRESS` 与链上部署一致；若历史较早，可调低 `NEXT_PUBLIC_STAKING_DEPLOY_BLOCK` 以扩大扫描起点。";
   }, [apiError]);
+
+  if (rolesLoading || !isOperator) return null;
 
   return (
     <div className="mt-4 border-t border-amber-500/20 pt-4">

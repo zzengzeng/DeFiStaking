@@ -18,7 +18,7 @@ library NotifyRewardLib {
         uint256 newRate;
     }
 
-    /// @notice Applies a new reward schedule: merges leftover emissions, sets `rewardRate`, extends `periodFinish`, and credits `availableRewards`.
+    /// @notice Applies a new reward schedule: merges temporal leftover (`remaining * rewardRate`), any **stranded** `availableRewards` from a finished period with no stakers, sets `rewardRate`, extends `periodFinish`, and credits `availableRewards`.
     /// @param pool Pool storage to mutate.
     /// @param actualAmount Reward tokens already received by the core (balance delta).
     /// @param duration New emission duration in seconds.
@@ -41,10 +41,21 @@ library NotifyRewardLib {
             revert StakingExecutionErrors.ZeroReceived();
         }
 
+        // When the prior period ended with `totalStaked == 0`, accrual advanced `lastUpdateTime` without debiting
+        // `availableRewards`, so temporal `leftover` is zero while TokenB remains booked — fold that bucket here.
+        uint256 carryStranded = 0;
+        if (pool.periodFinish > 0 && block.timestamp >= pool.periodFinish) {
+            carryStranded = pool.availableRewards;
+        }
+
         uint256 remaining = pool.periodFinish > pool.lastUpdateTime ? pool.periodFinish - pool.lastUpdateTime : 0;
         uint256 leftover = remaining * pool.rewardRate;
 
-        r.newRate = (actualAmount + leftover) / duration;
+        uint256 merged = actualAmount + leftover + carryStranded;
+        r.newRate = merged / duration;
+        if (r.newRate == 0) {
+            revert StakingExecutionErrors.ZeroRewardRate(merged, duration);
+        }
         uint256 maxRewardRate = Math.mulDiv(maxTotalSupplyBForRewardRateCap, maxAprBp, basisPoints * secondsPerYear);
         if (r.newRate > maxRewardRate) {
             revert StakingExecutionErrors.RewardRateExceedsMax(r.newRate, maxRewardRate);

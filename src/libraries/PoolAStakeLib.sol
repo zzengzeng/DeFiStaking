@@ -5,6 +5,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {PoolInfo, UserInfo} from "../StakeTypes.sol";
+import {RewardReanchorLib} from "./RewardReanchorLib.sol";
 import {StakingExecutionErrors} from "../StakingExecutionErrors.sol";
 
 /// @title PoolAStakeLib
@@ -23,6 +24,16 @@ library PoolAStakeLib {
         uint256 maxTransferFeeBP;
         /// @notice Denominator for basis-point checks (typically `10_000`).
         uint256 basisPoints;
+        /// @notice Minimum notify duration / re-anchor window (matches core `MIN_REWARD_RATE_DURATION`).
+        uint256 minRewardRateDuration;
+        /// @notice Maximum reward schedule length (matches core `MAX_DURATION`).
+        uint256 maxRewardDuration;
+        /// @notice Max APR in basis points for rate cap (matches core `MAX_APR_BP`).
+        uint256 maxAprBp;
+        /// @notice Seconds per year for APR cap (matches core `SECONDS_PER_YEAR`).
+        uint256 secondsPerYear;
+        /// @notice Deploy-time TokenB supply ceiling for max reward rate (matches core cap).
+        uint256 maxTotalSupplyBForRewardRateCap;
     }
 
     /// @notice Withdraws Pool A principal for `user`, updating totals and transferring TokenA.
@@ -85,8 +96,20 @@ library PoolAStakeLib {
         poolA.totalStaked += received;
 
         uint256 remainingTime = poolA.periodFinish > block.timestamp ? poolA.periodFinish - block.timestamp : 0;
-        if (isFirstDeposit && poolA.totalStaked > 0 && remainingTime > 0) {
-            poolA.rewardRate = poolA.availableRewards / remainingTime;
+        if (poolA.totalStaked > 0 && poolA.availableRewards > 0) {
+            if (remainingTime > 0 && isFirstDeposit) {
+                poolA.rewardRate = poolA.availableRewards / remainingTime;
+            } else if (remainingTime == 0) {
+                RewardReanchorLib.reanchorStaleSchedule(
+                    poolA,
+                    p.minRewardRateDuration,
+                    p.maxRewardDuration,
+                    p.maxAprBp,
+                    p.basisPoints,
+                    p.secondsPerYear,
+                    p.maxTotalSupplyBForRewardRateCap
+                );
+            }
         }
     }
 }

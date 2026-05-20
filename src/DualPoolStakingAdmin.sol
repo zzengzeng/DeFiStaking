@@ -8,7 +8,7 @@ import {DualPoolStaking} from "./DualPoolStaking.sol";
 
 /// @title DualPoolStakingAdmin
 /// @notice Governance facade: forwards `onlyOwner` calls to the `DualPoolStaking` core for timelocked parameter changes.
-/// @dev Grant this contract `ADMIN_ROLE` on the core. Set `owner` to OpenZeppelin `TimelockController` so changes go through `schedule` → `execute`. Do **not** route `pause` / `notifyReward*` here—those remain `OPERATOR_ROLE` on the core (zero delay) to avoid coupling hot ops to the timelock delay.
+/// @dev Grant this contract `ADMIN_ROLE` and `DEFAULT_ADMIN_ROLE` on the core. Set `owner` to OpenZeppelin `TimelockController` so changes go through `schedule` → `execute`. Do **not** route `pause` / `notifyReward*` here—those remain `OPERATOR_ROLE` on the core (zero delay) to avoid coupling hot ops to the timelock delay.
 /// @custom:forwarding Each external function is a thin `onlyOwner` wrapper around the same-named `DualPoolStaking` entrypoint.
 contract DualPoolStakingAdmin is Ownable {
     /// @notice Immutable reference to the staking core.
@@ -88,14 +88,14 @@ contract DualPoolStakingAdmin is Ownable {
         core.setMinStakeAmountB(amount);
     }
 
-    /// @notice Sets Pool A default reward duration config on the core.
-    /// @param duration Duration in seconds.
+    /// @notice Sets Pool A default notify emission length on the core (`notifyRewardAmountA(..., 0)` uses this value).
+    /// @param duration Seconds; `0` clears; non-zero must be within the core’s min/max reward duration constants.
     function setRewardDurationA(uint256 duration) external onlyOwner {
         core.setRewardDurationA(duration);
     }
 
-    /// @notice Sets Pool B default reward duration config on the core.
-    /// @param duration Duration in seconds.
+    /// @notice Sets Pool B default notify emission length on the core (`notifyRewardAmountB(..., 0)`).
+    /// @param duration Same semantics as `setRewardDurationA`.
     function setRewardDurationB(uint256 duration) external onlyOwner {
         core.setRewardDurationB(duration);
     }
@@ -142,6 +142,16 @@ contract DualPoolStakingAdmin is Ownable {
     /// @notice Finalizes protocol shutdown on the core.
     function forceShutdownFinalize() external onlyOwner {
         core.forceShutdownFinalize();
+    }
+
+    /// @notice Points the core `userModule` delegate target to `newModule` (super / timelocked governance).
+    function setUserModule(address newModule) external onlyOwner {
+        core.setUserModule(newModule);
+    }
+
+    /// @notice Points the core `adminModule` delegate target to `newModule` (super / timelocked governance).
+    function setAdminModule(address newModule) external onlyOwner {
+        core.setAdminModule(newModule);
     }
 
     /// @notice Grants or revokes `ADMIN_ROLE` on the core.

@@ -6,19 +6,19 @@ const ZERO = "0x0000000000000000000000000000000000000000" as const;
  */
 export const sepoliaDeploymentMeta = {
   chainId: 11155111 as const,
-  tokenA: "0xb4bce07c2504bde7a2623b0c82a148b1ffad9db1" as const,
-  tokenB: "0x96598170a339332ea4b1d4e4746f58011f057516" as const,
-  staking: "0xfe2891e3d40e936cb510585cebcdba0c819e69ab" as const,
-  dualPoolUserModule: "0xb362369d1be03d2b9fa33843b90c0ed4a9d0e345" as const,
-  dualPoolAdminModule: "0x59d50a53003569292045886406d03bbd9c30d5f9" as const,
-  dualPoolStakingAdmin: "0xbc71a713f785794a8bef4060c0ca45ebe19a68e7" as const,
-  timelockController: "0xae0f319fac374c1d535246da897ab932c09adae4" as const,
+  tokenA: "0x969b2e2A6b489C91960E01c35cB944356Cc7FDe3" as const,
+  tokenB: "0x4a69C18d7D332f5118A7a5CB298bcF2C82a9d806" as const,
+  staking: "0x486e3D190f1f57Ac480337dE4749dbf518039a9A" as const,
+  dualPoolUserModule: "0xAf5f612630a99faecf87aCa0506d3D27B34b62bB" as const,
+  dualPoolAdminModule: "0x068ca54f9B801d3eFbd6Ddd8BF58BC36F439e06a" as const,
+  dualPoolStakingAdmin: "0x71eE6fC78Ca9d4a40b042b68213BB2EeEcd27905" as const,
+  timelockController: "0xd7b0F6c18f3539534fED9E11cfFB6395cF55EF57" as const,
   /** TimelockController.minDelay（秒），当前为 48h */
   timelockMinDelaySeconds: 172800 as const,
   /** OPERATOR_ROLE 热钱包（0h 操作） */
-  operatorRoleHolder: "0xf29929bf612e7074cebc4365ba3730cc0f25a65e" as const,
+  operatorRoleHolder: "0xF29929Bf612E7074CEbC4365bA3730cC0f25a65E" as const,
   /** DualPoolStaking 合约创建所在区块，用于 timelock 事件索引起始高度 */
-  stakingDeployBlock: 10_724_145 as const,
+  stakingDeployBlock: 10_872_740 as const,
 } as const;
 
 /** 防止 .env 中误加引号/空格导致打包进客户端的地址字面量语法错误。 */

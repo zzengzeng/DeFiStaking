@@ -127,7 +127,11 @@ contract DualPoolStaking is Ownable, AccessControl, ReentrancyGuard, Pausable {
 
     event InsufficientBudget(Pool pool, uint256 shortfall, uint256 timestamp);
     event DustAccumulated(Pool pool, uint256 dustAmount, uint256 timestamp);
-    event EmergencyWithdrawn(address indexed user, uint256 amount, Pool indexed pool, uint256 at);
+    /// @param principal Token principal returned to the user (Pool A: TokenA wei; Pool B: TokenB wei).
+    /// @param rewardsForfeited User accrued rewards cleared on that pool before rebalance to Pool B budget (`userInfo*.rewards` snapshot).
+    event EmergencyWithdrawn(
+        address indexed user, uint256 principal, uint256 rewardsForfeited, Pool indexed pool, uint256 at
+    );
 
     event BudgetRebalanced(Pool indexed from, Pool indexed to, uint256 amount, uint256 timestamp);
     event FeesClaimed(address indexed recipient, uint256 amount, uint256 timestamp);
@@ -168,6 +172,10 @@ contract DualPoolStaking is Ownable, AccessControl, ReentrancyGuard, Pausable {
     address public adminModule;
     /// @dev Deploy-time TokenB supply ceiling for reward-rate cap (see PRD `MAX_REWARD_RATE_*`).
     uint256 public maxTotalSupplyBForRewardRateCap;
+    /// @notice Running sum of all `userInfoA[*].rewards` (must match `DualPoolStorageLayout` slot order).
+    uint256 public bookedUserRewardsA;
+    /// @notice Running sum of all `userInfoB[*].rewards`.
+    uint256 public bookedUserRewardsB;
 
     /// @notice Initializes pools, reward token, role admins, fee recipients, and ERC777 safety checks.
     /// @param tokenA Pool A staking token (must differ from `tokenB`).
@@ -222,7 +230,7 @@ contract DualPoolStaking is Ownable, AccessControl, ReentrancyGuard, Pausable {
 
     /// @notice Operator funds Pool A rewards and schedules emissions (`OPERATOR_ROLE`).
     /// @param amount Reward amount pulled from `msg.sender` (actual uses balance delta for FOT safety downstream).
-    /// @param duration Emission duration; validated inside admin module / `NotifyRewardLib`.
+    /// @param duration Emission duration in seconds, or `0` to use `poolA().rewardDuration` (set via `setRewardDurationA` within allowed bounds).
     function notifyRewardAmountA(uint256 amount, uint256 duration)
         external
         onlyRole(OPERATOR_ROLE)
@@ -255,15 +263,16 @@ contract DualPoolStaking is Ownable, AccessControl, ReentrancyGuard, Pausable {
         _delegateTo(userModule, abi.encodeWithSignature("executeClaimB(address)", msg.sender));
     }
 
-    /// @notice Emergency-style claim path that allows discounted settlement under bad debt or shutdown.
-    /// @dev This path protects locked principal and fees, and may partially pay rewards based on physical liquidity.
+    /// @notice Cross-pool claim that shares cooldown with `claimA`/`claimB` and may partially pay if TokenB liquidity is short.
+    /// @dev Under normal operation (`!shutdown`, no bad debt), **each pool** with accrued rewards must meet `minClaimAmount`
+    ///      (same as single-pool claims). Shutdown or bad debt relaxes that minimum and enables partial settlement semantics.
     function forceClaimAll() external nonReentrant whenNotPaused {
         _delegateTo(userModule, abi.encodeWithSignature("executeForceClaimAll(address)", msg.sender));
     }
 
     /// @notice Operator funds Pool B rewards and schedules emissions (`OPERATOR_ROLE`).
     /// @param amount Reward amount pulled from `msg.sender`.
-    /// @param duration Emission duration; validated downstream.
+    /// @param duration Emission duration in seconds, or `0` to use `poolB().rewardDuration` (`setRewardDurationB`).
     function notifyRewardAmountB(uint256 amount, uint256 duration)
         external
         onlyRole(OPERATOR_ROLE)
@@ -350,6 +359,7 @@ contract DualPoolStaking is Ownable, AccessControl, ReentrancyGuard, Pausable {
     }
 
     /// @notice Points `userModule` to a new implementation (`DEFAULT_ADMIN_ROLE`).
+    /// @dev Production: this role must not remain on an EOA; hold it on a Timelock-owned `DualPoolStakingAdmin` (or the timelock itself) so upgrades go through `schedule` / `execute`.
     /// @param newModule Non-zero module address.
     function setUserModule(address newModule) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (newModule == address(0)) revert StakingExecutionErrors.ZeroAddress();
@@ -359,6 +369,7 @@ contract DualPoolStaking is Ownable, AccessControl, ReentrancyGuard, Pausable {
     }
 
     /// @notice Points `adminModule` to a new implementation (`DEFAULT_ADMIN_ROLE`).
+    /// @dev See `setUserModule` NatSpec: delegatecall targets are fully trusted; gate `DEFAULT_ADMIN_ROLE` behind timelocked governance.
     /// @param newModule Non-zero module address.
     function setAdminModule(address newModule) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (newModule == address(0)) revert StakingExecutionErrors.ZeroAddress();
@@ -420,12 +431,12 @@ contract DualPoolStaking is Ownable, AccessControl, ReentrancyGuard, Pausable {
         _delegateTo(adminModule, abi.encodeWithSignature("executeSetMinStakeAmountB(uint256)", _amount));
     }
 
-    /// @notice Sets Pool A `rewardDuration` config (`ADMIN_ROLE`).
+    /// @notice Sets Pool A default emission length for `notifyRewardAmountA(amount, 0)` (`ADMIN_ROLE`).
     function setRewardDurationA(uint256 _duration) external onlyRole(ADMIN_ROLE) nonReentrant {
         _delegateTo(adminModule, abi.encodeWithSignature("executeSetRewardDurationA(uint256)", _duration));
     }
 
-    /// @notice Sets Pool B `rewardDuration` config (`ADMIN_ROLE`).
+    /// @notice Sets Pool B default emission length for `notifyRewardAmountB(amount, 0)` (`ADMIN_ROLE`).
     function setRewardDurationB(uint256 _duration) external onlyRole(ADMIN_ROLE) nonReentrant {
         _delegateTo(adminModule, abi.encodeWithSignature("executeSetRewardDurationB(uint256)", _duration));
     }

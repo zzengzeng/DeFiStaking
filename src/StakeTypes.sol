@@ -42,7 +42,7 @@ struct PoolInfo {
     uint256 tvlCap;
     /// @notice Minimum stake per transaction for the pool.
     uint256 minStakeAmount;
-    /// @notice Default reward duration parameter used by notify / admin flows.
+    /// @notice Default emission length for `notifyRewardAmount*` when the caller passes `duration == 0` (seconds); must be `0` (unset) or within `[MIN_REWARD_RATE_DURATION, MAX_DURATION]` when set via admin.
     uint256 rewardDuration;
 }
 

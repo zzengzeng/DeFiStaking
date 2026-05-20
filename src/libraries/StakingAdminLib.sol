@@ -9,7 +9,7 @@ import {Pool, PoolInfo, UserInfo} from "../StakeTypes.sol";
 import {StakingExecutionErrors} from "../StakingExecutionErrors.sol";
 
 /// @title StakingAdminLib
-/// @notice Linked library: admin, emergency, fee, recovery, shutdown, and bad-debt execution bodies used via `DualPoolAdminModule` (`delegatecall` from core) or direct `external` calls from `DualPoolStakingOld`.
+/// @notice Linked library: admin, emergency, recovery, shutdown, and bad-debt execution bodies used via `DualPoolAdminModule` (`delegatecall` from core) or direct `external` calls from `DualPoolStakingOld`. Pool B fee sweeps live on the cores / admin module (`claimFees`) with CEI ordering.
 /// @dev Every `execute*` entrypoint assumes the caller has already enforced pause/emergency/role gates unless noted.
 library StakingAdminLib {
     using SafeERC20 for IERC20;
@@ -44,6 +44,10 @@ library StakingAdminLib {
         uint256 deadlockBypass;
         /// @notice `unclaimedFeesB` captured at call time for residual accounting.
         uint256 unclaimedFeesAtCall;
+        /// @notice Aggregate of all Pool A `userInfo.rewards` at call time (must remain claimable after finalize).
+        uint256 bookedUserRewardsA;
+        /// @notice Aggregate of all Pool B `userInfo.rewards` at call time.
+        uint256 bookedUserRewardsB;
     }
 
     /// @notice Parameters for Pool A emergency principal exit.
@@ -119,20 +123,6 @@ library StakingAdminLib {
         poolTo.availableRewards += amount;
     }
 
-    /// @notice Transfers accumulated Pool B fees (`fees`) to `feeRecipient` using the reward token.
-    /// @param rewardToken TokenB ERC20 instance.
-    /// @param feeRecipient Recipient; must be non-zero.
-    /// @param fees Amount to transfer (caller typically passes full `unclaimedFeesB`).
-    function executeClaimFees(IERC20 rewardToken, address feeRecipient, uint256 fees) external {
-        if (fees == 0) {
-            revert StakingExecutionErrors.NoFeesToClaim();
-        }
-        if (feeRecipient == address(0)) {
-            revert StakingExecutionErrors.NoFeeRecipient();
-        }
-        rewardToken.safeTransfer(feeRecipient, fees);
-    }
-
     /// @notice Sweeps `p.token` to `p.to` if the amount is provably non-liability "excess" per pool accounting rules.
     /// @param poolA Pool A storage (TokenA principal liability).
     /// @param poolB Pool B storage.
@@ -170,11 +160,11 @@ library StakingAdminLib {
         p.token.safeTransfer(p.to, p.amount);
     }
 
-    /// @notice Terminal shutdown step: zeros pending/available/dust buckets and sends residual reward token to `feeRecipient` when allowed.
+    /// @notice Terminal shutdown step: sweeps **non-user** reward token residue to `feeRecipient` and retains per-pool `totalPending` equal to booked user rewards.
     /// @param poolA Pool A storage.
     /// @param poolB Pool B storage.
     /// @param p Shutdown finalization parameters (`ForceShutdownFinalizeParams`).
-    /// @dev `residual` includes `poolA.dust + poolB.dust` so sub-`DUST_TOLERANCE` accrual dust is swept with the final transfer (avoids wei permanently stuck in the core).
+    /// @dev `residual` is `availableRewards` + fee/dust buckets + **orphan** pending (`totalPending - bookedUserRewards`) per pool so users who exited principal during shutdown can still claim accrued `userInfo.rewards` after finalize.
     function executeForceShutdownFinalize(
         PoolInfo storage poolA,
         PoolInfo storage poolB,
@@ -190,11 +180,19 @@ library StakingAdminLib {
             revert StakingExecutionErrors.StillStaked();
         }
 
-        uint256 residual = poolA.totalPending + poolB.totalPending + poolA.availableRewards + poolB.availableRewards
-            + p.unclaimedFeesAtCall + poolA.dust + poolB.dust;
+        uint256 bookedA = p.bookedUserRewardsA;
+        uint256 bookedB = p.bookedUserRewardsB;
+        if (bookedA > poolA.totalPending || bookedB > poolB.totalPending) {
+            revert StakingExecutionErrors.BookedRewardsExceedPending();
+        }
+        uint256 orphanA = poolA.totalPending - bookedA;
+        uint256 orphanB = poolB.totalPending - bookedB;
 
-        poolA.totalPending = 0;
-        poolB.totalPending = 0;
+        uint256 residual = poolA.availableRewards + poolB.availableRewards + p.unclaimedFeesAtCall + poolA.dust
+            + poolB.dust + orphanA + orphanB;
+
+        poolA.totalPending = bookedA;
+        poolB.totalPending = bookedB;
         poolA.availableRewards = 0;
         poolB.availableRewards = 0;
         poolA.dust = 0;
@@ -206,6 +204,8 @@ library StakingAdminLib {
     }
 
     /// @notice Emergency Pool A exit: returns principal and rebalances unpaid rewards into Pool B budget per rules.
+    /// @dev Caller must run `PoolAccrualLib.updateGlobal` for both pools and `settleUser` for the exiting user (and peers if needed)
+    ///      **before** this call so `userInfo.rewards` matches `accRewardPerToken` and `totalPending` is not left inconsistent.
     /// @param poolA Pool A storage.
     /// @param poolB Pool B storage (receives rebalanced `availableRewards` from unpaid A rewards).
     /// @param userInfoA Pool A user mapping.
@@ -249,6 +249,7 @@ library StakingAdminLib {
     }
 
     /// @notice Emergency Pool B exit: returns principal, clears lock maps, and rebalances rewards similarly to Pool A path.
+    /// @dev Same pre-condition as `executeEmergencyWithdrawA`: global accrual + `settleUser` for the claimant must run first.
     /// @param poolB Pool B storage.
     /// @param userInfoB Pool B user mapping.
     /// @param unlockTimeB Pool B unlock map (zeroed for user).

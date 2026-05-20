@@ -46,7 +46,7 @@ function feeBpAt(stakeTs: bigint, evalTime: bigint, unlockTime: bigint, withdraw
   if (evalTime < unlockTime) return 0n;
   const stakedFor = evalTime > stakeTs ? evalTime - stakeTs : 0n;
   if (stakedFor < 90n * DAY) return withdrawFeeBP;
-  if (stakedFor < 180n * DAY) return midTermFeeBP;
+  if (stakedFor <= 180n * DAY) return midTermFeeBP;
   return 0n;
 }
 
@@ -116,13 +116,18 @@ export function WithdrawPanel({
 
     let currentFeeBp = 0n;
     if (stakedFor < 90n * DAY) currentFeeBp = withdrawFeeBP;
-    else if (stakedFor < 180n * DAY) currentFeeBp = midTermFeeBP;
+    else if (stakedFor <= 180n * DAY) currentFeeBp = midTermFeeBP;
     else currentFeeBp = 0n;
 
     let daysToBetterFee = 0;
     let saveBp = 0n;
     if (!locked && currentFeeBp > 0n) {
-      const nextTierIn = stakedFor < 90n * DAY ? 90n * DAY - stakedFor : stakedFor < 180n * DAY ? 180n * DAY - stakedFor : 0n;
+      const nextTierIn =
+        stakedFor < 90n * DAY
+          ? 90n * DAY - stakedFor
+          : stakedFor <= 180n * DAY
+            ? 180n * DAY + 1n - stakedFor
+            : 0n;
       daysToBetterFee = Number(nextTierIn / DAY);
       saveBp = stakedFor < 90n * DAY ? withdrawFeeBP - midTermFeeBP : midTermFeeBP;
     }
@@ -143,7 +148,7 @@ export function WithdrawPanel({
     let nextBestTs = nowSec;
     if (locked) nextBestTs = unlockTime;
     else if (stakedFor < 90n * DAY) nextBestTs = stakeTimestamp + 90n * DAY;
-    else if (stakedFor < 180n * DAY) nextBestTs = stakeTimestamp + 180n * DAY;
+    else if (stakedFor <= 180n * DAY) nextBestTs = stakeTimestamp + 180n * DAY + 1n;
     else nextBestTs = nowSec;
 
     const feeNowBp = penaltyBpAt(nowSec, unlockTime, penaltyFeeBP) + feeBpAt(stakeTimestamp, nowSec, unlockTime, withdrawFeeBP, midTermFeeBP);
@@ -283,7 +288,7 @@ export function WithdrawPanel({
           <div>Fee tiers:</div>
           <div>&lt;90 days -&gt; withdrawFee ({bpToPercent(suggestion?.withdrawFeeBP ?? 0n)})</div>
           <div>90-180 days -&gt; midTerm ({bpToPercent(suggestion?.midTermFeeBP ?? 0n)})</div>
-          <div>&gt;=180 days -&gt; 0%</div>
+          <div>&gt;180 days -&gt; 0%</div>
           {preview.isLocked && <div className="mt-1 text-red-300">Locked: penalty {bpToPercent(suggestion?.penaltyFeeBP ?? 0n)} applies to early exit.</div>}
         </div>
         {smart && (

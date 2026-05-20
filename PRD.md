@@ -1,4 +1,4 @@
-# ERC20 (Staking) 协议需求规格说明书 v1.0
+# ERC20 (Staking) 协议需求规格说明书 v1.1
 
 ## 1. 文档概览
 
@@ -24,7 +24,8 @@
 | **不变量弹性豁免** | `_assertInvariantB()` 在 Normal 模式失败时必 revert；在 **EmergencyWithdraw** 路径下仅警告不回滚。 |
 | **WADP 防套利** | 任何追加质押行为必须通过时间加权算法重算持仓起点，严禁通过 1 wei 追加重置费率阶梯。 |
 | **TVL 校验完整性** | 所有 Stake 操作的 Cap 检查必须包含 **“真实入账的拟新增量”**，防范闪电贷瞬时攻击与 FOT 额度虚占。 |
-| **空池重锚** | 当池子为空时奖励不释放，首位质押者进入时根据剩余预算重新锚定 `rewardRate`。 |
+| **空池重锚** | 当池子为空时奖励不释放；`periodFinish` 已过期但预算仍在时由 `RewardReanchorLib` 重排；首位质押/复利进 B 池时按剩余窗口或预算重锚 `rewardRate`（见 **§4.5**）。 |
+| **用户奖励账本对账** | Core 维护 `bookedUserRewardsA/B`（各池 `userInfo*.rewards` 之和），与 `totalPending` 对账，支撑停机 `forceShutdownFinalize` 与 orphan pending 清扫（见 **§3.2**、**§7.4**）。 |
 
 ### 1.3 文档范围
 
@@ -33,6 +34,18 @@
 **不覆盖**：前端实现、链下 Keeper 调度、多链部署差异。
 
 **覆盖（治理部署）**：推荐主路径为 **OpenZeppelin `TimelockController`** 持有治理门面 `owner`、并由其 `schedule` / `execute` 调用带 `ADMIN_ROLE` 的链上入口；细节见 **§2.1.1**。
+
+### 1.4 链上实现架构（与仓库对齐）
+
+| 组件 | 职责 |
+| --- | --- |
+| **`DualPoolStaking`（Core）** | 角色、路由、`delegatecall` 至模块、`_assertInvariantB`、Operator 0h 入口 |
+| **`DualPoolUserModule`** | `stake*` / `withdraw*` / `claimA` / `claimB` / `compoundB` / `forceClaimAll` / `emergencyWithdrawA/B`；维护 `bookedUserRewards*` |
+| **`DualPoolAdminModule`** | `notifyRewardAmount*`、治理 setter、`forceShutdownFinalize`、`resolveBadDebt` 等 |
+| **`DualPoolStakingAdmin`** | Timelock 可调用的 Admin 门面（`Ownable.owner` = Timelock） |
+| **链接库（library）** | `PoolAccrualLib`、`PoolAStakeLib`、`PoolBStakeLib`、`PoolBWithdrawLib`、`PoolBCompoundLib`、`PoolSingleClaimLib`、`NotifyRewardLib`、`ForceClaimAllLib`、`StakingAdminLib`、**`PoolBWadpLib`**、**`RewardReanchorLib`** |
+
+用户入口命名（与 Core 对外 ABI 一致）：**`claimA` / `claimB`**（分池领取）、**`compoundB`**（跨池复投进 B）、**`emergencyWithdrawA` / `emergencyWithdrawB`**（分池紧急退出）。
 
 ---
 
@@ -45,7 +58,7 @@
 | **Owner（`DEFAULT_ADMIN_ROLE`）** | 部署时授予 | 模块指针（`setUserModule` / `setAdminModule`）、`setAdmin` / `setOperator` 等超级配置 | 逻辑/实现升级等建议 **≥72h**，由 Timelock 或多签发起 |
 | **Admin（`ADMIN_ROLE`）** | 授予治理门面；门面 `Ownable.owner` = **`TimelockController`** | 风险参数、`recoverToken`、`rebalanceBudgets`、`unpause` 等 | **≥48h**：须由 Timelock `schedule` → 到期 `execute` 再调用门面→Core |
 | **Operator（`OPERATOR_ROLE`）** | `DEFAULT_ADMIN_ROLE` 单独授予运维地址 | **`pause()`、`enableEmergencyMode()`、`notifyRewardAmount*`**（不经治理门面） | **0h**（防御性/注资类）；**不得**仅挂在 `owner = Timelock` 的门面上以免被误加 48h |
-| **User** | 任意地址 | stake/withdraw/claim/compound/emergencyWithdraw | — |
+| **User** | 任意地址 | `stakeA`/`stakeB`、`withdrawA`/`withdrawB`、`claimA`/`claimB`、`compoundB`、`forceClaimAll`、`emergencyWithdrawA`/`emergencyWithdrawB` | — |
 
 #### 2.1.1 标准 Timelock 管 Admin（推荐主路径）
 
@@ -226,6 +239,14 @@ address public forfeitedRecipient; // 治理可配置的接收地址（Timelock�
 | `totalPendingA / B` | uint256 | 已释放且确权但未支付的奖励负债 | weiB |
 | `unclaimedFeesB` | uint256 | **已收取但未被管理员提取的提现手续费** | weiB |
 | `dustA / dustB` | uint256 | 每次结算累积的除法截断粉尘，按池严格物理隔离防溢出 | weiB |
+| `rewardDurationA / B`（`PoolInfo.rewardDuration`） | uint256 | 各池默认排放时长（秒）；`notifyRewardAmount*(amount, 0)` 时使用；`0` 表示未设默认（须 Operator 传显式 `duration` 或 Admin 先 `setRewardDuration*`） | seconds |
+| `bookedUserRewardsA / B` | uint256 | 链上汇总：该池所有 `userInfo*.rewards` 之和；在 settle / claim / compound / forfeit / emergency 路径增减；用于停机清算 | weiB |
+
+> **`bookedUserRewards` 与 `totalPending`**
+> * `totalPendingX`：池级「已释放、未兑付」负债（主要由 `_updateGlobalX` 增加）。
+> * `bookedUserRewardsX`：已记入用户 `rewards` 字段、尚未 claim 的合计。
+> * 正常态应满足 **`bookedUserRewardsX ≤ totalPendingX`**；差额 `orphanX = totalPendingX - bookedUserRewardsX` 为未挂到任何用户账上的 pending（停机 finalize 时并入 residual 清扫，见 **§7.4**）。
+> * 若 `bookedUserRewardsX > totalPendingX`，实现 **revert** `BookedRewardsExceedPending()`。
 
 > **⚠️ 实现警告（Critical）**：
 > 开发者在实现对应的 `_updateGlobalX()` 函数时，**切勿将逻辑碎片化**。必须以 **§4.1** 中提供的统一代码块为准（包含提前 return 防除零、坏账映射、粉尘还原回收等），以保证时序的安全性和会计一致性。
@@ -245,9 +266,9 @@ address public forfeitedRecipient; // 治理可配置的接收地址（Timelock�
 > 严禁在每次追加质押（Stake/Compound）时将 `stakeTimestamp` 粗暴重置为 `block.timestamp`，否则将严重惩罚长期持有者的复投行为。必须按资金量进行时间加权：
 > **WADP 公式**：
 > 
-> $$T_{new} = \frac{(Staked_{old} \times T_{old}) + (Amount_{new} \times Now)}{Staked_{old} + Amount_{new}}$$
+> $$T_{new} = \left\lceil\frac{(Staked_{old} \times T_{old}) + (Amount_{new} \times Now)}{Staked_{old} + Amount_{new}}\right\rceil$$
 > 
-> 
+> 实现见 **`PoolBWadpLib`**（OpenZeppelin `Math.Rounding.Ceil`），详见 **§4.4**。
 
 ### 3.4 费率与边界配置
 
@@ -341,8 +362,7 @@ function _updateGlobalX() internal {
 
 ```
 
-> **补充机制：空池重锚 (Re-anchor)**
-> 当 `totalStakedX` 从 `0` 变为 `> 0` 时（首个用户入场），由于此前 `_updateGlobalX` 执行了拦截并返回，不会结算历史时间。因此在用户**完成本金入账后**，系统必须立即重锚真实速率，防止 APR 被闲置期稀释。此逻辑应内嵌于 `stake` 和 `compound` 函数中（见 §5）。
+> **补充机制：空池重锚 (Re-anchor)** — 详见 **§4.5**。当 `totalStakedX == 0` 时 `_updateGlobalX` 不消耗 `availableRewards`；在 `stakeX` / `compoundB` 增加 B 池本金后须重锚 `rewardRate`，防止预算空转或 APR 被空置期稀释。
 
 ### 4.2 用户奖励结算 _settleUserX(user)
 
@@ -375,7 +395,8 @@ function _settleUserX(address user) internal {
     );
     if (earned > 0) {
         // 仅修改个人账本，严禁再累加全局 totalPendingX 造成复算
-        rewardsX[user] += earned; 
+        rewardsX[user] += earned;
+        // UserModule 同步：bookedUserRewardsX += earned（与 rewards 映射一致）
     }
     // 【核心优化】为了节省一次 SSTORE 的 Gas 操作，移除对 userRewardPaidX[user] 的内部重写。
     // 该快照变量交由外层操作 (Stake/Withdraw/Compound) 在合适的生命周期内统一固化。
@@ -420,10 +441,25 @@ function _updateWADP(
     uint256 weightedOld = oldStaked * oldTimestamp;
     uint256 weightedNew = addedAmount * block.timestamp;
 
-    return (weightedOld + weightedNew) / (oldStaked + addedAmount);
+    // 链上实现（PoolBWadpLib）：向上取整，避免多次小额 stake 因 floor 系统性压低 stakeTimestamp、虚增 holdingDuration 而提前进入低费率档
+    return Math.mulDiv(weightedOld + weightedNew, 1, oldStaked + addedAmount, Math.Rounding.Ceil);
 }
 
 ```
+
+> **舍入方向（实现约束）**：WADP 必须使用 **Ceil**（`PoolBWadpLib`）。Floor 会使 `stakeTimestampB` 偏旧、`holdingDuration = now - stakeTimestampB` 偏大，有利于用户、不利于协议费率阶梯。
+
+### 4.5 空池 / 过期窗口重锚（`RewardReanchorLib`）
+
+在 **`stakeA` / `stakeB` / `compoundB`** 增加本金后，若 `availableRewardsX > 0` 且 `totalStakedX > 0`，按剩余排放窗口重算速率：
+
+| 条件 | 行为 |
+| --- | --- |
+| **首笔进池**（`totalStaked` 由 0 变 >0）且 `remainingTime = periodFinish - now > 0` | `rewardRate = availableRewards / remainingTime`（压缩剩余窗口，抬高 APR） |
+| **`remainingTime == 0`**（`periodFinish` 已过）且 `availableRewards > 0` | 调用 **`RewardReanchorLib.reanchorStaleSchedule`**：用当前 `availableRewards` 按 `MIN_REWARD_RATE_DURATION`～`MAX_DURATION` 与 `MAX_REWARD_RATE_*` 上限重设 `rewardRate`、`periodFinish`、`lastUpdateTime` |
+| 否则 | 不重锚 |
+
+**Operator 二次注资**：若上一周期在空池下结束导致 `availableRewards` 滞留，下一次 `notifyRewardAmount*` 须将 **`carryStranded = availableRewards`**（当 `now >= periodFinish`）并入 `merged = actualAmount + leftover + carryStranded` 再算新速率（`NotifyRewardLib`，见 **§6.2**）。
 
 ---
 
@@ -464,11 +500,15 @@ require(maxTVLCapX == 0 || totalStakedX + received <= maxTVLCapX, "CAP_EXCEEDED"
 5. **更新快照 (Fail-safe)**：`userRewardPaidX[user] = accRewardPerTokenX`
 6. **修改本金**：`userStakedX[user] += received; totalStakedX += received`
 7. **Rolling Lock**：`unlockTimeX[user] = _updateRollingLock(unlockTimeX[user], lockDuration)`
-8. **触发重锚机制 (Re-anchor)**：
+8. **触发重锚机制 (Re-anchor)**（与 **§4.5** 一致）：
 ```solidity
 uint256 remainingTime = periodFinishX > block.timestamp ? periodFinishX - block.timestamp : 0;
-if (isFirstDeposit && remainingTime > 0) {
-    rewardRateX = availableRewardsX / remainingTime;
+if (totalStakedX > 0 && availableRewardsX > 0) {
+    if (remainingTime > 0 && isFirstDeposit) {
+        rewardRateX = availableRewardsX / remainingTime;
+    } else if (remainingTime == 0) {
+        RewardReanchorLib.reanchorStaleSchedule(poolX, MIN_REWARD_RATE_DURATION, MAX_DURATION, ...);
+    }
 }
 
 ```
@@ -526,11 +566,13 @@ if (isFirstDeposit && remainingTime > 0) {
   unlockTimeB[user] = _updateRollingLock(unlockTimeB[user], lockDuration)
   stakeTimestampB[user] = _updateWADP(userStakedB_before, stakeTimestampB[user], rA + rB)
 
-步骤 10：判断空池重锚 (安全拦截除零)
+步骤 10：判断 Pool B 重锚（与 §4.5 一致；`wasEmptyB` 或 `remTime == 0` 路径）
   uint256 remTime = periodFinishB > block.timestamp ? periodFinishB - block.timestamp : 0;
-  if (wasEmptyB && remTime > 0) {
-      rewardRateB = availableRewardsB / remTime;
+  if (poolB.totalStaked > 0 && poolB.availableRewards > 0) {
+      if (wasEmptyB && remTime > 0) rewardRateB = availableRewardsB / remTime;
+      else if (remTime == 0) RewardReanchorLib.reanchorStaleSchedule(...);
   }
+  bookedUserRewardsA -= rA; bookedUserRewardsB -= rB;  // 与 rewards 清零同步
 
 步骤 11：更新冷却与终检
   lastClaimTime[user] = block.timestamp
@@ -631,24 +673,28 @@ emit Withdrawn(user, amount, fee, false, Pool.B);
 
 ```
 
-### 5.4 ClaimReward 与 forceClaimAll
+### 5.4 claimA / claimB 与 forceClaimAll
 
-**标准 claim()：刚性兑付**
+**分池领取 `claimA()` / `claimB()`（刚性兑付）**
+
+两函数共享 `lastClaimTime` 与 `claimCooldown`（首次成功 claim/compound/forceClaim 后生效）。各自只结算并支付对应池的 `rewards`（均为 TokenB）。
 
 ```solidity
 require(!paused, "PAUSED");
 require(!emergencyMode || shutdownMode, "EMERGENCY_MODE");
 require(block.timestamp >= lastClaimTime[msg.sender] + claimCooldown, "COOLDOWN");
-// 结算后...
-require(badDebtA == 0 && badDebtB == 0, "BAD_DEBT_EXISTS"); // 拒绝物理坏账支付
-uint256 totalToPay = payA + payB;
-require(totalToPay >= minClaimAmount, "BELOW_MIN_CLAIM"); 
+// _updateGlobalX(); _settleUserX(msg.sender);
+require(badDebtA == 0 && badDebtB == 0, "BAD_DEBT_EXISTS"); // 任一池坏账则两池标准 claim 均阻断
+uint256 reward = rewardsX[msg.sender];
+require(reward >= minClaimAmount, "BELOW_MIN_CLAIM");
+// 支付后：rewardsX[user]=0; totalPendingX -= reward; bookedUserRewardsX -= reward;
+emit Claimed(user, paidA, paidB, timestamp);  // 单池路径另一侧为 0
 
 ```
 
-**forceClaimAll()：坏账逃生舱与粉尘清扫**
+**`forceClaimAll()`：跨池领取 / 坏账逃生舱**
 
-> **UX 指引**：`forceClaimAll` 豁免了 `minClaimAmount` 限制。为了防止正常用户误触折损条件，系统强制设置了其调用前提。前端层面仅推荐在系统出现物理坏账 (`badDebt > 0`) 或是彻底提款离场时引导用户使用此接口。
+> **UX 指引**：正常态下各池须满足与单池 claim 相同的 **`minClaimAmount`（按池、不可相加凑门槛）**；仅在 **`shutdownMode`** 或 **任一侧 `badDebt > 0`** 时放宽最小额并允许按物理流动性部分兑付。前端在健康态应引导 `claimA`/`claimB`，坏账或停机离场时再引导 `forceClaimAll`。
 
 ```solidity
 function forceClaimAll() external nonReentrant {
@@ -664,9 +710,11 @@ function forceClaimAll() external nonReentrant {
     uint256 rB = rewardsB[msg.sender];
     require(rA + rB > 0, "NOTHING_TO_CLAIM");
 
-    // 安全阀：仅在坏账/shutdown 场景或余额满足 minClaimAmount 时才允许走折损路径
-    // 防止正常状态下用户误触 forceClaimAll 拿到比 claimA/B 更少的钱
-    require(rA + rB >= minClaimAmount || badDebtA > 0 || badDebtB > 0 || shutdownMode, "USE_STANDARD_CLAIM");
+    // 正常态：有奖励的每一池均须 >= minClaimAmount（与 claimA/claimB 一致，禁止两池各低于门槛却相加通过）
+    if (!shutdownMode && badDebtA == 0 && badDebtB == 0) {
+        if (rA > 0) require(rA >= minClaimAmount);
+        if (rB > 0) require(rB >= minClaimAmount);
+    }
     
     // 【核心修复】：精准扣除受保护的“硬性锁定资金”（本金+未提手续费）
     // 防止极端坏账时 forceClaimAll 穿透并吃掉其他 Pool B 用户的本金
@@ -682,8 +730,8 @@ function forceClaimAll() external nonReentrant {
     uint256 unpaidA = rA - payA;
     uint256 unpaidB = rB - payB;
 
-    rewardsA[msg.sender] = 0; totalPendingA -= rA; // 逻辑负债按原额全额核销
-    rewardsB[msg.sender] = 0; totalPendingB -= rB;
+    rewardsA[msg.sender] = 0; totalPendingA -= rA; bookedUserRewardsA -= (payA + unpaidA);
+    rewardsB[msg.sender] = 0; totalPendingB -= rB; bookedUserRewardsB -= (payB + unpaidB);
     lastClaimTime[msg.sender] = block.timestamp;
     
     // 【会计平衡核心】
@@ -717,16 +765,18 @@ require(emergencyMode == true && !shutdownMode, "NOT_EMERGENCY"); // 仅纯 Emer
 
 // 闭环维持不变量：放弃个人全部收益，核减系统总负债，转入系统预算
 uint256 principal = userStakedA[user];
-uint256 forfeited = rewardsA[user];
+uint256 forfeited = rewardsA[user];  // 事件字段 rewardsForfeited 快照
 
 userStakedA[user] = 0;
 totalStakedA -= principal;
 rewardsA[user] = 0;
+bookedUserRewardsA -= forfeited;
 
 if (totalPendingA >= forfeited) totalPendingA -= forfeited;
 availableRewardsB += forfeited;
 
 stakingTokenA.safeTransfer(user, principal);
+emit EmergencyWithdrawn(user, principal, forfeited, Pool.A, block.timestamp);
 // 豁免 _assertInvariantB() 的 revert，仅 emit 事件
 
 ```
@@ -754,8 +804,10 @@ stakingTokenA.safeTransfer(user, principal);
 
 ```solidity
 require(!shutdownMode, "SHUTDOWN");
-require(duration >= MIN_REWARD_RATE_DURATION && duration <= MAX_DURATION, "DURATION_ERR");
 require(amount > 0, "ZERO_AMOUNT");
+// effectiveDuration：若调用方传入 duration == 0，则使用 poolX.rewardDuration（须已由 Admin 设在 [MIN_REWARD_RATE_DURATION, MAX_DURATION] 内；0 表示未设默认则 revert）
+uint256 effectiveDuration = duration == 0 ? poolX.rewardDuration : duration;
+require(effectiveDuration >= MIN_REWARD_RATE_DURATION && effectiveDuration <= MAX_DURATION, "DURATION_ERR");
 
 ```
 
@@ -774,7 +826,9 @@ uint256 leftover = 0;
 // 开发者注意：必须使用 lastUpdateTimeX 而非 block.timestamp，防止 double-count！
 // 因为 _updateGlobalX() 已经安全推进了时间锚点。
 uint256 remaining = periodFinishX > lastUpdateTimeX ? periodFinishX - lastUpdateTimeX : 0;
-leftover = remaining * rewardRateX; 
+leftover = remaining * rewardRateX;
+// 空池跑完一整窗后 availableRewards 可能滞留：若 now >= periodFinish，carryStranded = availableRewards（NotifyRewardLib）
+uint256 carryStranded = (periodFinishX > 0 && block.timestamp >= periodFinishX) ? availableRewardsX : 0;
 
 // 3. Interaction: 先转账验证真实到账资金
 uint256 balBefore = rewardTokenB.balanceOf(address(this));
@@ -783,18 +837,18 @@ uint256 actualAmount = rewardTokenB.balanceOf(address(this)) - balBefore;
 require(actualAmount > 0, "ZERO_TRANSFER");
 
 // 4. 计算新速率 (防稀释)
-uint256 newRate = (actualAmount + leftover) / duration;
+uint256 newRate = (actualAmount + leftover + carryStranded) / effectiveDuration;
 // MAX_REWARD_RATE_X 由 maxTotalSupplyBForRewardRateCap 与 MAX_APR_BP 推导（§3.1 / 附录 A），非 totalSupply()
 require(newRate <= MAX_REWARD_RATE_X, "RATE_EXCEEDS_MAX"); // 速率硬顶保护
 
 // 5. Effects: 更新周期与状态
 rewardRateX = newRate;
-periodFinishX = block.timestamp + duration;
+periodFinishX = block.timestamp + effectiveDuration;
 lastUpdateTimeX = block.timestamp;
-availableRewardsX += actualAmount; 
+availableRewardsX += actualAmount;  // carryStranded 已并入 rate 计算，不重复加账
 
 _assertInvariantB();
-emit RewardNotified(Pool.X, actualAmount, duration, newRate); 
+emit RewardNotified(Pool.X, actualAmount, effectiveDuration, newRate); 
 
 ```
 
@@ -806,7 +860,7 @@ emit RewardNotified(Pool.X, actualAmount, duration, newRate);
 * `claimFees()`: Admin 提取 `unclaimedFeesB`，提取后清零，外转 TokenB。
 * `setTVLCapX(uint256 cap)`: 触发 `TVLCapUpdated`。
 * `setMinStakeAmountX(uint256 amt)`: 触发 `MinStakeAmountUpdated`。
-* `setRewardDurationX(uint256 duration)`: 触发 `RewardDurationUpdated`。
+* `setRewardDurationA(uint256 duration)` / `setRewardDurationB(uint256 duration)`：`duration == 0` 清除默认；否则须在 `[MIN_REWARD_RATE_DURATION, MAX_DURATION]`；供 `notifyRewardAmount*(amount, 0)` 使用；触发 `RewardDurationUpdated`。
 * `setMinClaimAmount(uint256 newAmount)`  
   - Admin Only；**≥48h** 由 Timelock 调度落实  
   - `require(newAmount <= MAX_MIN_CLAIM_AMOUNT)`  
@@ -902,10 +956,15 @@ function forceShutdownFinalize() external onlyAdmin {
         require(totalStakedA == 0 && totalStakedB == 0, "STILL_STAKED");
     }
 
-    // 一波清空所有未认领的逻辑负债与预算（含粉尘桶，避免关机后 < DUST_TOLERANCE 的 wei 永久滞留）
-    uint256 residual = totalPendingA + totalPendingB + availableRewardsA + availableRewardsB + unclaimedFeesB + dustA + dustB;
+    // 保留用户仍可 claim 的 pending：仅等于 bookedUserRewards（停机期间 withdraw 本金后 rewards 仍挂在用户账上）
+    require(bookedUserRewardsA <= totalPendingA && bookedUserRewardsB <= totalPendingB, "BOOKED_EXCEEDS_PENDING");
+    uint256 orphanA = totalPendingA - bookedUserRewardsA;
+    uint256 orphanB = totalPendingB - bookedUserRewardsB;
 
-    totalPendingA = 0; totalPendingB = 0;
+    uint256 residual = availableRewardsA + availableRewardsB + unclaimedFeesB + dustA + dustB + orphanA + orphanB;
+
+    totalPendingA = bookedUserRewardsA;
+    totalPendingB = bookedUserRewardsB;
     availableRewardsA = 0; availableRewardsB = 0;
     unclaimedFeesB = 0;
     dustA = 0; dustB = 0;
@@ -913,8 +972,9 @@ function forceShutdownFinalize() external onlyAdmin {
     if (residual > 0) rewardTokenB.safeTransfer(feeRecipient, residual);
     emit ProtocolShutdownComplete(block.timestamp);
 }
-
 ```
+
+> **语义**：`orphan` pending 与预算残渣 sweep 至 `feeRecipient`；**`totalPending` 裁至 `bookedUserRewards`**，以便用户在 grace 后 `withdraw` 仅退本金、再 `claimA`/`claimB` 领走已记账奖励（与链上 `StakingAdminLib.executeForceShutdownFinalize` 一致）。
 
 ### 7.5 resolveBadDebt（坏账物理修复）
 
@@ -995,7 +1055,9 @@ event Withdrawn(address indexed user, uint256 amount, uint256 feeOrPenalty, bool
 event Claimed(address indexed user, uint256 paidA, uint256 paidB, uint256 timestamp);
 event ForceClaimed(address indexed user, uint256 paidA, uint256 paidB, uint256 unpaidA, uint256 unpaidB, uint256 timestamp); 
 event Compounded(address indexed user, uint256 amountA, uint256 amountB, uint256 newUserStakedB, uint256 newUnlockTimeB);
-event EmergencyWithdrawn(address indexed user, uint256 amount, Pool indexed pool, uint256 at); 
+event EmergencyWithdrawn(
+    address indexed user, uint256 principal, uint256 rewardsForfeited, Pool indexed pool, uint256 at
+);
 
 // ── 管理员与系统操作事件 ──────────────────────────────────────────────────
 event RewardNotified(Pool indexed pool, uint256 amount, uint256 duration, uint256 rate);
@@ -1024,6 +1086,8 @@ event RewardDurationUpdated(Pool indexed pool, uint256 oldDuration, uint256 newD
 
 ```
 
+**`EmergencyWithdrawn` 字段说明（与合约一致）**：`principal` 为退回的本金（A 池为 TokenA wei，B 池为 TokenB wei）；`rewardsForfeited` 为该池上紧急退出前用户已计提、本次被清零的奖励（`userInfo*.rewards` 快照，A/B 均为对应池奖励代币 wei），供链下监控统计没收量。
+
 ### 8.2 自定义错误定义
 
 ```solidity
@@ -1043,8 +1107,14 @@ error ZeroAmount();
 error Unauthorized(address caller);
 error TokenRecoveryRestricted();
 error BadDebtExists();
+error BookedRewardsExceedPending();
+error NoRewardsToClaim();
+error ZeroRewardRate(uint256 mergedBudget, uint256 duration);
+error StillStaked();
 
 ```
+
+> **部署角色交接（`script/DualPoolStaking.s.sol`）**：部署后将 `ADMIN_ROLE` 与 `DEFAULT_ADMIN_ROLE` 授予 `DualPoolStakingAdmin` 并从 deployer 撤销；Admin 门面 `owner` 转至 `TimelockController`；`OPERATOR_ROLE` 保留在运维热钱包（`pause` / `notify` / `enableEmergencyMode` 不经 Timelock）。
 
 ---
 
@@ -1056,9 +1126,12 @@ error BadDebtExists();
 | **巨鲸追加仓位** | 取 `max(oldUnlock, now+lockDuration)`。大额资金追加无法压缩原有解锁时间，强制遵守锁定期限。 |
 | **WADP 与 Lock 差异** | 属故意设计：提现费率由 WADP 加权更新（平滑后退），而锁定周期受 `Rolling Lock` 约束全额延长。 |
 | **CompoundB 豁免 Cap** | 复投产生的增加不占用 TVL Cap 配额限制，防止池子接近饱满时直接卡死用户的自动复投。 |
-| **Pause + Emergency** | **Emergency 优先级最高**。只要 `emergencyMode == true`，`emergencyWithdraw` 就必须可用，无视 `paused` 状态。 |
+| **Pause + Emergency** | **Emergency 优先级最高**。只要 `emergencyMode == true`，`emergencyWithdrawA/B` 就必须可用，无视 `paused` 状态。 |
 | **WithdrawB 罚金闭环** | TokenB 产生的 Early Exit 罚金与没收奖励**绝对不对外转账**，直接原路路由至 `availableRewardsB`，维持 TokenB 物理与逻辑不变量。 |
-| **坏账期 Claim** | 标准 `claim` 刚性阻断；`forceClaimAll()` 允许用户在退池前按物理残值折损清算，并按重叠部分核减 BadDebt 维持公式平衡。 |
+| **坏账期 Claim** | `claimA`/`claimB` 在任一侧 `badDebt > 0` 时阻断；`forceClaimAll()` 允许按物理残值部分兑付，并按重叠部分核减 BadDebt。 |
+| **`bookedUserRewards` 对账** | 各池 `booked ≤ totalPending`；finalize 时 `orphan = totalPending - booked` 并入 residual；`booked > totalPending` → `BookedRewardsExceedPending`。 |
+| **过期窗滞留预算** | `periodFinish` 已过且 `availableRewards > 0`：用户侧 `RewardReanchorLib`；运维侧下次 `notify` 的 `carryStranded`。 |
+| **WADP 取整** | `PoolBWadpLib` 使用 **Ceil**，防止 floor 叠加导致提前进入低提现费档。 |
 | **奖励预算不足** | 触发 `_updateGlobalX` 时若余额不足，必须显式记录 `badDebtX` 并 emit 告警，**严禁静默截断**。 |
 | **Bad Debt 期间复投** | `CompoundB` 强制 `require(badDebt == 0)`，防止系统在资不抵债时允许用户将“虚假负债”转化为“真实本金”。 |
 | **僵尸粉尘死锁** | Shutdown 开启 365 天后，且在所有质押本金已提走的先决条件下，Admin 有权调用 `forceShutdownFinalize` 清空残值。 |
@@ -1076,8 +1149,11 @@ error BadDebtExists();
 | **收益指数更新** (防溢出) | $accX=accX+\text{mulDiv}(rewardRateX \times deltaTime,PRECISION,totalStakedX)$ |
 | **用户已赚奖励** | $Earned=\text{mulDiv}(userStakedX,accX-userRewardPaidX,PRECISION)$ |
 | **Rolling Lock** (大值覆盖) | $unlockTime=\max(oldUnlock,\text{block.timestamp}+lockDuration)$ |
-| **WADP 费率计时** (防套利) | $T_{new}=\frac{(Staked_{old} \times T_{old})+(Amount_{new} \times \text{block.timestamp})}{Staked_{old}+Amount_{new}}$ |
-| **新奖励速率** (重锚/平滑) | $rewardRateX=\frac{amount+leftover}{duration}$ *(注: leftover 为按期折算的剩余流速)* |
+| **WADP 费率计时** (防套利) | $T_{new}=\left\lceil\frac{(Staked_{old} \times T_{old})+(Amount_{new} \times Now)}{Staked_{old}+Amount_{new}}\right\rceil$（`PoolBWadpLib`，Ceil） |
+| **新奖励速率** (notify) | $rewardRate=\frac{actual+leftover+carryStranded}{effectiveDuration}$；`duration==0` → `effectiveDuration=pool.rewardDuration` |
+| **过期窗重锚** (stake/compound) | `remainingTime==0` 且 `availableRewards>0` → `RewardReanchorLib.reanchorStaleSchedule` |
+| **首笔进池重锚** | `isFirstDeposit && remainingTime>0` → `rewardRate=availableRewards/remainingTime` |
+| **停机 orphan** | $orphan_X=totalPending_X-bookedUserRewards_X$；finalize 后 $totalPending_X \leftarrow bookedUserRewards_X$ |
 | **Early Exit 罚金（Pool B）** | $Penalty=\frac{Amount \times penaltyfeeBP}{10000}$ |
 | **minEarlyExit 约束** (防零，Pool B) | $minEarlyExitAmountB \ge \lceil \frac{BASIS\_POINTS}{penaltyfeeBP} \rceil$ |
 | **TokenB 终极不变量** (防死锁) | $BalanceB+BadDebt_{A+B}+DUST\_TOLERANCE \ge TotalStakedB+TotalPending_{A+B}+AvailableRewards_{A+B}+UnclaimedFeesB+Dust_{A}+Dust_{B}$ |

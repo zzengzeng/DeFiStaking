@@ -1078,7 +1078,11 @@ event DustAccumulated(Pool pool, uint256 dustAmount, uint256 timestamp);
 ### EmergencyWithdrawn
 
 ```solidity
-event EmergencyWithdrawn(address indexed user, uint256 amount, Pool indexed pool, uint256 at);
+/// @param principal Token principal returned to the user (Pool A: TokenA wei; Pool B: TokenB wei).
+/// @param rewardsForfeited User accrued rewards cleared on that pool before rebalance to Pool B budget (`userInfo*.rewards` snapshot).
+event EmergencyWithdrawn(
+    address indexed user, uint256 principal, uint256 rewardsForfeited, Pool indexed pool, uint256 at
+);
 ```
 
 ### BudgetRebalanced
