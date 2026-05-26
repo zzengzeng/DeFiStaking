@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useAccount } from "wagmi";
 
 import { ConfirmActionModal } from "@/components/ConfirmActionModal";
 import { OperatorNotifyPanel } from "@/components/OperatorNotifyPanel";
 import { PoolHeaderStats } from "@/components/PoolHeaderStats";
 import { StakeCard } from "@/components/StakeCard";
+import { WithdrawPanel } from "@/components/WithdrawPanel";
 import { contractAddresses } from "@/contracts/addresses";
 import { usePoolA } from "@/hooks/usePoolA";
 import { usePoolAStakeSince } from "@/hooks/usePoolAStakeSince";
@@ -14,11 +15,19 @@ import { useWriteWithStatus } from "@/hooks/useWriteWithStatus";
 import { formatToken } from "@/lib/format";
 import { formatCountdownHms } from "@/lib/timelockCountdown";
 
+const computeWithdrawPreviewA = (amount: bigint) => ({
+  netAmount: amount,
+  feeAmount: 0n,
+  penaltyAmount: 0n,
+  feeBp: 0n,
+  penaltyBp: 0n,
+  isLocked: false,
+});
+
 export default function PoolAPage() {
   const { address } = useAccount();
   const pool = usePoolA();
   const flow = useWriteWithStatus();
-  const [withdrawOpen, setWithdrawOpen] = useState(false);
   const [emergencyOpen, setEmergencyOpen] = useState(false);
 
   const tvlA = pool.poolA?.totalStaked ?? 0n;
@@ -28,18 +37,21 @@ export default function PoolAPage() {
   const { data: stakeSinceTs } = usePoolAStakeSince(userStakeA);
   const busy = flow.state !== "idle";
 
-  const runWithdraw = async () => {
-    await flow.executeWrite(
-      {
-        actionLabel: "Withdraw Pool A",
-        txType: "withdraw",
-        metadata: { pool: "A", token: "TokenA", amount: "1" },
-        onConfirmed: () => pool.refetchWalletAndPool(),
-      },
-      () => pool.writeWithdrawA("1"),
-    );
-    flow.reset({ closeGlobal: true });
-  };
+  const runWithdraw = useCallback(
+    async (amt: string) => {
+      await flow.executeWrite(
+        {
+          actionLabel: "Withdraw Pool A",
+          txType: "withdraw",
+          metadata: { pool: "A", token: "TokenA", amount: amt },
+          onConfirmed: () => pool.refetchWalletAndPool(),
+        },
+        () => pool.writeWithdrawA(amt),
+      );
+      flow.reset({ closeGlobal: true });
+    },
+    [flow, pool],
+  );
 
   const runClaim = async () => {
     await flow.executeWrite(
@@ -117,23 +129,6 @@ export default function PoolAPage() {
         }}
       />
 
-      <ConfirmActionModal
-        open={withdrawOpen}
-        title="Confirm withdraw (Pool A)"
-        rows={[
-          { label: "Amount", value: "1 TokenA" },
-          { label: "Your staked", value: `${formatToken(userStakeA)} TokenA` },
-        ]}
-        warning="This submits an on-chain withdrawal. Verify amount and gas before confirming."
-        confirmText="Submit withdrawal"
-        busy={busy}
-        onClose={() => !busy && setWithdrawOpen(false)}
-        onConfirm={async () => {
-          await runWithdraw();
-          setWithdrawOpen(false);
-        }}
-      />
-
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <StakeCard
           title="Stake TokenA"
@@ -153,58 +148,61 @@ export default function PoolAPage() {
             txMeta: { pool: "A", token: "TokenA" },
           }}
         />
-        <div className="min-w-0 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-3 sm:p-4">
-          <h3 className="text-lg font-semibold text-zinc-100">Position</h3>
-          <p className="mt-2 text-sm text-zinc-400">
-            Staked: <span className="font-mono text-zinc-200">{formatToken(pool.userA?.[0] ?? 0n)}</span> TokenA
-          </p>
+        <WithdrawPanel
+          title="Withdraw TokenA"
+          computePreview={computeWithdrawPreviewA}
+          protocolStatus={pool.status}
+          maxWithdrawWei={userStakeA}
+          tokenSymbol="TokenA"
+          showFeeTiers={false}
+          onWithdraw={(v) => runWithdraw(v)}
+          disabled={!pool.canWithdraw || busy || userStakeA <= 0n}
+        />
+      </div>
+
+      <div className="min-w-0 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-3 sm:p-4">
+        <h3 className="text-lg font-semibold text-zinc-100">Position</h3>
+        <p className="mt-2 text-sm text-zinc-400">
+          Staked: <span className="font-mono text-zinc-200">{formatToken(pool.userA?.[0] ?? 0n)}</span> TokenA
+        </p>
+        <p className="text-sm text-zinc-400">
+          Pending rewards: <span className="font-mono text-emerald-300/90">{formatToken(pendingA)}</span> TokenB
+        </p>
+        {stakeDurationLabel ? (
           <p className="text-sm text-zinc-400">
-            Pending rewards: <span className="font-mono text-emerald-300/90">{formatToken(pendingA)}</span> TokenB
+            Staking duration: <span className="font-mono text-zinc-200">{stakeDurationLabel}</span>
           </p>
-          {stakeDurationLabel ? (
-            <p className="text-sm text-zinc-400">
-              Staking duration: <span className="font-mono text-zinc-200">{stakeDurationLabel}</span>
-            </p>
-          ) : null}
-          <p className="text-sm text-zinc-400">
-            Reward paid (lifetime): <span className="font-mono text-zinc-500">{formatToken(pool.userA?.[2] ?? 0n)}</span>
-          </p>
-          {cooldownLabel ? (
-            <p className="mt-2 text-xs text-amber-200/90">Claim cooldown: {cooldownLabel} remaining</p>
-          ) : null}
-          <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-            <button
-              type="button"
-              onClick={() => setWithdrawOpen(true)}
-              disabled={!pool.canWithdraw || busy}
-              className="min-h-[44px] w-full rounded-lg bg-amber-400 px-3 py-2 text-sm text-black disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
-            >
-              Withdraw 1
-            </button>
-            <button
-              type="button"
-              onClick={() => void runClaim()}
-              disabled={!pool.canClaim || busy}
-              className="min-h-[44px] w-full rounded-lg bg-emerald-400 px-3 py-2 text-sm text-black disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
-            >
-              {busy ? "Pending…" : "Claim"}
-            </button>
-            <button
-              type="button"
-              onClick={() => setEmergencyOpen(true)}
-              disabled={!pool.canEmergencyWithdraw || busy}
-              className="min-h-[44px] w-full rounded-lg bg-red-400 px-3 py-2 text-sm text-black disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
-            >
-              Emergency Withdraw
-            </button>
-          </div>
-          {pool.claimDisabledReason ? (
-            <p className="mt-2 text-xs text-zinc-500">Claim unavailable: {pool.claimDisabledReason}</p>
-          ) : null}
-          {pool.emergencyDisabledReason ? (
-            <p className="text-xs text-zinc-500">Emergency withdraw unavailable: {pool.emergencyDisabledReason}</p>
-          ) : null}
+        ) : null}
+        <p className="text-sm text-zinc-400">
+          Reward paid (lifetime): <span className="font-mono text-zinc-500">{formatToken(pool.userA?.[2] ?? 0n)}</span>
+        </p>
+        {cooldownLabel ? (
+          <p className="mt-2 text-xs text-amber-200/90">Claim cooldown: {cooldownLabel} remaining</p>
+        ) : null}
+        <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+          <button
+            type="button"
+            onClick={() => void runClaim()}
+            disabled={!pool.canClaim || busy}
+            className="min-h-[44px] w-full rounded-lg bg-emerald-400 px-3 py-2 text-sm text-black disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
+          >
+            {busy ? "Pending…" : "Claim"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setEmergencyOpen(true)}
+            disabled={!pool.canEmergencyWithdraw || busy}
+            className="min-h-[44px] w-full rounded-lg bg-red-400 px-3 py-2 text-sm text-black disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
+          >
+            Emergency Withdraw
+          </button>
         </div>
+        {pool.claimDisabledReason ? (
+          <p className="mt-2 text-xs text-zinc-500">Claim unavailable: {pool.claimDisabledReason}</p>
+        ) : null}
+        {pool.emergencyDisabledReason ? (
+          <p className="text-xs text-zinc-500">Emergency withdraw unavailable: {pool.emergencyDisabledReason}</p>
+        ) : null}
       </div>
     </div>
   );

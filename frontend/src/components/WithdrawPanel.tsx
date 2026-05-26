@@ -33,6 +33,8 @@ type Props = {
   onWithdraw: (value: string) => Promise<unknown>;
   disabled?: boolean;
   tokenSymbol?: string;
+  /** 默认：有 suggestion 时显示 B 池费率说明 */
+  showFeeTiers?: boolean;
 };
 
 const DAY = 24n * 60n * 60n;
@@ -64,7 +66,9 @@ export function WithdrawPanel({
   onWithdraw,
   disabled,
   tokenSymbol = "TokenB",
+  showFeeTiers,
 }: Props) {
+  const feeTiersVisible = showFeeTiers ?? Boolean(suggestion);
   const [amount, setAmount] = useState("");
   const [debouncedAmount, setDebouncedAmount] = useState("");
   const [pending, setPending] = useState(false);
@@ -203,9 +207,24 @@ export function WithdrawPanel({
     };
   }, [suggestion, protocolStatus, basisAmount, tick]);
 
+  const exceedsMax =
+    maxWithdrawWei !== undefined && maxWithdrawWei > 0n && parsedLive > maxWithdrawWei;
+
+  const onMax = () => {
+    if (maxWithdrawWei === undefined || maxWithdrawWei <= 0n) return;
+    setAmount(trimDecimalInput(formatUnits(maxWithdrawWei, 18)));
+    amountInputRef.current?.focus();
+  };
+
   const openConfirm = () => {
     if (!amount || disabled || pending) return;
     if (parsedLive <= 0n) return;
+    if (exceedsMax) {
+      toast.error("超过可提数量", {
+        description: `最多可提 ${formatToken(maxWithdrawWei ?? 0n)} ${tokenSymbol}`,
+      });
+      return;
+    }
     setConfirmOpen(true);
   };
 
@@ -283,14 +302,19 @@ export function WithdrawPanel({
           penaltyAmount={preview.penaltyAmount}
           feeBp={preview.feeBp}
           penaltyBp={preview.penaltyBp}
+          tokenSymbol={tokenSymbol}
         />
-        <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-2 text-xs text-zinc-400">
-          <div>Fee tiers:</div>
-          <div>&lt;90 days -&gt; withdrawFee ({bpToPercent(suggestion?.withdrawFeeBP ?? 0n)})</div>
-          <div>90-180 days -&gt; midTerm ({bpToPercent(suggestion?.midTermFeeBP ?? 0n)})</div>
-          <div>&gt;180 days -&gt; 0%</div>
-          {preview.isLocked && <div className="mt-1 text-red-300">Locked: penalty {bpToPercent(suggestion?.penaltyFeeBP ?? 0n)} applies to early exit.</div>}
-        </div>
+        {feeTiersVisible ? (
+          <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-2 text-xs text-zinc-400">
+            <div>Fee tiers:</div>
+            <div>&lt;90 days -&gt; withdrawFee ({bpToPercent(suggestion?.withdrawFeeBP ?? 0n)})</div>
+            <div>90-180 days -&gt; midTerm ({bpToPercent(suggestion?.midTermFeeBP ?? 0n)})</div>
+            <div>&gt;180 days -&gt; 0%</div>
+            {preview.isLocked && <div className="mt-1 text-red-300">Locked: penalty {bpToPercent(suggestion?.penaltyFeeBP ?? 0n)} applies to early exit.</div>}
+          </div>
+        ) : (
+          <p className="rounded-lg border border-zinc-800 bg-zinc-950/80 px-3 py-2 text-xs text-zinc-500">No lock, penalty, or withdrawal fee on this pool.</p>
+        )}
         {smart && (
           <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3 text-sm">
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -379,16 +403,36 @@ export function WithdrawPanel({
           placeholder="Amount to withdraw"
           className="min-h-[44px] min-w-0 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-zinc-500 sm:flex-1"
         />
-        <button
-          type="button"
-          onClick={openConfirm}
-          disabled={disabled || pending}
-          className="min-h-[44px] w-full rounded-lg bg-amber-400 px-4 py-2 text-sm font-medium text-black disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto sm:shrink-0"
-        >
-          {pending ? "Pending..." : "Withdraw"}
-        </button>
+        <div className="flex w-full min-w-0 flex-col gap-2 sm:w-auto sm:flex-none sm:flex-row sm:items-stretch sm:gap-2">
+          {maxWithdrawWei !== undefined && maxWithdrawWei > 0n ? (
+            <button
+              type="button"
+              onClick={onMax}
+              disabled={disabled || pending}
+              className="min-h-[44px] w-full shrink-0 rounded-lg border border-zinc-600 px-3 py-2 text-xs font-semibold text-zinc-200 transition hover:border-zinc-500 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto sm:min-w-[4.5rem]"
+            >
+              Max
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={openConfirm}
+            disabled={disabled || pending || parsedLive <= 0n}
+            className="min-h-[44px] w-full rounded-lg bg-amber-400 px-4 py-2 text-sm font-medium text-black disabled:cursor-not-allowed disabled:opacity-40 sm:min-w-[7rem] sm:flex-1"
+          >
+            {pending ? "Pending..." : "Withdraw"}
+          </button>
+        </div>
       </div>
-      <p className="mt-2 text-xs text-zinc-500">Input: {amount ? formatToken(parsed) : "0"} TokenB</p>
+      {maxWithdrawWei !== undefined && maxWithdrawWei > 0n ? (
+        <p className="mt-2 text-xs text-zinc-500">
+          Staked: {formatToken(maxWithdrawWei)} {tokenSymbol}
+          {amount ? ` · Input: ${formatToken(parsed)} ${tokenSymbol}` : null}
+          {exceedsMax ? <span className="text-red-300/90"> · Exceeds staked balance</span> : null}
+        </p>
+      ) : (
+        <p className="mt-2 text-xs text-zinc-500">Input: {amount ? formatToken(parsed) : "0"} {tokenSymbol}</p>
+      )}
     </div>
   );
 }

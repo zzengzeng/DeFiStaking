@@ -25,10 +25,14 @@ type Props = {
   pool: "A" | "B";
   /** notify 成功后刷新池子与余额 */
   invalidate: () => Promise<void>;
+  /** 治理页已单独提供紧急模式按钮时设为 true */
+  hideEmergency?: boolean;
+  /** 紧凑布局（治理页双列） */
+  compact?: boolean;
 };
 
 /** 运营（OPERATOR_ROLE）注资奖励：approve(TokenB→staking) + notifyRewardAmountA/B */
-export function OperatorNotifyPanel({ pool, invalidate }: Props) {
+export function OperatorNotifyPanel({ pool, invalidate, hideEmergency = false, compact = false }: Props) {
   const queryClient = useQueryClient();
   const { address } = useAccount();
   const { isOperator, isLoading: rolesLoading } = useProtocolRoles();
@@ -173,10 +177,18 @@ export function OperatorNotifyPanel({ pool, invalidate }: Props) {
   if (!isOperator) return null;
 
   return (
-    <div className="min-w-0 rounded-2xl border border-amber-500/30 bg-amber-500/5 p-3 sm:p-4">
+    <div
+      className={
+        compact
+          ? "min-w-0 rounded-xl border border-amber-500/25 bg-amber-500/5 p-3"
+          : "min-w-0 rounded-2xl border border-amber-500/30 bg-amber-500/5 p-3 sm:p-4"
+      }
+    >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className="text-sm font-semibold text-amber-200 sm:text-base">Operator · Notify rewards</h3>
-        <p className="text-xs text-amber-200/80">Pool {pool} · pays TokenB</p>
+        <h3 className="text-sm font-semibold text-amber-200 sm:text-base">
+          {compact ? `Pool ${pool} · 注入奖励` : "Operator · Notify rewards"}
+        </h3>
+        <p className="text-xs text-amber-200/80">notifyRewardAmount{pool} · TokenB</p>
       </div>
       <p className="mt-2 text-xs text-zinc-400">
         需要钱包具备 <span className="font-mono text-zinc-300">OPERATOR_ROLE</span>；奖励从钱包转出{" "}
@@ -241,17 +253,19 @@ export function OperatorNotifyPanel({ pool, invalidate }: Props) {
         >
           {busy ? "Pending…" : needsApproval ? "Approve + Notify" : "Notify"}
         </button>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => void runEnableEmergencyMode().catch(() => flow.reset({ closeGlobal: true }))}
-          className="min-h-[44px] w-full rounded-lg bg-red-400 px-3 py-2 text-sm font-medium text-black disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
-        >
-          {busy ? "Pending…" : "Enable Emergency Mode"}
-        </button>
+        {!hideEmergency ? (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void runEnableEmergencyMode().catch(() => flow.reset({ closeGlobal: true }))}
+            className="min-h-[44px] w-full rounded-lg bg-red-400 px-3 py-2 text-sm font-medium text-black disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
+          >
+            {busy ? "Pending…" : "Enable Emergency Mode"}
+          </button>
+        ) : null}
       </div>
 
-      <OperatorNotifyRewardHistory />
+      {!compact ? <OperatorNotifyRewardHistory /> : null}
     </div>
   );
 }

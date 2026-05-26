@@ -1,4 +1,4 @@
-/** DualPoolStakingAdmin 门面：与 `src/DualPoolStakingAdmin.sol` 对齐的最小子集（供 `encodeFunctionData`）。 */
+/** DualPoolStakingAdmin 门面：与 `src/DualPoolStakingAdmin.sol` 对齐（供 Timelock `encodeFunctionData`）。 */
 export const dualPoolStakingAdminAbi = [
   {
     type: "function",
@@ -14,6 +14,15 @@ export const dualPoolStakingAdminAbi = [
   { type: "function", name: "setLockDuration", stateMutability: "nonpayable", inputs: [{ name: "newLockDuration", type: "uint256" }], outputs: [] },
   { type: "function", name: "setMinEarlyExitAmountB", stateMutability: "nonpayable", inputs: [{ name: "newMin", type: "uint256" }], outputs: [] },
   { type: "function", name: "setMaxTransferFeeBP", stateMutability: "nonpayable", inputs: [{ name: "newMaxTransferFeeBP", type: "uint256" }], outputs: [] },
+  { type: "function", name: "setMinClaimAmount", stateMutability: "nonpayable", inputs: [{ name: "amount", type: "uint256" }], outputs: [] },
+  { type: "function", name: "setRewardDurationA", stateMutability: "nonpayable", inputs: [{ name: "duration", type: "uint256" }], outputs: [] },
+  { type: "function", name: "setRewardDurationB", stateMutability: "nonpayable", inputs: [{ name: "duration", type: "uint256" }], outputs: [] },
+  { type: "function", name: "setMinStakeAmountA", stateMutability: "nonpayable", inputs: [{ name: "amount", type: "uint256" }], outputs: [] },
+  { type: "function", name: "setMinStakeAmountB", stateMutability: "nonpayable", inputs: [{ name: "amount", type: "uint256" }], outputs: [] },
+  { type: "function", name: "setTVLCapA", stateMutability: "nonpayable", inputs: [{ name: "cap", type: "uint256" }], outputs: [] },
+  { type: "function", name: "setTVLCapB", stateMutability: "nonpayable", inputs: [{ name: "cap", type: "uint256" }], outputs: [] },
+  { type: "function", name: "setFeeRecipient", stateMutability: "nonpayable", inputs: [{ name: "newRecipient", type: "address" }], outputs: [] },
+  { type: "function", name: "setForfeitedRecipient", stateMutability: "nonpayable", inputs: [{ name: "newRecipient", type: "address" }], outputs: [] },
   {
     type: "function",
     name: "rebalanceBudgets",
@@ -25,6 +34,21 @@ export const dualPoolStakingAdminAbi = [
     ],
     outputs: [],
   },
+  { type: "function", name: "claimFees", stateMutability: "nonpayable", inputs: [], outputs: [] },
+  { type: "function", name: "resolveBadDebt", stateMutability: "nonpayable", inputs: [{ name: "amount", type: "uint256" }], outputs: [] },
+  {
+    type: "function",
+    name: "recoverToken",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "token", type: "address" },
+      { name: "to", type: "address" },
+      { name: "amount", type: "uint256" },
+    ],
+    outputs: [],
+  },
+  { type: "function", name: "activateShutdown", stateMutability: "nonpayable", inputs: [], outputs: [] },
+  { type: "function", name: "forceShutdownFinalize", stateMutability: "nonpayable", inputs: [], outputs: [] },
   { type: "function", name: "unpause", stateMutability: "nonpayable", inputs: [], outputs: [] },
   { type: "function", name: "setUserModule", stateMutability: "nonpayable", inputs: [{ name: "newModule", type: "address" }], outputs: [] },
   { type: "function", name: "setAdminModule", stateMutability: "nonpayable", inputs: [{ name: "newModule", type: "address" }], outputs: [] },
