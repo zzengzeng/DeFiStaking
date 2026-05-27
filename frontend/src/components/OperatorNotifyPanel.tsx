@@ -163,7 +163,7 @@ export function OperatorNotifyPanel({ pool, invalidate, hideEmergency = false, c
         () =>
           writeContractAsync({
             abi: dualPoolStakingAbi,
-            address: STAKING,
+            address: staking,
             functionName: "enableEmergencyMode",
             account: address,
           }) as Promise<Hash>,
