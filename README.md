@@ -256,12 +256,26 @@ forge test --match-contract DeployDualPoolStakingRolesTest -vv
 
 脚本 [`script/DualPoolStaking.s.sol`](script/DualPoolStaking.s.sol) 部署顺序：
 
-1. `MockERC20` TokenA / TokenB（生产替换为真实代币）
+1. TokenA / TokenB：未设置 `TOKEN_A` / `TOKEN_B` 时部署新 `MockERC20`（**ZZTokenA / ZZTKA**、**ZZTokenB / ZZTKB**）；设置环境变量则**复用**已有地址（链上 `symbol` 不变，旧币可能仍是 ZTKA）
 2. `DualPoolStaking`（传入 `maxTotalSupplyBForRewardRateCap`）
 3. `DualPoolUserModule`、`DualPoolAdminModule` 并 `setUserModule` / `setAdminModule`
-4. `DualPoolStakingAdmin` 门面
-5. `TimelockController`（默认 `minDelay = 48 hours`）
-6. **角色交接**：`ADMIN_ROLE` 与 `DEFAULT_ADMIN_ROLE` 授予门面并从 deployer 撤销；门面 `owner` 转给 Timelock；`OPERATOR_ROLE` 保留在 deployer（热路径）
+4. `DualPoolStakingAdmin` 门面（绑定双 Timelock）
+5. `TimelockController` ×2：参数路径 **48h**、超级路径 **72h**
+6. **角色交接**：`ADMIN_ROLE` 与 `DEFAULT_ADMIN_ROLE` 授予门面并从 deployer 撤销；`OPERATOR_ROLE` 保留在 deployer（热路径）
+
+**Sepolia 复用已有 Mock 代币并广播示例：**
+
+```bash
+cp .env.example .env
+# 要 ZZTKA/ZZTKB：不要设置 TOKEN_A / TOKEN_B
+make deploy-fresh-tokens NETWORK=sepolia
+
+# 仅升级 Staking/模块/Timelock、保留原 Token 与余额：
+# 在 .env 中设置 TOKEN_A / TOKEN_B 后
+make deploy NETWORK=sepolia
+```
+
+部署完成后，将 `broadcast/DualPoolStaking.s.sol/11155111/run-latest.json` 中的地址同步到 `frontend/.env.local` 与 `frontend/src/contracts/addresses.ts`（`TOKEN_A` / `TOKEN_B` 可与部署 env 保持一致）。
 
 生产环境请将 Timelock 的 `proposer` / `executor` 换为多签，并将 `OPERATOR_ROLE` 交给独立运维地址。
 
@@ -269,8 +283,8 @@ forge test --match-contract DeployDualPoolStakingRolesTest -vv
 
 | 角色 | 权限 | Timelock |
 |---|---|---|
-| **Owner** (`DEFAULT_ADMIN_ROLE`) | 模块指针、超级配置 | ≥72h（推荐） |
-| **Admin** (`ADMIN_ROLE`) | 风险参数、提取、预算调拨 | ≥48h（经 Timelock → 门面 → Core） |
+| **Owner** (`DEFAULT_ADMIN_ROLE`) | 模块指针、超级配置 | ≥72h（`timelockSuper`） |
+| **Admin** (`ADMIN_ROLE`) | 风险参数、提取、预算调拨 | ≥48h（`timelockGovernance` → 门面 → Core） |
 | **Operator** (`OPERATOR_ROLE`) | 暂停、紧急模式、注资 | 0h（不经门面） |
 | **User** | stake / withdraw / claim / compound | — |
 

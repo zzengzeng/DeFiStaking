@@ -38,7 +38,7 @@ export const dualPoolStakingAbi = [
       { indexed: false, name: "principal", type: "uint256" },
       { indexed: false, name: "rewardsForfeited", type: "uint256" },
       { indexed: true, name: "pool", type: "uint8" },
-      { indexed: false, name: "at", type: "uint256" },
+      { indexed: false, name: "withdrawnAt", type: "uint256" },
     ],
   },
   {
@@ -134,6 +134,7 @@ export const dualPoolStakingAbi = [
   { type: "function", name: "stakeA", stateMutability: "nonpayable", inputs: [{ name: "amount", type: "uint256" }], outputs: [] },
   { type: "function", name: "withdrawA", stateMutability: "nonpayable", inputs: [{ name: "amount", type: "uint256" }], outputs: [] },
   { type: "function", name: "claimA", stateMutability: "nonpayable", inputs: [], outputs: [] },
+  { type: "function", name: "forceClaimAll", stateMutability: "nonpayable", inputs: [], outputs: [] },
   {
     type: "function",
     name: "notifyRewardAmountA",

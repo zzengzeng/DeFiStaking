@@ -53,8 +53,13 @@ endif
 deploy:
 	@forge script script/DualPoolStaking.s.sol:DeployDualPoolStaking $(NETWORK_ARGS)
 
+# 强制 new MockERC20（ZZTokenA/ZZTKA、ZZTokenB/ZZTKB），忽略 .env 中的 TOKEN_A / TOKEN_B
+deploy-fresh-tokens:
+	@env -u TOKEN_A -u TOKEN_B forge script script/DualPoolStaking.s.sol:DeployDualPoolStaking $(NETWORK_ARGS)
+
 help:
 	@echo "Targets: all clean remove install update build test snapshot format anvil deploy help"
 	@echo "  make deploy              # 本地 Anvil（先另开终端: make anvil）"
 	@echo "  make deploy NETWORK=sepolia   # Sepolia（推荐；.env: SEPOLIA_RPC_URL PRIVATE_KEY ETHERSCAN_API_KEY）"
+	@echo "  make deploy-fresh-tokens NETWORK=sepolia   # 新部署 ZZTKA/ZZTKB（不读 TOKEN_A/B）"
 	@echo "  make deploy ARGS=\"--network sepolia\"   # 同上（ARGS 必须整段加引号，否则 sepolia 会被当成另一个目标）"

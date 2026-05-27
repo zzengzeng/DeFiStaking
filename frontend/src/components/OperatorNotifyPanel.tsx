@@ -11,12 +11,10 @@ import { erc20Abi } from "@/contracts/abis/erc20";
 import { contractAddresses } from "@/contracts/addresses";
 import { useApproveIfNeeded } from "@/hooks/useApproveIfNeeded";
 import { useProtocolRoles } from "@/hooks/useProtocolRoles";
+import { useStaking } from "@/hooks/useStaking";
 import { useWriteWithStatus } from "@/hooks/useWriteWithStatus";
 
 import { OperatorNotifyRewardHistory } from "@/components/OperatorNotifyRewardHistory";
-
-const STAKING = contractAddresses.staking;
-const TOKEN_B = contractAddresses.tokenB;
 
 const MIN_DURATION = 86_400n;
 const MAX_DURATION = 31_536_000n;
@@ -35,6 +33,9 @@ type Props = {
 export function OperatorNotifyPanel({ pool, invalidate, hideEmergency = false, compact = false }: Props) {
   const queryClient = useQueryClient();
   const { address } = useAccount();
+  const { poolB } = useStaking();
+  const rewardToken = poolB?.stakingToken ?? contractAddresses.tokenB;
+  const staking = contractAddresses.staking;
   const { isOperator, isLoading: rolesLoading } = useProtocolRoles();
   const { writeContractAsync } = useWriteContract();
   const flow = useWriteWithStatus();
@@ -43,7 +44,7 @@ export function OperatorNotifyPanel({ pool, invalidate, hideEmergency = false, c
   const [durationSec, setDurationSec] = useState("604800");
   const [submitAttempted, setSubmitAttempted] = useState(false);
 
-  const allowance = useApproveIfNeeded({ token: TOKEN_B, spender: STAKING });
+  const allowance = useApproveIfNeeded({ token: rewardToken, spender: staking });
 
   const parsedAmountWei = useMemo(() => {
     const t = amount.trim();
@@ -92,9 +93,9 @@ export function OperatorNotifyPanel({ pool, invalidate, hideEmergency = false, c
   const writeApproveTokenB = (amountWei: bigint) =>
     writeContractAsync({
       abi: erc20Abi,
-      address: TOKEN_B,
+      address: rewardToken,
       functionName: "approve",
-      args: [STAKING, amountWei],
+      args: [staking, amountWei],
       account: address,
     });
 
@@ -105,7 +106,7 @@ export function OperatorNotifyPanel({ pool, invalidate, hideEmergency = false, c
     const fn = pool === "A" ? "notifyRewardAmountA" : "notifyRewardAmountB";
     return writeContractAsync({
       abi: dualPoolStakingAbi,
-      address: STAKING,
+      address: staking,
       functionName: fn,
       args: [parsedAmountWei, parsedDuration],
       account: address,

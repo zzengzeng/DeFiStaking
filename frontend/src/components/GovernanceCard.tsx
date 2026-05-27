@@ -24,6 +24,8 @@ type Props = {
   hint: string;
   /** `DualPoolStakingAdmin` 上 `encodeFunctionData` 得到的 calldata */
   payload: `0x${string}`;
+  /** 调度/执行所用的 TimelockController（默认 48h 治理 timelock） */
+  timelockAddress?: `0x${string}`;
   minDelay: bigint;
   canPropose: boolean;
   canExecute: boolean;
@@ -65,12 +67,25 @@ function mapOzToIndexedOp(
   };
 }
 
-export function GovernanceCard({ title, hint, payload, minDelay, canPropose, canExecute, canCancel, executeRows, children, onAfterTx, disabledReason }: Props) {
+export function GovernanceCard({
+  title,
+  hint,
+  payload,
+  timelockAddress = governanceAddresses.timelock,
+  minDelay,
+  canPropose,
+  canExecute,
+  canCancel,
+  executeRows,
+  children,
+  onAfterTx,
+  disabledReason,
+}: Props) {
   const { address } = useAccount();
   const { writeContractAsync } = useWriteContract();
   const flow = useWriteWithStatus();
 
-  const timelock = governanceAddresses.timelock;
+  const timelock = timelockAddress;
   const target = governanceAddresses.adminFacade;
 
   const salt = useMemo(() => keccak256(payload), [payload]);

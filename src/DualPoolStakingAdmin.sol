@@ -1,175 +1,156 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-
 import {Pool} from "./StakeTypes.sol";
 import {DualPoolStaking} from "./DualPoolStaking.sol";
 
 /// @title DualPoolStakingAdmin
-/// @notice Governance facade: forwards `onlyOwner` calls to the `DualPoolStaking` core for timelocked parameter changes.
-/// @dev Grant this contract `ADMIN_ROLE` and `DEFAULT_ADMIN_ROLE` on the core. Set `owner` to OpenZeppelin `TimelockController` so changes go through `schedule` → `execute`. Do **not** route `pause` / `notifyReward*` here—those remain `OPERATOR_ROLE` on the core (zero delay) to avoid coupling hot ops to the timelock delay.
-/// @custom:forwarding Each external function is a thin `onlyOwner` wrapper around the same-named `DualPoolStaking` entrypoint.
-contract DualPoolStakingAdmin is Ownable {
+/// @notice Governance facade: forwards timelocked calls to the `DualPoolStaking` core.
+/// @dev Grant this contract `ADMIN_ROLE` and `DEFAULT_ADMIN_ROLE` on the core. Parameter changes must be sent by
+///      `timelockGovernance` (typically 48h `TimelockController`); module / role super-paths must be sent by
+///      `timelockSuper` (typically 72h). Do **not** route `pause` / `notifyReward*` here—those remain `OPERATOR_ROLE`
+///      on the core (zero delay).
+contract DualPoolStakingAdmin {
     /// @notice Immutable reference to the staking core.
     DualPoolStaking public immutable core;
+    /// @notice Timelock allowed to call parameter / treasury / protocol admin functions (e.g. 48h delay).
+    address public immutable timelockGovernance;
+    /// @notice Timelock allowed to call super paths (`setUserModule`, `setAdminModule`, `setAdmin`, `setOperator`).
+    address public immutable timelockSuper;
 
-    /// @notice Deploys the facade and pins the core address.
-    /// @param coreAddress Deployed `DualPoolStaking` address; must not be zero.
-    constructor(address coreAddress) Ownable(msg.sender) {
-        require(coreAddress != address(0), "core is zero");
-        core = DualPoolStaking(coreAddress);
+    error ZeroCore();
+    error ZeroTimelockGovernance();
+    error ZeroTimelockSuper();
+    error UnauthorizedGovernanceTimelock(address caller);
+    error UnauthorizedSuperTimelock(address caller);
+
+    modifier onlyGovernanceTimelock() {
+        if (msg.sender != timelockGovernance) {
+            revert UnauthorizedGovernanceTimelock(msg.sender);
+        }
+        _;
     }
 
-    /// @notice Rebalances reward budget between pools on the core.
-    /// @param from Source pool.
-    /// @param to Destination pool.
-    /// @param amount Reward token amount to move.
-    function rebalanceBudgets(Pool from, Pool to, uint256 amount) external onlyOwner {
+    modifier onlySuperTimelock() {
+        if (msg.sender != timelockSuper) {
+            revert UnauthorizedSuperTimelock(msg.sender);
+        }
+        _;
+    }
+
+    /// @notice Deploys the facade and pins core + timelock addresses.
+    /// @param coreAddress Deployed `DualPoolStaking` address.
+    /// @param timelockGovernance_ Timelock for routine governance (e.g. 48h `minDelay`).
+    /// @param timelockSuper_ Timelock for super paths (e.g. 72h `minDelay`).
+    constructor(address coreAddress, address timelockGovernance_, address timelockSuper_) {
+        if (coreAddress == address(0)) revert ZeroCore();
+        if (timelockGovernance_ == address(0)) revert ZeroTimelockGovernance();
+        if (timelockSuper_ == address(0)) revert ZeroTimelockSuper();
+        core = DualPoolStaking(coreAddress);
+        timelockGovernance = timelockGovernance_;
+        timelockSuper = timelockSuper_;
+    }
+
+    function rebalanceBudgets(Pool from, Pool to, uint256 amount) external onlyGovernanceTimelock {
         core.rebalanceBudgets(from, to, amount);
     }
 
-    /// @notice Sweeps accumulated Pool B fees on the core to the configured recipient.
-    function claimFees() external onlyOwner {
+    function claimFees() external onlyGovernanceTimelock {
         core.claimFees();
     }
 
-    /// @notice Clears a `pendingOps` timelock row on the core, if present.
-    /// @param opId Operation identifier.
-    function cancelTimelock(bytes32 opId) external onlyOwner {
+    function cancelTimelock(bytes32 opId) external onlyGovernanceTimelock {
         core.cancelTimelock(opId);
     }
 
-    /// @notice Updates Pool B withdrawal fee recipient on the core.
-    /// @param newRecipient New recipient; must not be zero address.
-    function setFeeRecipient(address newRecipient) external onlyOwner {
+    function setFeeRecipient(address newRecipient) external onlyGovernanceTimelock {
         core.setFeeRecipient(newRecipient);
     }
 
-    /// @notice Updates forfeited / penalty-flow recipient on the core.
-    /// @param newRecipient New recipient; must not be zero address.
-    function setForfeitedRecipient(address newRecipient) external onlyOwner {
+    function setForfeitedRecipient(address newRecipient) external onlyGovernanceTimelock {
         core.setForfeitedRecipient(newRecipient);
     }
 
-    /// @notice Sets minimum early-exit principal bucket for Pool B on the core.
-    /// @param newMin New minimum amount.
-    function setMinEarlyExitAmountB(uint256 newMin) external onlyOwner {
+    function setMinEarlyExitAmountB(uint256 newMin) external onlyGovernanceTimelock {
         core.setMinEarlyExitAmountB(newMin);
     }
 
-    /// @notice Sets max tolerated FOT transfer-fee slippage (basis points) on the core.
-    /// @param newMaxTransferFeeBP New ceiling.
-    function setMaxTransferFeeBP(uint256 newMaxTransferFeeBP) external onlyOwner {
+    function setMaxTransferFeeBP(uint256 newMaxTransferFeeBP) external onlyGovernanceTimelock {
         core.setMaxTransferFeeBP(newMaxTransferFeeBP);
     }
 
-    /// @notice Sets Pool A TVL cap on the core.
-    /// @param cap New cap value.
-    function setTVLCapA(uint256 cap) external onlyOwner {
+    function setTVLCapA(uint256 cap) external onlyGovernanceTimelock {
         core.setTVLCapA(cap);
     }
 
-    /// @notice Sets Pool B TVL cap on the core.
-    /// @param cap New cap value.
-    function setTVLCapB(uint256 cap) external onlyOwner {
+    function setTVLCapB(uint256 cap) external onlyGovernanceTimelock {
         core.setTVLCapB(cap);
     }
 
-    /// @notice Sets Pool A minimum stake on the core.
-    /// @param amount New minimum stake.
-    function setMinStakeAmountA(uint256 amount) external onlyOwner {
+    function setMinStakeAmountA(uint256 amount) external onlyGovernanceTimelock {
         core.setMinStakeAmountA(amount);
     }
 
-    /// @notice Sets Pool B minimum stake on the core.
-    /// @param amount New minimum stake.
-    function setMinStakeAmountB(uint256 amount) external onlyOwner {
+    function setMinStakeAmountB(uint256 amount) external onlyGovernanceTimelock {
         core.setMinStakeAmountB(amount);
     }
 
-    /// @notice Sets Pool A default notify emission length on the core (`notifyRewardAmountA(..., 0)` uses this value).
-    /// @param duration Seconds; `0` clears; non-zero must be within the core’s min/max reward duration constants.
-    function setRewardDurationA(uint256 duration) external onlyOwner {
+    function setRewardDurationA(uint256 duration) external onlyGovernanceTimelock {
         core.setRewardDurationA(duration);
     }
 
-    /// @notice Sets Pool B default notify emission length on the core (`notifyRewardAmountB(..., 0)`).
-    /// @param duration Same semantics as `setRewardDurationA`.
-    function setRewardDurationB(uint256 duration) external onlyOwner {
+    function setRewardDurationB(uint256 duration) external onlyGovernanceTimelock {
         core.setRewardDurationB(duration);
     }
 
-    /// @notice Sets minimum claimable reward threshold on the core.
-    /// @param amount New threshold.
-    function setMinClaimAmount(uint256 amount) external onlyOwner {
+    function setMinClaimAmount(uint256 amount) external onlyGovernanceTimelock {
         core.setMinClaimAmount(amount);
     }
 
-    /// @notice Updates Pool B fee parameters (basis points) on the core.
-    /// @param newWithdrawFeeBP Withdrawal fee (bp).
-    /// @param newMidTermFeeBP Mid-term fee (bp).
-    /// @param newPenaltyFeeBP Early-exit penalty (bp).
-    function setFees(uint256 newWithdrawFeeBP, uint256 newMidTermFeeBP, uint256 newPenaltyFeeBP) external onlyOwner {
+    function setFees(uint256 newWithdrawFeeBP, uint256 newMidTermFeeBP, uint256 newPenaltyFeeBP)
+        external
+        onlyGovernanceTimelock
+    {
         core.setFees(newWithdrawFeeBP, newMidTermFeeBP, newPenaltyFeeBP);
     }
 
-    /// @notice Updates Pool B lock duration on the core.
-    /// @param newLockDuration Lock duration in seconds.
-    function setLockDuration(uint256 newLockDuration) external onlyOwner {
+    function setLockDuration(uint256 newLockDuration) external onlyGovernanceTimelock {
         core.setLockDuration(newLockDuration);
     }
 
-    /// @notice Caller funds bad-debt repayment on the core.
-    /// @param amount Repayment amount.
-    function resolveBadDebt(uint256 amount) external onlyOwner {
+    function resolveBadDebt(uint256 amount) external onlyGovernanceTimelock {
         core.resolveBadDebt(amount);
     }
 
-    /// @notice Recovers ERC20 tokens on the core when accounting rules allow.
-    /// @param token Token to sweep.
-    /// @param to Recipient.
-    /// @param amount Amount to recover.
-    function recoverToken(address token, address to, uint256 amount) external onlyOwner {
+    function recoverToken(address token, address to, uint256 amount) external onlyGovernanceTimelock {
         core.recoverToken(token, to, amount);
     }
 
-    /// @notice Activates shutdown on the core (requires emergency mode per core rules).
-    function activateShutdown() external onlyOwner {
+    function activateShutdown() external onlyGovernanceTimelock {
         core.activateShutdown();
     }
 
-    /// @notice Finalizes protocol shutdown on the core.
-    function forceShutdownFinalize() external onlyOwner {
+    function forceShutdownFinalize() external onlyGovernanceTimelock {
         core.forceShutdownFinalize();
     }
 
-    /// @notice Points the core `userModule` delegate target to `newModule` (super / timelocked governance).
-    function setUserModule(address newModule) external onlyOwner {
+    function setUserModule(address newModule) external onlySuperTimelock {
         core.setUserModule(newModule);
     }
 
-    /// @notice Points the core `adminModule` delegate target to `newModule` (super / timelocked governance).
-    function setAdminModule(address newModule) external onlyOwner {
+    function setAdminModule(address newModule) external onlySuperTimelock {
         core.setAdminModule(newModule);
     }
 
-    /// @notice Grants or revokes `ADMIN_ROLE` on the core.
-    /// @param newAdmin Admin address.
-    /// @param enabled True to grant, false to revoke.
-    function setAdmin(address newAdmin, bool enabled) external onlyOwner {
+    function setAdmin(address newAdmin, bool enabled) external onlySuperTimelock {
         core.setAdmin(newAdmin, enabled);
     }
 
-    /// @notice Grants or revokes `OPERATOR_ROLE` on the core.
-    /// @param newOperator Operator address.
-    /// @param enabled True to grant, false to revoke.
-    function setOperator(address newOperator, bool enabled) external onlyOwner {
+    function setOperator(address newOperator, bool enabled) external onlySuperTimelock {
         core.setOperator(newOperator, enabled);
     }
 
-    /// @notice Unpauses the core after cooldown (extends reward schedules per core logic).
-    function unpause() external onlyOwner {
+    function unpause() external onlyGovernanceTimelock {
         core.unpause();
     }
 }

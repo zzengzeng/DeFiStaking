@@ -26,12 +26,16 @@ function resolveUiState(
   const delta = executeAfter - now;
 
   if (op.state === "EXECUTED") {
-    const at = op.executedAt ? new Date(Number(op.executedAt) * 1000).toLocaleString() : new Date(executeAtMs).toLocaleString();
-    return { state: "EXECUTED", remainingSec: 0, executeAtMs, settledAtLabel: at };
+    const settledAtLabel = op.executedAt
+      ? new Date(Number(op.executedAt) * 1000).toLocaleString()
+      : new Date(executeAtMs).toLocaleString();
+    return { state: "EXECUTED", remainingSec: 0, executeAtMs, settledAtLabel };
   }
   if (op.state === "CANCELLED") {
-    const at = op.cancelledAt ? new Date(Number(op.cancelledAt) * 1000).toLocaleString() : new Date(executeAtMs).toLocaleString();
-    return { state: "CANCELLED", remainingSec: 0, executeAtMs, settledAtLabel: at };
+    const settledAtLabel = op.cancelledAt
+      ? new Date(Number(op.cancelledAt) * 1000).toLocaleString()
+      : new Date(executeAtMs).toLocaleString();
+    return { state: "CANCELLED", remainingSec: 0, executeAtMs, settledAtLabel };
   }
   if (op.state === "READY" || (op.state === "CREATED" && delta <= 0)) {
     return { state: "READY_TO_EXECUTE", remainingSec: 0, executeAtMs, settledAtLabel: "—" };

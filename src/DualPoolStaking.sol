@@ -130,7 +130,7 @@ contract DualPoolStaking is Ownable, AccessControl, ReentrancyGuard, Pausable {
     /// @param principal Token principal returned to the user (Pool A: TokenA wei; Pool B: TokenB wei).
     /// @param rewardsForfeited User accrued rewards cleared on that pool before rebalance to Pool B budget (`userInfo*.rewards` snapshot).
     event EmergencyWithdrawn(
-        address indexed user, uint256 principal, uint256 rewardsForfeited, Pool indexed pool, uint256 at
+        address indexed user, uint256 principal, uint256 rewardsForfeited, Pool indexed pool, uint256 withdrawnAt
     );
 
     event BudgetRebalanced(Pool indexed from, Pool indexed to, uint256 amount, uint256 timestamp);
@@ -142,22 +142,22 @@ contract DualPoolStaking is Ownable, AccessControl, ReentrancyGuard, Pausable {
     event MinClaimAmountUpdated(uint256 oldValue, uint256 newValue, uint256 timestamp);
     event LockDurationUpdated(uint256 oldDuration, uint256 newDuration, uint256 timestamp);
 
-    event FeesUpdated(uint256 penaltyBP, uint256 withdrawBP, uint256 midTermBP, uint256 at);
+    event FeesUpdated(uint256 penaltyBP, uint256 withdrawBP, uint256 midTermBP, uint256 timestamp);
 
     event FeeRecipientUpdated(address indexed oldRecipient, address indexed newRecipient, uint256 timestamp);
     event ForfeitedRecipientUpdated(address indexed oldRecipient, address indexed newRecipient, uint256 timestamp);
-    event ShutdownActivated(address indexed by, uint256 at);
-    event ProtocolShutdownComplete(uint256 at);
-    event EmergencyModeActivated(address indexed by, uint256 at);
+    event ShutdownActivated(address indexed by, uint256 timestamp);
+    event ProtocolShutdownComplete(uint256 timestamp);
+    event EmergencyModeActivated(address indexed by, uint256 timestamp);
     event BadDebtResolved(Pool indexed pool, uint256 amount, uint256 timestamp);
     event BadDebtResolvedTotal(uint256 totalRepaid, uint256 timestamp);
     event TokenRecovered(address indexed token, uint256 amount, address indexed to);
     event InvariantViolated(uint256 actual, uint256 required, uint256 timestamp);
-    event Paused(address indexed by, uint256 at);
-    event Unpaused(address indexed by, uint256 at);
+    event Paused(address indexed by, uint256 timestamp);
+    event Unpaused(address indexed by, uint256 timestamp);
     event RewardNotified(Pool indexed pool, uint256 amount, uint256 duration, uint256 rate);
-    event UserModuleUpdated(address indexed oldModule, address indexed newModule, uint256 at);
-    event AdminModuleUpdated(address indexed oldModule, address indexed newModule, uint256 at);
+    event UserModuleUpdated(address indexed oldModule, address indexed newModule, uint256 timestamp);
+    event AdminModuleUpdated(address indexed oldModule, address indexed newModule, uint256 timestamp);
 
     PoolInfo internal poolAState;
     PoolInfo internal poolBState;
@@ -263,9 +263,9 @@ contract DualPoolStaking is Ownable, AccessControl, ReentrancyGuard, Pausable {
         _delegateTo(userModule, abi.encodeWithSignature("executeClaimB(address)", msg.sender));
     }
 
-    /// @notice Cross-pool claim that shares cooldown with `claimA`/`claimB` and may partially pay if TokenB liquidity is short.
-    /// @dev Under normal operation (`!shutdown`, no bad debt), **each pool** with accrued rewards must meet `minClaimAmount`
-    ///      (same as single-pool claims). Shutdown or bad debt relaxes that minimum and enables partial settlement semantics.
+    /// @notice Cross-pool emergency claim: only during `shutdown` or when either pool has `badDebt`.
+    /// @dev Shares cooldown with `claimA`/`claimB`. May partially pay if TokenB liquidity is short. When `shutdown` or any
+    ///      `badDebt`, per-pool `minClaimAmount` is relaxed (see `ForceClaimAllLib`). Healthy normal ops must use `claimA`/`claimB`.
     function forceClaimAll() external nonReentrant whenNotPaused {
         _delegateTo(userModule, abi.encodeWithSignature("executeForceClaimAll(address)", msg.sender));
     }

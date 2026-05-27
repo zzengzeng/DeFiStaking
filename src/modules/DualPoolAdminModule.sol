@@ -46,7 +46,7 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
     event RewardNotified(Pool indexed pool, uint256 amount, uint256 duration, uint256 rate);
     event BudgetRebalanced(Pool indexed from, Pool indexed to, uint256 amount, uint256 timestamp);
     event FeesClaimed(address indexed recipient, uint256 amount, uint256 timestamp);
-    event FeesUpdated(uint256 penaltyBP, uint256 withdrawBP, uint256 midTermBP, uint256 at);
+    event FeesUpdated(uint256 penaltyBP, uint256 withdrawBP, uint256 midTermBP, uint256 timestamp);
     event InvariantViolated(uint256 actual, uint256 required, uint256 timestamp);
     event InsufficientBudget(Pool pool, uint256 shortfall, uint256 timestamp);
     event DustAccumulated(Pool pool, uint256 dustAmount, uint256 timestamp);
@@ -60,11 +60,11 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
     event BadDebtResolved(Pool indexed pool, uint256 amount, uint256 timestamp);
     event BadDebtResolvedTotal(uint256 totalRepaid, uint256 timestamp);
     event TokenRecovered(address indexed token, uint256 amount, address indexed to);
-    event ShutdownActivated(address indexed by, uint256 at);
-    event ProtocolShutdownComplete(uint256 at);
-    event EmergencyModeActivated(address indexed by, uint256 at);
-    event Paused(address indexed by, uint256 at);
-    event Unpaused(address indexed by, uint256 at);
+    event ShutdownActivated(address indexed by, uint256 timestamp);
+    event ProtocolShutdownComplete(uint256 timestamp);
+    event EmergencyModeActivated(address indexed by, uint256 timestamp);
+    event Paused(address indexed by, uint256 timestamp);
+    event Unpaused(address indexed by, uint256 timestamp);
     event TimelockCancelled(bytes32 indexed opId, bytes32 indexed paramsHash, uint256 cancelledAt);
 
     /// @notice Funds Pool A rewards from `sender` and schedules emissions (`notifyRewardAmountA` delegate path).

@@ -20,16 +20,24 @@ export function mapContractError(error: unknown): string {
   if (text.includes("TimelockNotReady")) return "Timelock 未到可执行时间，请稍后再执行。";
   if (text.includes("TimelockParamChanged")) return "当前参数和已排队提案不一致，请先取消再重新排队。";
   if (text.includes("TimelockNotFound")) return "未找到可取消的 timelock 操作。";
+  if (text.includes("ForceClaimAllNotAvailable")) return "forceClaimAll 仅在关停或存在坏账时可用，请使用 claimA/claimB。";
   if (text.includes("EmergencyModeActive") || text.includes("EmergencyActive")) return "协议处于 Emergency 模式，当前操作不可用。";
-  if (text.includes("InvariantViolation") || text.includes("gas limit too high")) {
-    return "奖励池资金与负债校验未通过（InvariantViolation）。这通常不是 gas 问题：请先补充少量 TokenB 到质押合约，或先执行一次运营侧的奖励注资/坏账处理后再试。";
+  if (text.includes("InvariantViolation")) {
+    return "奖励池资金与负债校验未通过（InvariantViolation）。请先由运营向质押合约注入 TokenB（notifyReward），或向合约直接转入少量 TokenB 补足账面缺口后再试。";
   }
   if (text.includes("ExceedsTVLCap")) return "超过 TVL 上限，无法继续质押。";
   if (text.includes("UnlockTimePending")) return "锁仓尚未到期，当前不能正常退出。";
   if (text.includes("InsufficientPending")) return "系统待发奖励不足，请稍后重试。";
   if (text.includes("User rejected") || text.includes("rejected") || text.includes("denied transaction")) return "你已取消钱包签名。";
-  if (text.includes("insufficient allowance") || text.includes("ERC20: insufficient allowance")) return "代币授权不足，请先 Approve。";
-  if (text.includes("insufficient balance") || text.includes("ERC20: transfer amount exceeds balance")) return "钱包余额不足。";
+  if (text.includes("insufficient allowance") || text.includes("ERC20: insufficient allowance")) {
+    return "代币授权不足：请先对 ZZTKA（Pool A）或 ZZTKB（Pool B）执行 Approve，再质押。";
+  }
+  if (text.includes("insufficient balance") || text.includes("ERC20: transfer amount exceeds balance")) {
+    return "钱包 ZZTKA/ZZTKB 余额不足。新部署后请先在首页领取空投（mint），或向你的地址转入测试币。";
+  }
+  if (text.includes("gas limit too high")) {
+    return "交易模拟失败（合约会 revert）。新部署常见原因：① 未领 ZZTKA 空投 ② 未 Approve ③ 运营注资未做。协议当前未暂停；若刚改 .env.local 请重启 yarn dev。";
+  }
   if (text.includes("NoRewardsToClaim") || text.includes("no rewards to claim")) return "当前没有可领取的奖励。";
   if (text.includes("NoRewardsToCompound") || text.includes("nothing to compound")) return "当前没有可复投的奖励。";
   if (text.includes("ClaimCooldown") || text.includes("claim cooldown")) return "Claim 冷却尚未结束，请稍后再试。";

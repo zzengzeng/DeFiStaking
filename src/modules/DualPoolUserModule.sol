@@ -32,7 +32,7 @@ contract DualPoolUserModule is DualPoolStorageLayout {
         address indexed user, uint256 paidA, uint256 paidB, uint256 unpaidA, uint256 unpaidB, uint256 timestamp
     );
     event EmergencyWithdrawn(
-        address indexed user, uint256 principal, uint256 rewardsForfeited, Pool indexed pool, uint256 at
+        address indexed user, uint256 principal, uint256 rewardsForfeited, Pool indexed pool, uint256 withdrawnAt
     );
     event InvariantViolated(uint256 actual, uint256 required, uint256 timestamp);
     event InsufficientBudget(Pool pool, uint256 shortfall, uint256 timestamp);
@@ -183,9 +183,13 @@ contract DualPoolUserModule is DualPoolStorageLayout {
     }
 
     /// @notice Force-claim-all entrypoint for delegatecall from the core (partial pay when liquidity is insufficient).
-    /// @param user Claimant whose Pool A + B rewards are settled; per-pool `minClaimAmount` applies when not shutdown and no bad debt.
+    /// @param user Claimant whose Pool A + B rewards are settled; only during `shutdown` or when either pool has `badDebt`.
+    ///      Per-pool `minClaimAmount` applies when not shutdown and no bad debt (see `ForceClaimAllLib`).
     function executeForceClaimAll(address user) external {
         if (emergencyMode && !shutdown) revert EmergencyModeActive();
+        if (!shutdown && poolAState.badDebt == 0 && poolBState.badDebt == 0) {
+            revert StakingExecutionErrors.ForceClaimAllNotAvailable();
+        }
         // M-2: cooldown parity with standard claim — first use still allowed when `lastClaimTime[user] == 0`.
         if (lastClaimTime[user] != 0 && block.timestamp < lastClaimTime[user] + claimCooldown) {
             revert StakingExecutionErrors.UnlockTimePending(lastClaimTime[user] + claimCooldown, block.timestamp);

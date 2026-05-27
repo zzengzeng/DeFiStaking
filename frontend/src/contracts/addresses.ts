@@ -6,19 +6,21 @@ const ZERO = "0x0000000000000000000000000000000000000000" as const;
  */
 export const sepoliaDeploymentMeta = {
   chainId: 11155111 as const,
-  tokenA: "0x969b2e2A6b489C91960E01c35cB944356Cc7FDe3" as const,
-  tokenB: "0x4a69C18d7D332f5118A7a5CB298bcF2C82a9d806" as const,
-  staking: "0x486e3D190f1f57Ac480337dE4749dbf518039a9A" as const,
-  dualPoolUserModule: "0xAf5f612630a99faecf87aCa0506d3D27B34b62bB" as const,
-  dualPoolAdminModule: "0x068ca54f9B801d3eFbd6Ddd8BF58BC36F439e06a" as const,
-  dualPoolStakingAdmin: "0x71eE6fC78Ca9d4a40b042b68213BB2EeEcd27905" as const,
-  timelockController: "0xd7b0F6c18f3539534fED9E11cfFB6395cF55EF57" as const,
-  /** TimelockController.minDelay（秒），当前为 48h */
+  tokenA: "0xbd1ea15e7f4774df55b99d4bae731dd0b4e602de" as const,
+  tokenB: "0x65e926f4b96d9f29082fc6b3758132eccc73bbf1" as const,
+  /** DualPoolStaking（双 Timelock 治理 + forceClaimAll 门禁） */
+  staking: "0x1ae91a3afeb2459607b7a894e030b6500afee18b" as const,
+  dualPoolUserModule: "0xd8049e433ce352fd6db688d90e42456a2fa8b8aa" as const,
+  dualPoolAdminModule: "0x5ff0350520f6080e58b8e91f6628371a9c225297" as const,
+  dualPoolStakingAdmin: "0x9a70eb99269d641c17325cccaadd457f62ec6fda" as const,
+  /** 参数类治理 Timelock（48h） */
+  timelockController: "0xad8531f6ed44d63ed73bd83a6db4dce6d7e69b8a" as const,
+  /** 超级路径 Timelock（72h） */
+  timelockSuperController: "0x71789aef7967f43361cec3ec6af2a2e8af3f25bc" as const,
   timelockMinDelaySeconds: 172800 as const,
-  /** OPERATOR_ROLE 热钱包（0h 操作） */
+  timelockSuperMinDelaySeconds: 259200 as const,
   operatorRoleHolder: "0xF29929Bf612E7074CEbC4365bA3730cC0f25a65E" as const,
-  /** DualPoolStaking 合约创建所在区块，用于 timelock 事件索引起始高度 */
-  stakingDeployBlock: 10_872_740 as const,
+  stakingDeployBlock: 10_925_027 as const,
 } as const;
 
 /** 防止 .env 中误加引号/空格导致打包进客户端的地址字面量语法错误。 */
@@ -89,10 +91,17 @@ export const sepoliaAuxAddresses = {
 
 /** Timelock 原生治理：`TimelockController` → `DualPoolStakingAdmin` → `DualPoolStaking`。 */
 export const governanceAddresses = {
+  /** 参数 / 金库 / 协议状态（48h） */
   timelock: envOrSepoliaDefault(
     process.env.NEXT_PUBLIC_TIMELOCK_CONTROLLER_ADDRESS,
     "NEXT_PUBLIC_TIMELOCK_CONTROLLER_ADDRESS",
     sepoliaDeploymentMeta.timelockController,
+  ),
+  /** 模块与角色超级路径（72h） */
+  timelockSuper: envOrSepoliaDefault(
+    process.env.NEXT_PUBLIC_TIMELOCK_SUPER_CONTROLLER_ADDRESS,
+    "NEXT_PUBLIC_TIMELOCK_SUPER_CONTROLLER_ADDRESS",
+    sepoliaDeploymentMeta.timelockSuperController,
   ),
   adminFacade: envOrSepoliaDefault(
     process.env.NEXT_PUBLIC_STAKING_ADMIN_FACADE_ADDRESS,

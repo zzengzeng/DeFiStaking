@@ -5,30 +5,30 @@ import { useAccount, useReadContract } from "wagmi";
 import { timelockControllerAbi } from "@/contracts/abis/timelockController";
 import { governanceAddresses } from "@/contracts/addresses";
 
-const TL = governanceAddresses.timelock;
 const ABI = timelockControllerAbi;
 
 /** TimelockController 上的治理参与角色（与部署脚本授予的 proposer/executor/canceller 对齐）。 */
-export function useTimelockGovernanceRoles() {
+export function useTimelockGovernanceRoles(timelockAddress: `0x${string}` = governanceAddresses.timelock) {
   const { address } = useAccount();
+  const enabled = timelockAddress !== "0x0000000000000000000000000000000000000000";
 
   const proposerRole = useReadContract({
-    address: TL,
+    address: timelockAddress,
     abi: ABI,
     functionName: "PROPOSER_ROLE",
-    query: { staleTime: 120_000, refetchOnWindowFocus: false },
+    query: { enabled, staleTime: 120_000, refetchOnWindowFocus: false },
   });
   const executorRole = useReadContract({
-    address: TL,
+    address: timelockAddress,
     abi: ABI,
     functionName: "EXECUTOR_ROLE",
-    query: { staleTime: 120_000, refetchOnWindowFocus: false },
+    query: { enabled, staleTime: 120_000, refetchOnWindowFocus: false },
   });
   const cancellerRole = useReadContract({
-    address: TL,
+    address: timelockAddress,
     abi: ABI,
     functionName: "CANCELLER_ROLE",
-    query: { staleTime: 120_000, refetchOnWindowFocus: false },
+    query: { enabled, staleTime: 120_000, refetchOnWindowFocus: false },
   });
 
   const pr = proposerRole.data;
@@ -36,25 +36,25 @@ export function useTimelockGovernanceRoles() {
   const cr = cancellerRole.data;
 
   const isProposer = useReadContract({
-    address: TL,
+    address: timelockAddress,
     abi: ABI,
     functionName: "hasRole",
     args: pr && address ? [pr, address] : undefined,
-    query: { enabled: Boolean(pr && address), staleTime: 30_000, refetchOnWindowFocus: false },
+    query: { enabled: enabled && Boolean(pr && address), staleTime: 30_000, refetchOnWindowFocus: false },
   });
   const isExecutor = useReadContract({
-    address: TL,
+    address: timelockAddress,
     abi: ABI,
     functionName: "hasRole",
     args: er && address ? [er, address] : undefined,
-    query: { enabled: Boolean(er && address), staleTime: 30_000, refetchOnWindowFocus: false },
+    query: { enabled: enabled && Boolean(er && address), staleTime: 30_000, refetchOnWindowFocus: false },
   });
   const isCanceller = useReadContract({
-    address: TL,
+    address: timelockAddress,
     abi: ABI,
     functionName: "hasRole",
     args: cr && address ? [cr, address] : undefined,
-    query: { enabled: Boolean(cr && address), staleTime: 30_000, refetchOnWindowFocus: false },
+    query: { enabled: enabled && Boolean(cr && address), staleTime: 30_000, refetchOnWindowFocus: false },
   });
 
   const canPropose = Boolean(address && isProposer.data === true);

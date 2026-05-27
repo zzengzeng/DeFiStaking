@@ -24,13 +24,14 @@ export function usePoolB() {
   const { address } = useAccount();
   const { writeContractAsync } = useWriteContract();
   const staking = useStaking();
+  const stakingTokenB = staking.poolB?.stakingToken ?? contractAddresses.tokenB;
   const now = BigInt(Math.floor(Date.now() / 1000));
 
   const {
     data: tokenBBalance = 0n,
     refetch: refetchTokenBBalance,
   } = useReadContract({
-    address: contractAddresses.tokenB,
+    address: stakingTokenB,
     abi: erc20Abi,
     functionName: "balanceOf",
     args: address ? [address] : undefined,
@@ -82,7 +83,7 @@ export function usePoolB() {
   const writeApproveTokenB = (amountWei: bigint) =>
     writeContractAsync({
       abi: erc20Abi,
-      address: contractAddresses.tokenB,
+      address: stakingTokenB,
       functionName: "approve",
       args: [contractAddresses.staking, amountWei],
       account: address,
@@ -138,6 +139,7 @@ export function usePoolB() {
 
   return {
     ...staking,
+    stakingTokenB,
     canStake,
     canWithdraw,
     canClaim,

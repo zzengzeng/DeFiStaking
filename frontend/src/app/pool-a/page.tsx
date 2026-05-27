@@ -7,7 +7,9 @@ import { ConfirmActionModal } from "@/components/ConfirmActionModal";
 import { OperatorNotifyPanel } from "@/components/OperatorNotifyPanel";
 import { PoolHeaderStats } from "@/components/PoolHeaderStats";
 import { StakeCard } from "@/components/StakeCard";
+import { ForceClaimAllButton } from "@/components/ForceClaimAllButton";
 import { WithdrawPanel } from "@/components/WithdrawPanel";
+import { DeploymentMismatchAlert } from "@/components/DeploymentMismatchAlert";
 import { contractAddresses } from "@/contracts/addresses";
 import { usePoolA } from "@/hooks/usePoolA";
 import { usePoolAStakeSince } from "@/hooks/usePoolAStakeSince";
@@ -96,6 +98,8 @@ export default function PoolAPage() {
     <div className="min-w-0 space-y-4 sm:space-y-5">
       <h1 className="text-lg font-semibold text-zinc-100 sm:text-xl">Pool A</h1>
 
+      <DeploymentMismatchAlert poolAStakingToken={pool.poolA?.stakingToken} poolBStakingToken={pool.poolB?.stakingToken} />
+
       <PoolHeaderStats
         poolLabel="Pool A metrics"
         tokenSymbol="TokenA"
@@ -140,7 +144,7 @@ export default function PoolAPage() {
           rewardRateWei={rrA}
           dailyRewardSymbol="TokenB"
           tx={{
-            tokenAddress: contractAddresses.tokenA,
+            tokenAddress: pool.stakingTokenA,
             spenderAddress: contractAddresses.staking,
             approve: pool.writeApproveTokenA,
             stake: pool.writeStakeA,
@@ -204,6 +208,8 @@ export default function PoolAPage() {
           <p className="text-xs text-zinc-500">Emergency withdraw unavailable: {pool.emergencyDisabledReason}</p>
         ) : null}
       </div>
+
+      <ForceClaimAllButton onConfirmed={() => pool.refetchWalletAndPool()} />
     </div>
   );
 }

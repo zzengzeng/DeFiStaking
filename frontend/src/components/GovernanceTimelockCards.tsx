@@ -7,7 +7,7 @@ import { useReadContract } from "wagmi";
 import { GovernanceCard } from "@/components/GovernanceCard";
 import { dualPoolStakingAbi } from "@/contracts/abis/dualPoolStaking";
 import { dualPoolStakingAdminAbi } from "@/contracts/abis/dualPoolStakingAdmin";
-import { contractAddresses, sepoliaAuxAddresses } from "@/contracts/addresses";
+import { contractAddresses, governanceAddresses, sepoliaAuxAddresses } from "@/contracts/addresses";
 import type { useStaking } from "@/hooks/useStaking";
 import {
   BASIS_POINTS,
@@ -37,8 +37,10 @@ type TimelockRoles = {
 };
 
 type Props = {
-  minDelay: bigint;
-  tl: TimelockRoles;
+  minDelayGovernance: bigint;
+  minDelaySuper: bigint;
+  tlGovernance: TimelockRoles;
+  tlSuper: TimelockRoles;
   staking: StakingSnapshot;
   onAfterTx: () => Promise<void>;
 };
@@ -87,7 +89,7 @@ function FieldLabel({ children, hint }: { children: React.ReactNode; hint?: stri
 const inputClass = "w-full min-w-0 rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm";
 
 /** Timelock → DualPoolStakingAdmin 参数卡片（按 PRD / 门面函数分组）。 */
-export function GovernanceTimelockCards({ minDelay, tl, staking, onAfterTx }: Props) {
+export function GovernanceTimelockCards({ minDelayGovernance, minDelaySuper, tlGovernance, tlSuper, staking, onAfterTx }: Props) {
   const [activeTab, setActiveTab] = useState<GovTabId>("params");
   const [pagePort, setPagePort] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
@@ -264,7 +266,23 @@ export function GovernanceTimelockCards({ minDelay, tl, staking, onAfterTx }: Pr
 
   const roleError = !roleTargetValue ? "目标地址无效" : null;
 
-  const cardProps = { minDelay, canPropose: tl.canPropose, canExecute: tl.canExecute, canCancel: tl.canCancel, onAfterTx };
+  const govCardProps = {
+    timelockAddress: governanceAddresses.timelock,
+    minDelay: minDelayGovernance,
+    canPropose: tlGovernance.canPropose,
+    canExecute: tlGovernance.canExecute,
+    canCancel: tlGovernance.canCancel,
+    onAfterTx,
+  };
+  const superCardProps = {
+    timelockAddress: governanceAddresses.timelockSuper,
+    minDelay: minDelaySuper,
+    canPropose: tlSuper.canPropose,
+    canExecute: tlSuper.canExecute,
+    canCancel: tlSuper.canCancel,
+    onAfterTx,
+  };
+  const superTimelockUnset = governanceAddresses.timelockSuper === "0x0000000000000000000000000000000000000000";
 
   const totalCards = GOV_TABS.reduce((n, t) => n + t.count, 0);
 
@@ -289,7 +307,7 @@ export function GovernanceTimelockCards({ minDelay, tl, staking, onAfterTx }: Pr
 
       {activeTab === "params" ? (
         <>
-      <GovernanceCard title="setFees (bp)" hint="B 池提现 / 中期 / 提前退出费率" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "setFees", args: [withdrawBpValue ?? 0n, midtermBpValue ?? 0n, penaltyBpValue ?? 0n] })} {...cardProps} disabledReason={feesError} executeRows={() => [{ label: "withdraw", value: withdrawBp }, { label: "midterm", value: midtermBp }, { label: "penalty", value: penaltyBp }]}>
+      <GovernanceCard title="setFees (bp)" hint="B 池提现 / 中期 / 提前退出费率" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "setFees", args: [withdrawBpValue ?? 0n, midtermBpValue ?? 0n, penaltyBpValue ?? 0n] })} {...govCardProps} disabledReason={feesError} executeRows={() => [{ label: "withdraw", value: withdrawBp }, { label: "midterm", value: midtermBp }, { label: "penalty", value: penaltyBp }]}>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
           <FieldLabel hint="withdrawFeeBP">提现 bp<input value={withdrawBp} onChange={(e) => setWithdrawBp(e.target.value)} className={inputClass} /></FieldLabel>
           <FieldLabel hint="midTermFeeBP">中期 bp<input value={midtermBp} onChange={(e) => setMidtermBp(e.target.value)} className={inputClass} /></FieldLabel>
@@ -297,43 +315,43 @@ export function GovernanceTimelockCards({ minDelay, tl, staking, onAfterTx }: Pr
         </div>
       </GovernanceCard>
 
-      <GovernanceCard title="setLockDuration (seconds)" hint="B 池滚动锁仓时长" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "setLockDuration", args: [lockDurationValue ?? 0n] })} {...cardProps} disabledReason={lockError} executeRows={() => [{ label: "lockDuration", value: lockDuration }]}>
+      <GovernanceCard title="setLockDuration (seconds)" hint="B 池滚动锁仓时长" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "setLockDuration", args: [lockDurationValue ?? 0n] })} {...govCardProps} disabledReason={lockError} executeRows={() => [{ label: "lockDuration", value: lockDuration }]}>
         <FieldLabel hint="默认 604800 = 7 天">秒<input value={lockDuration} onChange={(e) => setLockDuration(e.target.value)} className={inputClass} /></FieldLabel>
       </GovernanceCard>
 
-      <GovernanceCard title="setMinClaimAmount" hint="领取 TokenB 奖励最低门槛；0=无门槛，上限 0.1 TokenB" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "setMinClaimAmount", args: [minClaimAmountValue ?? 0n] })} {...cardProps} disabledReason={minClaimError} executeRows={() => [{ label: "amount (TokenB)", value: minClaimAmount }]}>
+      <GovernanceCard title="setMinClaimAmount" hint="领取 TokenB 奖励最低门槛；0=无门槛，上限 0.1 TokenB" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "setMinClaimAmount", args: [minClaimAmountValue ?? 0n] })} {...govCardProps} disabledReason={minClaimError} executeRows={() => [{ label: "amount (TokenB)", value: minClaimAmount }]}>
         <FieldLabel hint="TokenB 数量（18 decimals）">数量<input value={minClaimAmount} onChange={(e) => setMinClaimAmount(e.target.value)} placeholder="0 或 0.001" className={inputClass} /></FieldLabel>
       </GovernanceCard>
 
-      <GovernanceCard title="setMinEarlyExitAmountB (wei)" hint="B 池提前退出最小本金（最小单位 wei，非 Token 小数）" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "setMinEarlyExitAmountB", args: [minEarlyExitAmountBValue ?? 0n] })} {...cardProps} disabledReason={minEarlyError} executeRows={() => [{ label: "wei", value: minEarlyExitAmountB }]}>
+      <GovernanceCard title="setMinEarlyExitAmountB (wei)" hint="B 池提前退出最小本金（最小单位 wei，非 Token 小数）" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "setMinEarlyExitAmountB", args: [minEarlyExitAmountBValue ?? 0n] })} {...govCardProps} disabledReason={minEarlyError} executeRows={() => [{ label: "wei", value: minEarlyExitAmountB }]}>
         <FieldLabel hint={`链上当前: ${onChainMinEarlyExit?.toString() ?? "—"}`}>wei<input value={minEarlyExitAmountB} onChange={(e) => setMinEarlyExitAmountB(e.target.value)} placeholder="10" className={inputClass} /></FieldLabel>
       </GovernanceCard>
 
-      <GovernanceCard title="setMaxTransferFeeBP" hint="FOT Token 转账损耗容差（bp）" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "setMaxTransferFeeBP", args: [maxTransferFeeBpValue ?? 0n] })} {...cardProps} disabledReason={maxTransferError} executeRows={() => [{ label: "bp", value: maxTransferFeeBp }]}>
+      <GovernanceCard title="setMaxTransferFeeBP" hint="FOT Token 转账损耗容差（bp）" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "setMaxTransferFeeBP", args: [maxTransferFeeBpValue ?? 0n] })} {...govCardProps} disabledReason={maxTransferError} executeRows={() => [{ label: "bp", value: maxTransferFeeBp }]}>
         <FieldLabel>bp<input value={maxTransferFeeBp} onChange={(e) => setMaxTransferFeeBp(e.target.value)} className={inputClass} /></FieldLabel>
       </GovernanceCard>
 
-      <GovernanceCard title="setRewardDurationA" hint="notifyRewardAmountA(amount,0) 使用的默认周期；0=清除" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "setRewardDurationA", args: [rewardDurationAValue ?? 0n] })} {...cardProps} disabledReason={rewardDurationError(rewardDurationAValue, "A")} executeRows={() => [{ label: "seconds", value: rewardDurationA }]}>
+      <GovernanceCard title="setRewardDurationA" hint="notifyRewardAmountA(amount,0) 使用的默认周期；0=清除" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "setRewardDurationA", args: [rewardDurationAValue ?? 0n] })} {...govCardProps} disabledReason={rewardDurationError(rewardDurationAValue, "A")} executeRows={() => [{ label: "seconds", value: rewardDurationA }]}>
         <FieldLabel hint="86400～31536000 或 0">秒<input value={rewardDurationA} onChange={(e) => setRewardDurationA(e.target.value)} className={inputClass} /></FieldLabel>
       </GovernanceCard>
 
-      <GovernanceCard title="setRewardDurationB" hint="notifyRewardAmountB(amount,0) 使用的默认周期；0=清除" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "setRewardDurationB", args: [rewardDurationBValue ?? 0n] })} {...cardProps} disabledReason={rewardDurationError(rewardDurationBValue, "B")} executeRows={() => [{ label: "seconds", value: rewardDurationB }]}>
+      <GovernanceCard title="setRewardDurationB" hint="notifyRewardAmountB(amount,0) 使用的默认周期；0=清除" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "setRewardDurationB", args: [rewardDurationBValue ?? 0n] })} {...govCardProps} disabledReason={rewardDurationError(rewardDurationBValue, "B")} executeRows={() => [{ label: "seconds", value: rewardDurationB }]}>
         <FieldLabel hint="86400～31536000 或 0">秒<input value={rewardDurationB} onChange={(e) => setRewardDurationB(e.target.value)} className={inputClass} /></FieldLabel>
       </GovernanceCard>
 
-      <GovernanceCard title="setMinStakeAmountA" hint="Pool A 最小质押（TokenA）；0=不限制" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "setMinStakeAmountA", args: [minStakeAValue ?? 0n] })} {...cardProps} disabledReason={tokenAmountOrZeroError(minStakeAValue, "A")} executeRows={() => [{ label: "TokenA", value: minStakeA }]}>
+      <GovernanceCard title="setMinStakeAmountA" hint="Pool A 最小质押（TokenA）；0=不限制" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "setMinStakeAmountA", args: [minStakeAValue ?? 0n] })} {...govCardProps} disabledReason={tokenAmountOrZeroError(minStakeAValue, "A")} executeRows={() => [{ label: "TokenA", value: minStakeA }]}>
         <FieldLabel>数量<input value={minStakeA} onChange={(e) => setMinStakeA(e.target.value)} className={inputClass} /></FieldLabel>
       </GovernanceCard>
 
-      <GovernanceCard title="setMinStakeAmountB" hint="Pool B 最小质押（TokenB）；0=不限制" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "setMinStakeAmountB", args: [minStakeBValue ?? 0n] })} {...cardProps} disabledReason={tokenAmountOrZeroError(minStakeBValue, "B")} executeRows={() => [{ label: "TokenB", value: minStakeB }]}>
+      <GovernanceCard title="setMinStakeAmountB" hint="Pool B 最小质押（TokenB）；0=不限制" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "setMinStakeAmountB", args: [minStakeBValue ?? 0n] })} {...govCardProps} disabledReason={tokenAmountOrZeroError(minStakeBValue, "B")} executeRows={() => [{ label: "TokenB", value: minStakeB }]}>
         <FieldLabel>数量<input value={minStakeB} onChange={(e) => setMinStakeB(e.target.value)} className={inputClass} /></FieldLabel>
       </GovernanceCard>
 
-      <GovernanceCard title="setTVLCapA" hint="Pool A TVL 上限（TokenA）；0=不 cap" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "setTVLCapA", args: [tvlCapAValue ?? 0n] })} {...cardProps} disabledReason={tokenAmountOrZeroError(tvlCapAValue, "cap A")} executeRows={() => [{ label: "TokenA cap", value: tvlCapA }]}>
+      <GovernanceCard title="setTVLCapA" hint="Pool A TVL 上限（TokenA）；0=不 cap" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "setTVLCapA", args: [tvlCapAValue ?? 0n] })} {...govCardProps} disabledReason={tokenAmountOrZeroError(tvlCapAValue, "cap A")} executeRows={() => [{ label: "TokenA cap", value: tvlCapA }]}>
         <FieldLabel>上限<input value={tvlCapA} onChange={(e) => setTvlCapA(e.target.value)} className={inputClass} /></FieldLabel>
       </GovernanceCard>
 
-      <GovernanceCard title="setTVLCapB" hint="Pool B TVL 上限（TokenB）；0=不 cap" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "setTVLCapB", args: [tvlCapBValue ?? 0n] })} {...cardProps} disabledReason={tokenAmountOrZeroError(tvlCapBValue, "cap B")} executeRows={() => [{ label: "TokenB cap", value: tvlCapB }]}>
+      <GovernanceCard title="setTVLCapB" hint="Pool B TVL 上限（TokenB）；0=不 cap" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "setTVLCapB", args: [tvlCapBValue ?? 0n] })} {...govCardProps} disabledReason={tokenAmountOrZeroError(tvlCapBValue, "cap B")} executeRows={() => [{ label: "TokenB cap", value: tvlCapB }]}>
         <FieldLabel>上限<input value={tvlCapB} onChange={(e) => setTvlCapB(e.target.value)} className={inputClass} /></FieldLabel>
       </GovernanceCard>
         </>
@@ -341,11 +359,11 @@ export function GovernanceTimelockCards({ minDelay, tl, staking, onAfterTx }: Pr
 
       {activeTab === "recipients" ? (
         <>
-      <GovernanceCard title="setFeeRecipient" hint="B 池提现手续费收款地址" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "setFeeRecipient", args: [feeRecipientValue ?? "0x0000000000000000000000000000000000000000"] })} {...cardProps} disabledReason={addressError(feeRecipientValue, "feeRecipient")} executeRows={() => [{ label: "address", value: feeRecipient }]}>
+      <GovernanceCard title="setFeeRecipient" hint="B 池提现手续费收款地址" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "setFeeRecipient", args: [feeRecipientValue ?? "0x0000000000000000000000000000000000000000"] })} {...govCardProps} disabledReason={addressError(feeRecipientValue, "feeRecipient")} executeRows={() => [{ label: "address", value: feeRecipient }]}>
         <FieldLabel hint={onChainFeeRecipient ? `链上: ${onChainFeeRecipient}` : undefined}>地址<input value={feeRecipient} onChange={(e) => setFeeRecipient(e.target.value)} className={inputClass} /></FieldLabel>
       </GovernanceCard>
 
-      <GovernanceCard title="setForfeitedRecipient" hint="罚没 / 紧急退出 forfeited 收款地址" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "setForfeitedRecipient", args: [forfeitedRecipientValue ?? "0x0000000000000000000000000000000000000000"] })} {...cardProps} disabledReason={addressError(forfeitedRecipientValue, "forfeitedRecipient")} executeRows={() => [{ label: "address", value: forfeitedRecipient }]}>
+      <GovernanceCard title="setForfeitedRecipient" hint="罚没 / 紧急退出 forfeited 收款地址" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "setForfeitedRecipient", args: [forfeitedRecipientValue ?? "0x0000000000000000000000000000000000000000"] })} {...govCardProps} disabledReason={addressError(forfeitedRecipientValue, "forfeitedRecipient")} executeRows={() => [{ label: "address", value: forfeitedRecipient }]}>
         <FieldLabel hint={onChainForfeitedRecipient ? `链上: ${onChainForfeitedRecipient}` : undefined}>地址<input value={forfeitedRecipient} onChange={(e) => setForfeitedRecipient(e.target.value)} className={inputClass} /></FieldLabel>
       </GovernanceCard>
         </>
@@ -353,7 +371,7 @@ export function GovernanceTimelockCards({ minDelay, tl, staking, onAfterTx }: Pr
 
       {activeTab === "treasury" ? (
         <>
-      <GovernanceCard title="rebalanceBudgets" hint="池间奖励预算调拨（TokenB）" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "rebalanceBudgets", args: [rebalanceFrom === "A" ? 0 : 1, rebalanceFrom === "A" ? 1 : 0, rebalanceAmountValue ?? 0n] })} {...cardProps} disabledReason={rebalanceError} executeRows={() => [{ label: "dir", value: rebalanceFrom === "A" ? "A→B" : "B→A" }, { label: "amount", value: rebalanceAmount }]}>
+      <GovernanceCard title="rebalanceBudgets" hint="池间奖励预算调拨（TokenB）" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "rebalanceBudgets", args: [rebalanceFrom === "A" ? 0 : 1, rebalanceFrom === "A" ? 1 : 0, rebalanceAmountValue ?? 0n] })} {...govCardProps} disabledReason={rebalanceError} executeRows={() => [{ label: "dir", value: rebalanceFrom === "A" ? "A→B" : "B→A" }, { label: "amount", value: rebalanceAmount }]}>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           <select value={rebalanceFrom} onChange={(e) => setRebalanceFrom(e.target.value as "A" | "B")} className={inputClass}>
             <option value="A">A → B</option>
@@ -363,15 +381,15 @@ export function GovernanceTimelockCards({ minDelay, tl, staking, onAfterTx }: Pr
         </div>
       </GovernanceCard>
 
-      <GovernanceCard title="claimFees" hint="将累计 B 池手续费扫至 feeRecipient" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "claimFees", args: [] })} {...cardProps} executeRows={() => [{ label: "unclaimedFeesB", value: staking.unclaimedFeesB?.toString() ?? "—" }]}>
+      <GovernanceCard title="claimFees" hint="将累计 B 池手续费扫至 feeRecipient" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "claimFees", args: [] })} {...govCardProps} executeRows={() => [{ label: "unclaimedFeesB", value: staking.unclaimedFeesB?.toString() ?? "—" }]}>
         <p className="text-[11px] text-zinc-500">无参数。执行前请确认链上 unclaimedFeesB &gt; 0。</p>
       </GovernanceCard>
 
-      <GovernanceCard title="resolveBadDebt" hint="治理方偿还坏账（需事先 approve TokenB 给核心）" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "resolveBadDebt", args: [badDebtRepayValue ?? 0n] })} {...cardProps} disabledReason={badDebtError} executeRows={() => [{ label: "TokenB", value: badDebtRepay }, { label: "globalBadDebt", value: staking.globalBadDebt?.toString() ?? "—" }]}>
+      <GovernanceCard title="resolveBadDebt" hint="治理方偿还坏账（需事先 approve TokenB 给核心）" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "resolveBadDebt", args: [badDebtRepayValue ?? 0n] })} {...govCardProps} disabledReason={badDebtError} executeRows={() => [{ label: "TokenB", value: badDebtRepay }, { label: "globalBadDebt", value: staking.globalBadDebt?.toString() ?? "—" }]}>
         <FieldLabel>还款 TokenB 数量<input value={badDebtRepay} onChange={(e) => setBadDebtRepay(e.target.value)} className={inputClass} /></FieldLabel>
       </GovernanceCard>
 
-      <GovernanceCard title="recoverToken" hint="在会计规则允许时回收误转代币（慎用）" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "recoverToken", args: [recoverTokenAddress ?? "0x0000000000000000000000000000000000000000", recoverToValue ?? "0x0000000000000000000000000000000000000000", recoverAmountValue ?? 0n] })} {...cardProps} disabledReason={recoverError} executeRows={() => [{ label: "token", value: recoverTokenAddress ?? "—" }, { label: "to", value: recoverTo }, { label: "amount", value: recoverAmount }]}>
+      <GovernanceCard title="recoverToken" hint="在会计规则允许时回收误转代币（慎用）" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "recoverToken", args: [recoverTokenAddress ?? "0x0000000000000000000000000000000000000000", recoverToValue ?? "0x0000000000000000000000000000000000000000", recoverAmountValue ?? 0n] })} {...govCardProps} disabledReason={recoverError} executeRows={() => [{ label: "token", value: recoverTokenAddress ?? "—" }, { label: "to", value: recoverTo }, { label: "amount", value: recoverAmount }]}>
         <div className="space-y-2">
           <select value={recoverTokenKind} onChange={(e) => setRecoverTokenKind(e.target.value as "A" | "B" | "custom")} className={inputClass}>
             <option value="A">TokenA</option>
@@ -388,15 +406,15 @@ export function GovernanceTimelockCards({ minDelay, tl, staking, onAfterTx }: Pr
 
       {activeTab === "protocol" ? (
         <>
-      <GovernanceCard title="unpause" hint="pause 之后解冻；须满足核心 unpause 条件" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "unpause", args: [] })} {...cardProps} executeRows={() => [{ label: "status", value: staking.status }]}>
+      <GovernanceCard title="unpause" hint="pause 之后解冻；须满足核心 unpause 条件" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "unpause", args: [] })} {...govCardProps} executeRows={() => [{ label: "status", value: staking.status }]}>
         <p className="text-[11px] text-zinc-500">无参数。当前状态: {staking.status}</p>
       </GovernanceCard>
 
-      <GovernanceCard title="activateShutdown" hint="进入关停流程（通常需已 enableEmergencyMode）" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "activateShutdown", args: [] })} {...cardProps} executeRows={() => [{ label: "warning", value: "不可逆路径，仅演练/生产预案" }]}>
+      <GovernanceCard title="activateShutdown" hint="进入关停流程（通常需已 enableEmergencyMode）" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "activateShutdown", args: [] })} {...govCardProps} executeRows={() => [{ label: "warning", value: "不可逆路径，仅演练/生产预案" }]}>
         <p className="text-[11px] text-amber-200/90">高风险：请确认 PRD 前置条件后再 schedule。</p>
       </GovernanceCard>
 
-      <GovernanceCard title="forceShutdownFinalize" hint="关停终局清算" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "forceShutdownFinalize", args: [] })} {...cardProps} executeRows={() => [{ label: "warning", value: "终局操作" }]}>
+      <GovernanceCard title="forceShutdownFinalize" hint="关停终局清算" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "forceShutdownFinalize", args: [] })} {...govCardProps} executeRows={() => [{ label: "warning", value: "终局操作" }]}>
         <p className="text-[11px] text-amber-200/90">高风险：schedule 前请再次核对链上 shutdown 状态。</p>
       </GovernanceCard>
         </>
@@ -404,25 +422,28 @@ export function GovernanceTimelockCards({ minDelay, tl, staking, onAfterTx }: Pr
 
       {activeTab === "super" ? (
         <>
-      <p className="col-span-full text-[11px] text-amber-200/90">模块与角色变更影响全局权限，建议生产环境单独拉长 Timelock 流程并多签复核。</p>
-      <GovernanceCard title="setUserModule" hint="更换用户模块 delegate 地址" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "setUserModule", args: [userModuleValue ?? "0x0000000000000000000000000000000000000000"] })} {...cardProps} disabledReason={addressError(userModuleValue, "module")} executeRows={() => [{ label: "newModule", value: userModuleAddr }]}>
+      <p className="col-span-full text-[11px] text-amber-200/90">
+        超级路径须经 72h Timelock（`timelockSuper`）schedule/execute。模块与角色变更影响全局权限，请多签复核。
+        {superTimelockUnset ? " 当前未配置 NEXT_PUBLIC_TIMELOCK_SUPER_CONTROLLER_ADDRESS。" : null}
+      </p>
+      <GovernanceCard title="setUserModule" hint="更换用户模块 delegate 地址（72h）" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "setUserModule", args: [userModuleValue ?? "0x0000000000000000000000000000000000000000"] })} {...superCardProps} disabledReason={superTimelockUnset ? "未配置 72h Timelock 地址" : addressError(userModuleValue, "module")} executeRows={() => [{ label: "newModule", value: userModuleAddr }]}>
         <FieldLabel>新模块地址<input value={userModuleAddr} onChange={(e) => setUserModuleAddr(e.target.value)} className={inputClass} /></FieldLabel>
       </GovernanceCard>
 
-      <GovernanceCard title="setAdminModule" hint="更换管理模块 delegate 地址" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "setAdminModule", args: [adminModuleValue ?? "0x0000000000000000000000000000000000000000"] })} {...cardProps} disabledReason={addressError(adminModuleValue, "module")} executeRows={() => [{ label: "newModule", value: adminModuleAddr }]}>
+      <GovernanceCard title="setAdminModule" hint="更换管理模块 delegate 地址（72h）" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "setAdminModule", args: [adminModuleValue ?? "0x0000000000000000000000000000000000000000"] })} {...superCardProps} disabledReason={superTimelockUnset ? "未配置 72h Timelock 地址" : addressError(adminModuleValue, "module")} executeRows={() => [{ label: "newModule", value: adminModuleAddr }]}>
         <FieldLabel>新模块地址<input value={adminModuleAddr} onChange={(e) => setAdminModuleAddr(e.target.value)} className={inputClass} /></FieldLabel>
       </GovernanceCard>
 
       <GovernanceCard
         title={roleKind === "admin" ? "setAdmin" : "setOperator"}
-        hint={roleKind === "admin" ? "授予/撤销核心 ADMIN_ROLE" : "授予/撤销核心 OPERATOR_ROLE（热路径）"}
+        hint={roleKind === "admin" ? "授予/撤销核心 ADMIN_ROLE（72h）" : "授予/撤销核心 OPERATOR_ROLE（72h）"}
         payload={encodeFunctionData({
           abi: dualPoolStakingAdminAbi,
           functionName: roleKind === "admin" ? "setAdmin" : "setOperator",
           args: [roleTargetValue ?? "0x0000000000000000000000000000000000000000", roleEnabled],
         })}
-        {...cardProps}
-        disabledReason={roleError}
+        {...superCardProps}
+        disabledReason={superTimelockUnset ? "未配置 72h Timelock 地址" : roleError}
         executeRows={() => [{ label: "target", value: roleTarget }, { label: "enabled", value: roleEnabled ? "true" : "false" }]}
       >
         <div className="space-y-2">

@@ -13,57 +13,96 @@ import {DualPoolUserModule} from "../src/modules/DualPoolUserModule.sol";
 import {DualPoolAdminModule} from "../src/modules/DualPoolAdminModule.sol";
 
 /// @title DeployDualPoolStaking
-/// @notice Foundry broadcast script: deploys mock ERC20s, `DualPoolStaking`, delegate modules, admin facade, and a `TimelockController` wired as `DualPoolStakingAdmin` owner.
-/// @dev For production, replace `proposers` / `executors` with multisigs; Timelock `admin` is `address(0)` (self-administered timelock). `OPERATOR_ROLE` remains on the broadcaster from the core constructor for hot-path ops.
-/// @custom:security After wiring, `ADMIN_ROLE` and `DEFAULT_ADMIN_ROLE` on the core are held by `DualPoolStakingAdmin` (Timelock-owned); both are revoked from `deployer` so module swaps and role changes require Timelock delay. `OPERATOR_ROLE` remains on `deployer` until explicitly revoked elsewhere.
+/// @notice Foundry broadcast script: deploys or reuses ERC20s, `DualPoolStaking`, delegate modules, admin facade, and dual `TimelockController`s (48h governance + 72h super).
+/// @dev Set env `TOKEN_A` / `TOKEN_B` to reuse existing Sepolia mocks; omit both to deploy fresh `MockERC20`s.
+///      For production, replace `proposers` / `executors` with multisigs. `OPERATOR_ROLE` remains on the broadcaster from the core constructor for hot-path ops.
+/// @custom:security After wiring, `ADMIN_ROLE` and `DEFAULT_ADMIN_ROLE` on the core are held by `DualPoolStakingAdmin`; both are revoked from `deployer`. Module swaps and role changes require the 72h timelock; parameter changes use the 48h timelock.
 contract DeployDualPoolStaking is Script {
-    /// @notice Executes the full deployment graph inside `vm.startBroadcast()` / `vm.stopBroadcast()`.
-    /// @dev Deployment order: tokens → core → modules → wire `setUserModule` / `setAdminModule` → admin facade → timelock → transfer admin facade ownership to timelock → role handover on core.
-    function run() external {
-        vm.startBroadcast();
+    uint256 internal constant GOVERNANCE_MIN_DELAY = 48 hours;
+    uint256 internal constant SUPER_MIN_DELAY = 72 hours;
 
-        address deployer = msg.sender;
+    struct Deployment {
+        address tokenA;
+        address tokenB;
+        DualPoolStaking core;
+        DualPoolUserModule userModule;
+        DualPoolAdminModule adminModule;
+        DualPoolStakingAdmin admin;
+        TimelockController timelockGovernance;
+        TimelockController timelockSuper;
+    }
 
-        MockERC20 tokenA = new MockERC20("ZTokenA", "ZTKA");
-        MockERC20 tokenB = new MockERC20("ZTokenB", "ZTKB");
+    /// @notice Resolves pool token address from env, or deploys a new `MockERC20`.
+    /// @dev Reusing `TOKEN_A` / `TOKEN_B` keeps the **on-chain** `name` / `symbol` from the first deploy (e.g. ZTKA).
+    ///      For ZZTKA / ZZTKB, omit both env vars (or `make deploy-fresh-tokens`) so new mocks are created.
+    function _resolveToken(string memory envKey, string memory name, string memory symbol) internal returns (address) {
+        try vm.envAddress(envKey) returns (address existing) {
+            require(existing != address(0), "token env is zero");
+            MockERC20 token = MockERC20(existing);
+            console.log(string.concat(envKey, " reused:"), existing);
+            console.log(string.concat(envKey, " on-chain name:"), token.name());
+            console.log(string.concat(envKey, " on-chain symbol:"), token.symbol());
+            if (keccak256(bytes(token.symbol())) != keccak256(bytes(symbol))) {
+                console.log(string.concat("WARN: ", envKey, " symbol is not "), symbol);
+                console.log("      unset TOKEN_A/TOKEN_B in .env to deploy fresh mocks with ZZTKA/ZZTKB");
+            }
+            return existing;
+        } catch {
+            address token = address(new MockERC20(name, symbol));
+            console.log(string.concat(envKey, " deployed:"), token);
+            console.log(string.concat(envKey, " name:"), name);
+            console.log(string.concat(envKey, " symbol:"), symbol);
+            return token;
+        }
+    }
 
-        // TokenB max supply cap for reward-rate ceiling (PRD); align with your tokenomics / mint cap.
-        uint256 maxTotalSupplyBForRewardRateCap = 10_000_000 * 1e18;
-        DualPoolStaking dualPoolStaking =
-            new DualPoolStaking(address(tokenA), address(tokenB), maxTotalSupplyBForRewardRateCap);
-        DualPoolUserModule userModule = new DualPoolUserModule();
-        DualPoolAdminModule adminModule = new DualPoolAdminModule();
-        DualPoolStakingAdmin admin = new DualPoolStakingAdmin(address(dualPoolStaking));
-        dualPoolStaking.setUserModule(address(userModule));
-        dualPoolStaking.setAdminModule(address(adminModule));
+    function _wireAdminRoles(DualPoolStaking core, address adminFacade, address deployer) internal {
+        core.grantRole(core.ADMIN_ROLE(), adminFacade);
+        core.revokeRole(core.ADMIN_ROLE(), deployer);
+        core.grantRole(core.DEFAULT_ADMIN_ROLE(), adminFacade);
+        core.revokeRole(core.DEFAULT_ADMIN_ROLE(), deployer);
+    }
 
-        // Governance: TimelockController is the delay layer; admin facade holds ADMIN on core, owner = timelock.
+    function _deployAll(address deployer) internal returns (Deployment memory d) {
+        d.tokenA = _resolveToken("TOKEN_A", "ZZTokenA", "ZZTKA");
+        d.tokenB = _resolveToken("TOKEN_B", "ZZTokenB", "ZZTKB");
+        require(d.tokenA != d.tokenB, "TOKEN_A == TOKEN_B");
+
+        d.core = new DualPoolStaking(d.tokenA, d.tokenB, 10_000_000 * 1e18);
+        d.userModule = new DualPoolUserModule();
+        d.adminModule = new DualPoolAdminModule();
+
         address[] memory proposers = new address[](1);
         proposers[0] = deployer;
         address[] memory executors = new address[](1);
         executors[0] = deployer;
-        uint256 minDelay = 48 hours;
-        TimelockController timelock = new TimelockController(minDelay, proposers, executors, address(0));
 
-        dualPoolStaking.grantRole(dualPoolStaking.ADMIN_ROLE(), address(admin));
-        dualPoolStaking.revokeRole(dualPoolStaking.ADMIN_ROLE(), deployer);
-        // Super paths (`setUserModule` / `setAdminModule` / `setAdmin` / `setOperator`) are `onlyRole(DEFAULT_ADMIN_ROLE)` on core; gate them via the facade + Timelock like other governance calls.
-        dualPoolStaking.grantRole(dualPoolStaking.DEFAULT_ADMIN_ROLE(), address(admin));
-        dualPoolStaking.revokeRole(dualPoolStaking.DEFAULT_ADMIN_ROLE(), deployer);
-        // `OPERATOR_ROLE` remains on `deployer` from the core constructor (pause / notify / emergency).
+        d.timelockGovernance = new TimelockController(GOVERNANCE_MIN_DELAY, proposers, executors, address(0));
+        d.timelockSuper = new TimelockController(SUPER_MIN_DELAY, proposers, executors, address(0));
+        d.admin = new DualPoolStakingAdmin(address(d.core), address(d.timelockGovernance), address(d.timelockSuper));
 
-        admin.transferOwnership(address(timelock));
+        d.core.setUserModule(address(d.userModule));
+        d.core.setAdminModule(address(d.adminModule));
+        _wireAdminRoles(d.core, address(d.admin), deployer);
+    }
 
-        console.log("TokenA deployed at:", address(tokenA));
-        console.log("TokenB deployed at:", address(tokenB));
-        console.log("DualPoolStaking deployed at:", address(dualPoolStaking));
-        console.log("DualPoolUserModule deployed at:", address(userModule));
-        console.log("DualPoolAdminModule deployed at:", address(adminModule));
-        console.log("DualPoolStakingAdmin deployed at:", address(admin));
-        console.log("TimelockController deployed at:", address(timelock));
-        console.log("Timelock minDelay (seconds):", minDelay);
+    function _logDeployment(Deployment memory d, address deployer) internal pure {
+        console.log("DualPoolStaking deployed at:", address(d.core));
+        console.log("DualPoolUserModule deployed at:", address(d.userModule));
+        console.log("DualPoolAdminModule deployed at:", address(d.adminModule));
+        console.log("DualPoolStakingAdmin deployed at:", address(d.admin));
+        console.log("TimelockController (governance 48h) at:", address(d.timelockGovernance));
+        console.log("TimelockController (super 72h) at:", address(d.timelockSuper));
+        console.log("Governance minDelay (seconds):", GOVERNANCE_MIN_DELAY);
+        console.log("Super minDelay (seconds):", SUPER_MIN_DELAY);
         console.log("OPERATOR_ROLE holder (hot ops, 0h):", deployer);
+    }
 
+    /// @notice Executes the full deployment graph inside `vm.startBroadcast()` / `vm.stopBroadcast()`.
+    function run() external {
+        vm.startBroadcast();
+        Deployment memory d = _deployAll(msg.sender);
+        _logDeployment(d, msg.sender);
         vm.stopBroadcast();
     }
 }

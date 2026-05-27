@@ -7,8 +7,10 @@ import { ConfirmActionModal } from "@/components/ConfirmActionModal";
 import { LockProgress } from "@/components/LockProgress";
 import { OperatorNotifyPanel } from "@/components/OperatorNotifyPanel";
 import { PoolHeaderStats } from "@/components/PoolHeaderStats";
+import { ForceClaimAllButton } from "@/components/ForceClaimAllButton";
 import { StakeCard } from "@/components/StakeCard";
 import { WithdrawPanel } from "@/components/WithdrawPanel";
+import { DeploymentMismatchAlert } from "@/components/DeploymentMismatchAlert";
 import { contractAddresses } from "@/contracts/addresses";
 import { usePoolB } from "@/hooks/usePoolB";
 import { useWriteWithStatus } from "@/hooks/useWriteWithStatus";
@@ -99,6 +101,8 @@ export default function PoolBPage() {
     <div className="min-w-0 space-y-4 sm:space-y-5">
       <h1 className="text-lg font-semibold text-zinc-100 sm:text-xl">Pool B</h1>
 
+      <DeploymentMismatchAlert poolAStakingToken={pool.poolA?.stakingToken} poolBStakingToken={pool.poolB?.stakingToken} />
+
       <PoolHeaderStats
         poolLabel="Pool B metrics"
         tokenSymbol="TokenB"
@@ -157,7 +161,7 @@ export default function PoolBPage() {
           rewardRateWei={rrB}
           dailyRewardSymbol="TokenB"
           tx={{
-            tokenAddress: contractAddresses.tokenB,
+            tokenAddress: pool.stakingTokenB,
             spenderAddress: contractAddresses.staking,
             approve: pool.writeApproveTokenB,
             stake: pool.writeStakeB,
@@ -240,6 +244,8 @@ export default function PoolBPage() {
           </button>
         </div>
       </div>
+
+      <ForceClaimAllButton onConfirmed={() => pool.refetchWalletAndPool()} />
     </div>
   );
 }

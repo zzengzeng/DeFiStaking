@@ -81,4 +81,6 @@ abstract contract StakingExecutionErrors {
     error StillStaked();
     /// @notice `bookedUserRewards*` aggregate exceeded `totalPending` for a pool (accounting invariant broken).
     error BookedRewardsExceedPending();
+    /// @notice `forceClaimAll` is only available during shutdown or when either pool carries `badDebt`.
+    error ForceClaimAllNotAvailable();
 }

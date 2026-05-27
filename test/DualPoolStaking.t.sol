@@ -43,7 +43,7 @@ contract DualPoolStakingTest is Test {
         // Align with `script/DualPoolStaking.s.sol`: wire delegate modules + admin facade (no Timelock in tests).
         DualPoolUserModule userModule = new DualPoolUserModule();
         DualPoolAdminModule adminModule = new DualPoolAdminModule();
-        stakingAdmin = new DualPoolStakingAdmin(address(dualPoolStaking));
+        stakingAdmin = new DualPoolStakingAdmin(address(dualPoolStaking), address(this), address(this));
         dualPoolStaking.setUserModule(address(userModule));
         dualPoolStaking.setAdminModule(address(adminModule));
         dualPoolStaking.grantRole(dualPoolStaking.ADMIN_ROLE(), address(stakingAdmin));
@@ -68,6 +68,13 @@ contract DualPoolStakingTest is Test {
         dualPoolStaking.notifyRewardAmountB(rewardAmount, duration);
         vm.warp(block.timestamp + duration + 1);
         dualPoolStaking.notifyRewardAmountB(rewardAmount, duration);
+    }
+
+    /// @dev Enables `forceClaimAll` and shutdown withdrawals in tests. Clears any active `vm.prank` (must re-prank user afterward).
+    function _activateShutdownForTests() internal {
+        vm.stopPrank();
+        dualPoolStaking.enableEmergencyMode();
+        stakingAdmin.activateShutdown();
     }
 
     /// @dev Same TokenB backing check as `DualPoolUserModule._assertInvariantB` (`DUST_TOLERANCE == 10`).
@@ -2301,8 +2308,10 @@ contract DualPoolStakingTest is Test {
         dualPoolStaking.stakeA(DEFAULT_STAKE);
 
         vm.warp(block.timestamp + duration);
+        vm.stopPrank();
+        _activateShutdownForTests();
+        vm.startPrank(user);
 
-        // forceClaimAll should work
         uint256 balBefore = rewardToken.balanceOf(user);
         dualPoolStaking.forceClaimAll();
         uint256 balAfter = rewardToken.balanceOf(user);
@@ -2313,8 +2322,24 @@ contract DualPoolStakingTest is Test {
     }
 
     function testForceClaimAllNoRewardsReverts() public {
+        _activateShutdownForTests();
         vm.startPrank(user);
         vm.expectRevert(StakingExecutionErrors.NoRewardsToClaim.selector);
+        dualPoolStaking.forceClaimAll();
+        vm.stopPrank();
+    }
+
+    function testForceClaimAllRevertsInHealthyOps() public {
+        uint256 rewardAmount = SAFE_REWARD_AMOUNT;
+        uint256 duration = SAFE_DURATION;
+        rewardToken.approve(address(dualPoolStaking), type(uint256).max);
+        dualPoolStaking.notifyRewardAmountA(rewardAmount, duration);
+
+        vm.startPrank(user);
+        stakingToken.approve(address(dualPoolStaking), DEFAULT_STAKE);
+        dualPoolStaking.stakeA(DEFAULT_STAKE);
+        vm.warp(block.timestamp + duration);
+        vm.expectRevert(StakingExecutionErrors.ForceClaimAllNotAvailable.selector);
         dualPoolStaking.forceClaimAll();
         vm.stopPrank();
     }
@@ -2330,8 +2355,10 @@ contract DualPoolStakingTest is Test {
         dualPoolStaking.stakeA(DEFAULT_STAKE);
 
         vm.warp(block.timestamp + duration);
+        vm.stopPrank();
+        _activateShutdownForTests();
+        vm.startPrank(user);
 
-        // First forceClaimAll succeeds
         dualPoolStaking.forceClaimAll();
 
         // Second within cooldown reverts
@@ -2342,7 +2369,7 @@ contract DualPoolStakingTest is Test {
         vm.stopPrank();
     }
 
-    /// @notice Cannot use `forceClaimAll` in normal ops to aggregate two sub-`minClaimAmount` pool balances.
+    /// @notice Healthy ops cannot call `forceClaimAll` even when per-pool rewards are below `minClaimAmount`.
     function testForceClaimAllRevertsWhenPerPoolBelowMinButSumAbove() public {
         stakingAdmin.setMinClaimAmount(1e17);
         uint256 amt = 2e17;
@@ -2359,9 +2386,48 @@ contract DualPoolStakingTest is Test {
 
         vm.warp(block.timestamp + 10 hours);
 
-        vm.expectRevert(); // BelowMinClaim on first pool below threshold (sum can still exceed min)
+        vm.expectRevert(StakingExecutionErrors.ForceClaimAllNotAvailable.selector);
         dualPoolStaking.forceClaimAll();
 
+        vm.stopPrank();
+        stakingAdmin.setMinClaimAmount(0);
+    }
+
+    /// @notice During shutdown, sub-`minClaimAmount` per-pool balances can still be cleared via `forceClaimAll`.
+    function testForceClaimAllAllowsSubMinPerPoolDuringShutdown() public {
+        uint256 minClaim = 1e17;
+        stakingAdmin.setMinClaimAmount(minClaim);
+        uint256 amt = 2e17;
+        uint256 duration = 1 days;
+        rewardToken.approve(address(dualPoolStaking), type(uint256).max);
+        dualPoolStaking.notifyRewardAmountA(amt, duration);
+        dualPoolStaking.notifyRewardAmountB(amt, duration);
+
+        vm.startPrank(user);
+        stakingToken.approve(address(dualPoolStaking), DEFAULT_STAKE);
+        rewardToken.approve(address(dualPoolStaking), DEFAULT_STAKE);
+        dualPoolStaking.stakeA(DEFAULT_STAKE);
+        dualPoolStaking.stakeB(DEFAULT_STAKE);
+        vm.warp(block.timestamp + 2 hours);
+        stakingToken.mint(user, 1 wei);
+        stakingToken.approve(address(dualPoolStaking), 1 wei);
+        dualPoolStaking.stakeA(1 wei);
+        rewardToken.mint(user, 1 wei);
+        rewardToken.approve(address(dualPoolStaking), 1 wei);
+        dualPoolStaking.stakeB(1 wei);
+        (, uint256 rewA,) = dualPoolStaking.userInfoA(user);
+        (, uint256 rewB,) = dualPoolStaking.userInfoB(user);
+        assertGt(rewA, 0);
+        assertGt(rewB, 0);
+        assertLt(rewA, minClaim);
+        assertLt(rewB, minClaim);
+        vm.stopPrank();
+        _activateShutdownForTests();
+        vm.startPrank(user);
+
+        uint256 balBefore = rewardToken.balanceOf(user);
+        dualPoolStaking.forceClaimAll();
+        assertGt(rewardToken.balanceOf(user), balBefore);
         vm.stopPrank();
         stakingAdmin.setMinClaimAmount(0);
     }
@@ -2494,8 +2560,18 @@ contract DualPoolStakingTest is Test {
     }
 
     function testDualPoolStakingAdminConstructorZeroCoreReverts() public {
-        vm.expectRevert("core is zero");
-        new DualPoolStakingAdmin(address(0));
+        vm.expectRevert(DualPoolStakingAdmin.ZeroCore.selector);
+        new DualPoolStakingAdmin(address(0), address(1), address(2));
+    }
+
+    function testDualPoolStakingAdminConstructorZeroGovernanceTimelockReverts() public {
+        vm.expectRevert(DualPoolStakingAdmin.ZeroTimelockGovernance.selector);
+        new DualPoolStakingAdmin(address(dualPoolStaking), address(0), address(2));
+    }
+
+    function testDualPoolStakingAdminConstructorZeroSuperTimelockReverts() public {
+        vm.expectRevert(DualPoolStakingAdmin.ZeroTimelockSuper.selector);
+        new DualPoolStakingAdmin(address(dualPoolStaking), address(1), address(0));
     }
 
     function testDualPoolStakingSameTokenReverts() public {
@@ -2520,7 +2596,7 @@ contract DualPoolStakingTest is Test {
         MockERC20 tokenA = new MockERC20("TKA3", "TKA3");
         MockFOTERC20 tokenB = new MockFOTERC20("TKB3", "TKB3", 2000);
         DualPoolStaking s = _deployWiredDualPool(address(tokenA), address(tokenB));
-        DualPoolStakingAdmin sa = new DualPoolStakingAdmin(address(s));
+        DualPoolStakingAdmin sa = new DualPoolStakingAdmin(address(s), address(this), address(this));
         s.grantRole(s.ADMIN_ROLE(), address(sa));
         tokenB.mint(user, 1000 ether);
         vm.startPrank(user);
@@ -2547,7 +2623,7 @@ contract DualPoolStakingTest is Test {
         MockFOTERC20 tokenA = new MockFOTERC20("FOTA", "FOTA", 500);
         MockERC20 tokenB = new MockERC20("TKB5", "TKB5");
         DualPoolStaking s = _deployWiredDualPool(address(tokenA), address(tokenB));
-        DualPoolStakingAdmin sa = new DualPoolStakingAdmin(address(s));
+        DualPoolStakingAdmin sa = new DualPoolStakingAdmin(address(s), address(this), address(this));
         s.grantRole(s.ADMIN_ROLE(), address(sa));
         sa.setMinStakeAmountA(1 wei);
         tokenA.mint(user, 1000 ether);
@@ -2560,8 +2636,8 @@ contract DualPoolStakingTest is Test {
         vm.stopPrank();
     }
 
-    /// @notice After `forceClaimAll` with both pools above `minClaimAmount`, user receives the sum of both reward legs.
-    function testForceClaimAllNormalOpsBothPoolsPaid() public {
+    /// @notice After `forceClaimAll` during shutdown with both pools above `minClaimAmount`, user receives both reward legs.
+    function testForceClaimAllDuringShutdownBothPoolsPaid() public {
         stakingAdmin.setMinClaimAmount(1 wei);
         uint256 rewardAmount = SAFE_REWARD_AMOUNT;
         uint256 duration = SAFE_DURATION;
@@ -2587,6 +2663,10 @@ contract DualPoolStakingTest is Test {
         assertGt(rewB, 0);
         assertGe(rewA, dualPoolStaking.minClaimAmount());
         assertGe(rewB, dualPoolStaking.minClaimAmount());
+
+        vm.stopPrank();
+        _activateShutdownForTests();
+        vm.startPrank(user);
 
         uint256 balBefore = rewardToken.balanceOf(user);
         dualPoolStaking.forceClaimAll();
@@ -2722,5 +2802,34 @@ contract DualPoolStakingTest is Test {
         vm.stopPrank();
         _assertTokenBBalanceInvariant(dualPoolStaking);
         assertGt(dualPoolStaking.poolA().rewardRate, 0);
+    }
+
+    /// @notice Pool A stake rejects TokenA FOT when implied fee exceeds `maxTransferFeeBP` (same rule as `stakeB`).
+    function testStakeAFOTRevertsWhenBeyondMaxTransferFeeBP() public {
+        MockFOTERC20 tokenA = new MockFOTERC20("FOTA2", "FOTA2", 2000);
+        MockERC20 tokenB = new MockERC20("TKB6", "TKB6");
+        DualPoolStaking s = _deployWiredDualPool(address(tokenA), address(tokenB));
+        tokenA.mint(user, 1000 ether);
+        vm.startPrank(user);
+        tokenA.approve(address(s), type(uint256).max);
+        vm.expectRevert(StakingExecutionErrors.ExcessiveTransferFee.selector);
+        s.stakeA(100 ether);
+        vm.stopPrank();
+    }
+
+    /// @notice When accumulated rounding dust reaches `DUST_TOLERANCE`, it is swept into `availableRewards`.
+    function testDustRecyclesAtTolerance() public {
+        rewardToken.approve(address(dualPoolStaking), type(uint256).max);
+        dualPoolStaking.notifyRewardAmountA(100 ether, 100 days);
+        vm.startPrank(user);
+        stakingToken.approve(address(dualPoolStaking), type(uint256).max);
+        dualPoolStaking.stakeA(7 wei);
+        for (uint256 i; i < 15; ++i) {
+            vm.warp(block.timestamp + 6 hours);
+            stakingToken.mint(user, 1 wei);
+            dualPoolStaking.stakeA(1 wei);
+        }
+        vm.stopPrank();
+        assertLt(dualPoolStaking.poolA().dust, 10, "dust recycled or below tolerance");
     }
 }

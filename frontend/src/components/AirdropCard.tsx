@@ -12,7 +12,7 @@ const TOKEN_A = contractAddresses.tokenA;
 const AIRDROP_AMOUNT_WEI = parseUnits("1000", 18);
 const AIRDROP_MAX_USERS = 1000n;
 const AIRDROP_MAX_SUPPLY_WEI = AIRDROP_AMOUNT_WEI * AIRDROP_MAX_USERS;
-const STORAGE_KEY = "dualpool-airdrop-claimed-v1";
+const STORAGE_KEY = "dualpool-airdrop-claimed-v3-zztka";
 
 type Props = {
   onClaimed?: () => Promise<void> | void;

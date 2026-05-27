@@ -2,6 +2,20 @@
 export const dualPoolStakingAdminAbi = [
   {
     type: "function",
+    name: "timelockGovernance",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ type: "address" }],
+  },
+  {
+    type: "function",
+    name: "timelockSuper",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ type: "address" }],
+  },
+  {
+    type: "function",
     name: "setFees",
     stateMutability: "nonpayable",
     inputs: [

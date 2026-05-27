@@ -18,7 +18,7 @@ import { useWriteWithStatus } from "@/hooks/useWriteWithStatus";
 import { getAddressExplorerUrl } from "@/lib/explorerLink";
 
 const GOV_TIMELOCK_HELPER =
-  "参数类变更走 OpenZeppelin TimelockController：PROPOSER 提交 schedule → 等待 minDelay → EXECUTOR 执行 execute。目标合约为 DualPoolStakingAdmin（onlyOwner），由 Timelock 作为 owner 调用核心。";
+  "参数类变更走 48h TimelockController；模块/角色超级路径走 72h Timelock。流程均为 PROPOSER schedule → 等待 minDelay → EXECUTOR execute → DualPoolStakingAdmin → 核心。";
 
 const TOOLTIP_PAUSE =
   "Pause stops state-changing user flows (e.g. stake, claim, compound, normal withdrawals). Principal and accrued rewards stay in the contract — nothing is auto-liquidated — but users cannot move funds until governance unpauses.";
@@ -44,24 +44,42 @@ export function GovernancePanel() {
   const { writeContractAsync } = useWriteContract();
   const staking = useStaking();
   const { isOperator, refetchRoles } = useProtocolRoles();
-  const tl = useTimelockGovernanceRoles();
+  const tlGov = useTimelockGovernanceRoles(governanceAddresses.timelock);
+  const tlSuper = useTimelockGovernanceRoles(governanceAddresses.timelockSuper);
   const flow = useWriteWithStatus();
 
   const [confirm, setConfirm] = useState<{ kind: "pause" | "emergency" | null }>({ kind: null });
 
-  const { data: minDelayOnChain } = useReadContract({
+  const { data: minDelayGovOnChain } = useReadContract({
     address: governanceAddresses.timelock,
     abi: timelockControllerAbi,
     functionName: "getMinDelay",
     query: { staleTime: 60_000, refetchOnWindowFocus: false },
   });
+  const { data: minDelaySuperOnChain } = useReadContract({
+    address: governanceAddresses.timelockSuper,
+    abi: timelockControllerAbi,
+    functionName: "getMinDelay",
+    query: {
+      enabled: governanceAddresses.timelockSuper !== "0x0000000000000000000000000000000000000000",
+      staleTime: 60_000,
+      refetchOnWindowFocus: false,
+    },
+  });
 
-  const minDelay = minDelayOnChain ?? BigInt(sepoliaDeploymentMeta.timelockMinDelaySeconds);
+  const minDelayGovernance = minDelayGovOnChain ?? BigInt(sepoliaDeploymentMeta.timelockMinDelaySeconds);
+  const minDelaySuper = minDelaySuperOnChain ?? BigInt(sepoliaDeploymentMeta.timelockSuperMinDelaySeconds);
   const govBusy = flow.state !== "idle";
-  const canTimelockPanel = tl.canPropose || tl.canExecute || tl.canCancel;
+  const canTimelockPanel =
+    tlGov.canPropose ||
+    tlGov.canExecute ||
+    tlGov.canCancel ||
+    tlSuper.canPropose ||
+    tlSuper.canExecute ||
+    tlSuper.canCancel;
 
   const afterTx = async () => {
-    await Promise.all([staking.refetchAll(), refetchRoles(), tl.refetchTimelockRoles()]);
+    await Promise.all([staking.refetchAll(), refetchRoles(), tlGov.refetchTimelockRoles(), tlSuper.refetchTimelockRoles()]);
   };
 
   const callCore = async (label: string, functionName: string, args: readonly unknown[] = []) => {
@@ -154,15 +172,14 @@ export function GovernancePanel() {
               </summary>
               <div className="border-t border-zinc-800 px-3 pb-3 pt-2">
                 <p className="mb-2 text-[11px] text-zinc-500">
-                  Timelock minDelay（链上）: {minDelay.toString()}s · 可用环境变量覆盖{" "}
-                  <code className="text-zinc-400">NEXT_PUBLIC_TIMELOCK_CONTROLLER_ADDRESS</code> /{" "}
-                  <code className="text-zinc-400">NEXT_PUBLIC_STAKING_ADMIN_FACADE_ADDRESS</code>
+                  治理 Timelock minDelay: {minDelayGovernance.toString()}s · 超级 Timelock: {minDelaySuper.toString()}s
                 </p>
                 <AddrRow chainId={chainId} label="DualPoolStaking（当前）" addr={contractAddresses.staking} />
                 <AddrRow chainId={chainId} label="TokenA" addr={contractAddresses.tokenA} />
                 <AddrRow chainId={chainId} label="TokenB" addr={contractAddresses.tokenB} />
                 <AddrRow chainId={chainId} label="DualPoolStakingAdmin（门面）" addr={governanceAddresses.adminFacade} />
-                <AddrRow chainId={chainId} label="TimelockController" addr={governanceAddresses.timelock} />
+                <AddrRow chainId={chainId} label="Timelock（参数 48h）" addr={governanceAddresses.timelock} />
+                <AddrRow chainId={chainId} label="Timelock（超级 72h）" addr={governanceAddresses.timelockSuper} />
                 <AddrRow chainId={chainId} label="DualPoolUserModule" addr={sepoliaAuxAddresses.dualPoolUserModule} />
                 <AddrRow chainId={chainId} label="DualPoolAdminModule" addr={sepoliaAuxAddresses.dualPoolAdminModule} />
                 <AddrRow chainId={chainId} label="OPERATOR_ROLE（参考）" addr={sepoliaAuxAddresses.operatorRoleHolder} />
@@ -171,8 +188,10 @@ export function GovernancePanel() {
           ) : null}
 
           <GovernanceTimelockCards
-            minDelay={minDelay}
-            tl={{ canPropose: tl.canPropose, canExecute: tl.canExecute, canCancel: tl.canCancel }}
+            minDelayGovernance={minDelayGovernance}
+            minDelaySuper={minDelaySuper}
+            tlGovernance={{ canPropose: tlGov.canPropose, canExecute: tlGov.canExecute, canCancel: tlGov.canCancel }}
+            tlSuper={{ canPropose: tlSuper.canPropose, canExecute: tlSuper.canExecute, canCancel: tlSuper.canCancel }}
             staking={staking}
             onAfterTx={afterTx}
           />
