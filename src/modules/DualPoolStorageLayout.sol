@@ -21,6 +21,8 @@ abstract contract DualPoolStorageLayout is Ownable, AccessControl, ReentrancyGua
     uint256 public constant PRECISION = 1e18;
     /// @dev Upper bound on a single `updateGlobal` time step to bound reward accrual in one call.
     uint256 public constant MAX_DELTA_TIME = 30 days;
+    /// @dev Max `updateGlobal` steps in one `pause` catch-up loop (`× MAX_DELTA_TIME` wall-clock span).
+    uint256 public constant MAX_CATCHUP_ITERATIONS = 50;
     /// @dev Sub-wei dust bucket recycling threshold in `PoolAccrualLib` (matches core `DUST_TOLERANCE`).
     uint256 public constant DUST_TOLERANCE = 10 wei;
     /// @dev Denominator for all basis-point fee and cap parameters (`10_000` = 100%).

@@ -9,6 +9,7 @@ import {PoolAStakeLib} from "../libraries/PoolAStakeLib.sol";
 import {PoolBStakeLib} from "../libraries/PoolBStakeLib.sol";
 import {PoolBWithdrawLib} from "../libraries/PoolBWithdrawLib.sol";
 import {PoolSingleClaimLib} from "../libraries/PoolSingleClaimLib.sol";
+import {RewardReanchorLib} from "../libraries/RewardReanchorLib.sol";
 import {StakingAdminLib} from "../libraries/StakingAdminLib.sol";
 import {StakingExecutionErrors} from "../StakingExecutionErrors.sol";
 import {DualPoolStorageLayout} from "./DualPoolStorageLayout.sol";
@@ -113,7 +114,8 @@ contract DualPoolUserModule is DualPoolStorageLayout {
             penaltyfeeBP: penaltyfeeBP,
             withdrawFeeBP: withdrawFeeBP,
             midTermFeeBP: midTermFeeBP,
-            basisPoints: BASIS_POINTS
+            basisPoints: BASIS_POINTS,
+            reanchorCaps: _reanchorCaps()
         });
 
         PoolBWithdrawLib.WithdrawBResult memory res =
@@ -265,7 +267,8 @@ contract DualPoolUserModule is DualPoolStorageLayout {
         uint256 rewardSnapA = userInfoA[user].rewards;
         StakingAdminLib.EmergencyWithdrawAParams memory params =
             StakingAdminLib.EmergencyWithdrawAParams({emergencyMode: emergencyMode, shutdown: shutdown, user: user});
-        uint256 stakedAmount = StakingAdminLib.executeEmergencyWithdrawA(poolAState, poolBState, userInfoA, params);
+        uint256 stakedAmount =
+            StakingAdminLib.executeEmergencyWithdrawA(poolAState, poolBState, userInfoA, params, _reanchorCaps());
         bookedUserRewardsA -= rewardSnapA;
         _checkInvariantBNoRevert();
         emit EmergencyWithdrawn(user, stakedAmount, rewardSnapA, Pool.A, block.timestamp);
@@ -281,11 +284,24 @@ contract DualPoolUserModule is DualPoolStorageLayout {
         uint256 rewardSnapB = userInfoB[user].rewards;
         StakingAdminLib.EmergencyWithdrawBParams memory params =
             StakingAdminLib.EmergencyWithdrawBParams({emergencyMode: emergencyMode, shutdown: shutdown, user: user});
-        uint256 stakedAmount =
-            StakingAdminLib.executeEmergencyWithdrawB(poolBState, userInfoB, unlockTimeB, stakeTimestampB, params);
+        uint256 stakedAmount = StakingAdminLib.executeEmergencyWithdrawB(
+            poolBState, userInfoB, unlockTimeB, stakeTimestampB, params, _reanchorCaps()
+        );
         bookedUserRewardsB -= rewardSnapB;
         _checkInvariantBNoRevert();
         emit EmergencyWithdrawn(user, stakedAmount, rewardSnapB, Pool.B, block.timestamp);
+    }
+
+    /// @dev APR / duration caps for `RewardReanchorLib.reanchorOnBudgetInjection`.
+    function _reanchorCaps() private view returns (RewardReanchorLib.ReanchorCaps memory) {
+        return RewardReanchorLib.ReanchorCaps({
+            minDuration: MIN_REWARD_RATE_DURATION,
+            maxDuration: MAX_DURATION,
+            maxAprBp: MAX_APR_BP,
+            basisPoints: BASIS_POINTS,
+            secondsPerYear: SECONDS_PER_YEAR,
+            maxTotalSupplyBForRewardRateCap: maxTotalSupplyBForRewardRateCap
+        });
     }
 
     /// @dev Advances Pool A global reward index; emits `InsufficientBudget` / `DustAccumulated` when the library reports signals.

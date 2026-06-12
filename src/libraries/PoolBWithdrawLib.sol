@@ -6,6 +6,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {PoolInfo, UserInfo} from "../StakeTypes.sol";
+import {RewardReanchorLib} from "./RewardReanchorLib.sol";
 import {StakingExecutionErrors} from "../StakingExecutionErrors.sol";
 
 /// @title PoolBWithdrawLib
@@ -40,6 +41,8 @@ library PoolBWithdrawLib {
         uint256 midTermFeeBP;
         /// @notice Basis-point denominator (`10_000`).
         uint256 basisPoints;
+        /// @notice Schedule caps for post-forfeiture `rewardRate` re-anchor.
+        RewardReanchorLib.ReanchorCaps reanchorCaps;
     }
 
     /// @notice Outputs for `executeWithdrawB` (caller aggregates fees into `unclaimedFeesB` if needed).
@@ -52,17 +55,6 @@ library PoolBWithdrawLib {
         bool isEarlyForEvent;
         /// @notice Pool B rewards moved from pending into `availableRewards` on early exit (`0` if not early / no rewards).
         uint256 forfeitedRewardsB;
-    }
-
-    /// @dev Recomputes `rewardRate` as `availableRewards / remainingSeconds` for the **current** reward period.
-    /// @dev Intent (M-1 / PRD-adjacent): early-exit penalty (and forfeiture paths above) increase `availableRewards` **without**
-    ///      extending `periodFinish`. Re-anchoring the rate keeps the *remaining* seconds from being diluted vs a stale
-    ///      `rewardRate` that was set when `availableRewards` was lower—i.e. post-penalty emissions stay consistent with liquidity.
-    function _recomputeRewardRateB(PoolInfo storage poolB) private {
-        uint256 remTime = poolB.periodFinish > block.timestamp ? poolB.periodFinish - block.timestamp : 0;
-        if (remTime > 0) {
-            poolB.rewardRate = poolB.availableRewards / remTime;
-        }
     }
 
     /// @dev Validates `minEarlyExitAmountB`, forfeits user rewards into `availableRewards`, and returns principal penalty.
@@ -140,10 +132,12 @@ library PoolBWithdrawLib {
             }
         }
 
-        // Penalty stays on-contract (see PRD); see `_recomputeRewardRateB` natspec for why we refresh `rewardRate` here.
-        if (calc.penalty > 0) {
-            poolB.availableRewards += calc.penalty;
-            _recomputeRewardRateB(poolB);
+        // Penalty stays on-contract (see PRD); see `RewardReanchorLib.reanchorOnBudgetInjection` for why we refresh `rewardRate` here.
+        if (calc.isEarly && (r.forfeitedRewardsB > 0 || calc.penalty > 0)) {
+            if (calc.penalty > 0) {
+                poolB.availableRewards += calc.penalty;
+            }
+            RewardReanchorLib.reanchorOnBudgetInjection(poolB, p.reanchorCaps);
         }
 
         uint256 netAmount = p.amount - calc.fee - calc.penalty;

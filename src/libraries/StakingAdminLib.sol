@@ -6,6 +6,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {Pool, PoolInfo, UserInfo} from "../StakeTypes.sol";
+import {RewardReanchorLib} from "./RewardReanchorLib.sol";
 import {StakingExecutionErrors} from "../StakingExecutionErrors.sol";
 
 /// @title StakingAdminLib
@@ -96,15 +97,40 @@ library StakingAdminLib {
         return principalAndPending + rewardsAndDust;
     }
 
+    /// @dev Stops the active emission schedule so post-finalize user paths cannot accrue against swept `availableRewards`.
+    function _terminateEmission(PoolInfo storage pool) private {
+        pool.rewardRate = 0;
+        pool.periodFinish = block.timestamp;
+        pool.lastUpdateTime = block.timestamp;
+    }
+
+    /// @dev Budget still scheduled for `[lastUpdateTime, periodFinish]` at `rewardRate`; must stay in `availableRewards`.
+    function _reservedEmissionBudget(PoolInfo storage pool) private view returns (uint256) {
+        if (pool.periodFinish <= pool.lastUpdateTime) return 0;
+        return (pool.periodFinish - pool.lastUpdateTime) * pool.rewardRate;
+    }
+
+    /// @dev Max reward wei movable from `pool` without breaking its active or unfinished emission schedule.
+    ///      Caller should run `PoolAccrualLib.updateGlobal` for both pools first so `lastUpdateTime` / `availableRewards` reflect accrual.
+    function _movableRebalanceBudget(PoolInfo storage pool) private view returns (uint256) {
+        uint256 reserved = _reservedEmissionBudget(pool);
+        return pool.availableRewards > reserved ? pool.availableRewards - reserved : 0;
+    }
+
     /// @notice Moves `amount` of `availableRewards` from `from` pool to `to` pool (no bad debt, distinct pools).
     /// @param poolA Pool A storage.
     /// @param poolB Pool B storage.
     /// @param from Source pool enum.
     /// @param to Destination pool enum.
     /// @param amount Reward token wei to move between `availableRewards` buckets.
-    function executeRebalanceBudgets(PoolInfo storage poolA, PoolInfo storage poolB, Pool from, Pool to, uint256 amount)
-        external
-    {
+    function executeRebalanceBudgets(
+        PoolInfo storage poolA,
+        PoolInfo storage poolB,
+        Pool from,
+        Pool to,
+        uint256 amount,
+        RewardReanchorLib.ReanchorCaps memory caps
+    ) external {
         if (poolA.badDebt > 0 || poolB.badDebt > 0) {
             revert StakingExecutionErrors.BadDebtExists();
         }
@@ -119,8 +145,14 @@ library StakingAdminLib {
             revert StakingExecutionErrors.InsufficientBalance(amount, poolFrom.availableRewards);
         }
 
+        uint256 movable = _movableRebalanceBudget(poolFrom);
+        if (amount > movable) {
+            revert StakingExecutionErrors.RebalanceExceedsMovableBudget(amount, movable);
+        }
+
         poolFrom.availableRewards -= amount;
         poolTo.availableRewards += amount;
+        RewardReanchorLib.reanchorOnBudgetInjection(poolTo, caps);
     }
 
     /// @notice Sweeps `p.token` to `p.to` if the amount is provably non-liability "excess" per pool accounting rules.
@@ -180,6 +212,9 @@ library StakingAdminLib {
             revert StakingExecutionErrors.StillStaked();
         }
 
+        _terminateEmission(poolA);
+        _terminateEmission(poolB);
+
         uint256 bookedA = p.bookedUserRewardsA;
         uint256 bookedB = p.bookedUserRewardsB;
         if (bookedA > poolA.totalPending || bookedB > poolB.totalPending) {
@@ -215,7 +250,8 @@ library StakingAdminLib {
         PoolInfo storage poolA,
         PoolInfo storage poolB,
         mapping(address => UserInfo) storage userInfoA,
-        EmergencyWithdrawAParams memory p
+        EmergencyWithdrawAParams memory p,
+        RewardReanchorLib.ReanchorCaps memory caps
     ) external returns (uint256 stakedAmount) {
         if (!p.emergencyMode) {
             revert StakingExecutionErrors.NotInEmergency();
@@ -244,6 +280,9 @@ library StakingAdminLib {
 
         poolA.totalPending -= actualReward;
         poolB.availableRewards += actualReward;
+        if (actualReward > 0) {
+            RewardReanchorLib.reanchorOnBudgetInjection(poolB, caps);
+        }
 
         poolA.stakingToken.safeTransfer(p.user, stakedAmount);
     }
@@ -261,7 +300,8 @@ library StakingAdminLib {
         mapping(address => UserInfo) storage userInfoB,
         mapping(address => uint256) storage unlockTimeB,
         mapping(address => uint256) storage stakeTimestampB,
-        EmergencyWithdrawBParams memory p
+        EmergencyWithdrawBParams memory p,
+        RewardReanchorLib.ReanchorCaps memory caps
     ) external returns (uint256 stakedAmount) {
         if (!p.emergencyMode) {
             revert StakingExecutionErrors.NotInEmergency();
@@ -289,6 +329,9 @@ library StakingAdminLib {
         }
         poolB.totalPending -= actualReward;
         poolB.availableRewards += actualReward;
+        if (actualReward > 0) {
+            RewardReanchorLib.reanchorOnBudgetInjection(poolB, caps);
+        }
 
         unlockTimeB[p.user] = 0;
         stakeTimestampB[p.user] = 0;
@@ -309,10 +352,12 @@ library StakingAdminLib {
     /// @param poolB Pool B storage.
     /// @param p Pull parameters (`ResolveBadDebtParams`).
     /// @return r Applied repayments per pool; any remainder after both debts is added to `poolB.availableRewards`.
-    function executeResolveBadDebt(PoolInfo storage poolA, PoolInfo storage poolB, ResolveBadDebtParams memory p)
-        external
-        returns (ResolveBadDebtResult memory r)
-    {
+    function executeResolveBadDebt(
+        PoolInfo storage poolA,
+        PoolInfo storage poolB,
+        ResolveBadDebtParams memory p,
+        RewardReanchorLib.ReanchorCaps memory caps
+    ) external returns (ResolveBadDebtResult memory r) {
         if (poolA.badDebt == 0 && poolB.badDebt == 0) {
             revert StakingExecutionErrors.NoBadDebt();
         }
@@ -336,6 +381,7 @@ library StakingAdminLib {
         }
         if (rem > 0) {
             poolB.availableRewards += rem;
+            RewardReanchorLib.reanchorOnBudgetInjection(poolB, caps);
         }
     }
 }

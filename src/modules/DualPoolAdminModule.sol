@@ -6,6 +6,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {Pool, PoolInfo, PendingOp} from "../StakeTypes.sol";
 import {PoolAccrualLib} from "../libraries/PoolAccrualLib.sol";
 import {NotifyRewardLib} from "../libraries/NotifyRewardLib.sol";
+import {RewardReanchorLib} from "../libraries/RewardReanchorLib.sol";
 import {StakingAdminLib} from "../libraries/StakingAdminLib.sol";
 import {StakingExecutionErrors} from "../StakingExecutionErrors.sol";
 import {DualPoolStorageLayout} from "./DualPoolStorageLayout.sol";
@@ -132,11 +133,14 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
     }
 
     /// @notice Rebalances reward budgets between pools (`rebalanceBudgets` delegate path).
+    /// @dev Runs `_updateGlobal*` first so movable budget excludes `remaining * rewardRate` still owed by the source schedule.
     /// @param from Source pool for `availableRewards` debit.
     /// @param to Destination pool for credit.
     /// @param amount Reward token wei to move.
     function executeRebalanceBudgets(Pool from, Pool to, uint256 amount) external {
-        StakingAdminLib.executeRebalanceBudgets(poolAState, poolBState, from, to, amount);
+        _updateGlobalA();
+        _updateGlobalB();
+        StakingAdminLib.executeRebalanceBudgets(poolAState, poolBState, from, to, amount, _reanchorCaps());
         _assertInvariantB();
         emit BudgetRebalanced(from, to, amount, block.timestamp);
     }
@@ -274,7 +278,7 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
         StakingAdminLib.ResolveBadDebtParams memory params =
             StakingAdminLib.ResolveBadDebtParams({rewardToken: rewardToken, from: sender, amount: amount});
         StakingAdminLib.ResolveBadDebtResult memory res =
-            StakingAdminLib.executeResolveBadDebt(poolAState, poolBState, params);
+            StakingAdminLib.executeResolveBadDebt(poolAState, poolBState, params, _reanchorCaps());
         if (res.repayA > 0) emit BadDebtResolved(Pool.A, res.repayA, block.timestamp);
         if (res.repayB > 0) emit BadDebtResolved(Pool.B, res.repayB, block.timestamp);
         if (res.repayA + res.repayB > 0) emit BadDebtResolvedTotal(res.repayA + res.repayB, block.timestamp);
@@ -305,6 +309,8 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
 
     /// @notice Finalizes shutdown (`forceShutdownFinalize` delegate path).
     function executeForceShutdownFinalize() external {
+        _updateGlobalA();
+        _updateGlobalB();
         uint256 uf = unclaimedFeesB;
         StakingAdminLib.ForceShutdownFinalizeParams memory params = StakingAdminLib.ForceShutdownFinalizeParams({
             shutdown: shutdown,
@@ -352,8 +358,8 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
     /// @notice Pauses the core (`pause` delegate path).
     /// @param sender Address recorded on `Paused` after global accrual snapshots.
     function executePause(address sender) external {
-        _updateGlobalA();
-        _updateGlobalB();
+        _catchUpGlobalA();
+        _catchUpGlobalB();
         pausedAt = block.timestamp;
         unpauseAt = block.timestamp + UNPAUSE_COOLDOWN;
         _pause();
@@ -366,6 +372,8 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
         if (block.timestamp < unpauseAt) {
             revert UnpauseCooldownPending(unpauseAt, block.timestamp);
         }
+        _requirePauseCatchUpComplete(poolAState, pausedAt);
+        _requirePauseCatchUpComplete(poolBState, pausedAt);
         uint256 delta = block.timestamp - pausedAt;
         if (poolAState.periodFinish > 0) poolAState.periodFinish += delta;
         if (poolBState.periodFinish > 0) poolBState.periodFinish += delta;
@@ -427,6 +435,60 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
         if (t < MIN_REWARD_RATE_DURATION || t > MAX_DURATION) {
             revert StakingExecutionErrors.InvalidRewardDuration();
         }
+    }
+
+    /// @dev Accrual ceiling for pause catch-up: rewards only through `min(now, periodFinish)`.
+    function _accrualCatchUpCap(PoolInfo storage pool) private view returns (uint256 cap) {
+        cap = block.timestamp;
+        if (pool.periodFinish < cap) cap = pool.periodFinish;
+    }
+
+    /// @dev Loops `updateGlobal` until `lastUpdateTime` reaches `_accrualCatchUpCap` (bounded by `MAX_CATCHUP_ITERATIONS`).
+    function _catchUpGlobal(PoolInfo storage pool, Pool p) private {
+        uint256 cap = _accrualCatchUpCap(pool);
+        uint256 iterations;
+        while (pool.lastUpdateTime < cap && iterations < MAX_CATCHUP_ITERATIONS) {
+            uint256 prev = pool.lastUpdateTime;
+            if (p == Pool.A) {
+                _updateGlobalA();
+            } else {
+                _updateGlobalB();
+            }
+            if (pool.lastUpdateTime == prev) break;
+            iterations++;
+        }
+        if (pool.lastUpdateTime < cap) {
+            revert StakingExecutionErrors.PauseCatchUpIncomplete(cap, pool.lastUpdateTime);
+        }
+    }
+
+    function _catchUpGlobalA() internal {
+        _catchUpGlobal(poolAState, Pool.A);
+    }
+
+    function _catchUpGlobalB() internal {
+        _catchUpGlobal(poolBState, Pool.B);
+    }
+
+    /// @dev Belt-and-suspenders guard for legacy paused state before `unpause` schedule shift.
+    function _requirePauseCatchUpComplete(PoolInfo storage pool, uint256 pausedAt_) private view {
+        if (pool.periodFinish == 0) return;
+        uint256 cap = pausedAt_ < pool.periodFinish ? pausedAt_ : pool.periodFinish;
+        if (pool.lastUpdateTime < cap) {
+            revert StakingExecutionErrors.PauseCatchUpIncomplete(cap, pool.lastUpdateTime);
+        }
+    }
+
+    /// @dev APR / duration caps for `RewardReanchorLib.reanchorOnBudgetInjection`.
+    function _reanchorCaps() private view returns (RewardReanchorLib.ReanchorCaps memory) {
+        return RewardReanchorLib.ReanchorCaps({
+            minDuration: MIN_REWARD_RATE_DURATION,
+            maxDuration: MAX_DURATION,
+            maxAprBp: MAX_APR_BP,
+            basisPoints: BASIS_POINTS,
+            secondsPerYear: SECONDS_PER_YEAR,
+            maxTotalSupplyBForRewardRateCap: maxTotalSupplyBForRewardRateCap
+        });
     }
 
     /// @dev Advances Pool A global reward index.

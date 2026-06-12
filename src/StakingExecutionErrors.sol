@@ -65,6 +65,10 @@ abstract contract StakingExecutionErrors {
     error NoBadDebt();
     /// @notice Rebalance source and destination pool are the same enum value.
     error SamePool();
+    /// @notice Rebalance would move budget reserved for the source pool’s active `rewardRate` schedule.
+    /// @param requested Amount requested to move from the source pool.
+    /// @param movable Maximum movable from `availableRewards` after reserving `remaining * rewardRate`.
+    error RebalanceExceedsMovableBudget(uint256 requested, uint256 movable);
     /// @notice No accumulated Pool B fees available to sweep to `feeRecipient`.
     error NoFeesToClaim();
     /// @notice Fee recipient is unset or invalid for a fee sweep.
@@ -73,6 +77,9 @@ abstract contract StakingExecutionErrors {
     error TokenRecoveryRestricted();
     /// @notice Zero address passed where a non-zero address is required.
     error ZeroAddress();
+    /// @notice Module pointer must reference an address with deployed bytecode (EOA / empty / destroyed).
+    /// @param module Address that failed `extcodesize` check.
+    error NotAContract(address module);
     /// @notice Operation requires shutdown but protocol is not in shutdown.
     error NotShutdown();
     /// @notice Shutdown finalization attempted before grace / time rules allow.
@@ -83,4 +90,8 @@ abstract contract StakingExecutionErrors {
     error BookedRewardsExceedPending();
     /// @notice `forceClaimAll` is only available during shutdown or when either pool carries `badDebt`.
     error ForceClaimAllNotAvailable();
+    /// @notice `pause` / `unpause` could not advance `lastUpdateTime` to the pre-pause accrual ceiling within iteration budget.
+    /// @param requiredLastUpdate Earliest `lastUpdateTime` that must be reached (`min(pausedAt, periodFinish)`).
+    /// @param actualLastUpdate `lastUpdateTime` after bounded catch-up attempts.
+    error PauseCatchUpIncomplete(uint256 requiredLastUpdate, uint256 actualLastUpdate);
 }

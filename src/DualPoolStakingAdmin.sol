@@ -119,7 +119,7 @@ contract DualPoolStakingAdmin {
     }
 
     function resolveBadDebt(uint256 amount) external onlyGovernanceTimelock {
-        core.resolveBadDebt(amount);
+        core.resolveBadDebt(msg.sender, amount);
     }
 
     function recoverToken(address token, address to, uint256 amount) external onlyGovernanceTimelock {

@@ -41,15 +41,16 @@ library NotifyRewardLib {
             revert StakingExecutionErrors.ZeroReceived();
         }
 
-        // When the prior period ended with `totalStaked == 0`, accrual advanced `lastUpdateTime` without debiting
-        // `availableRewards`, so temporal `leftover` is zero while TokenB remains booked — fold that bucket here.
-        uint256 carryStranded = 0;
-        if (pool.periodFinish > 0 && block.timestamp >= pool.periodFinish) {
-            carryStranded = pool.availableRewards;
-        }
-
         uint256 remaining = pool.periodFinish > pool.lastUpdateTime ? pool.periodFinish - pool.lastUpdateTime : 0;
         uint256 leftover = remaining * pool.rewardRate;
+
+        // Stranded budget: `availableRewards` not yet folded into `leftover` (typical when empty pool ran out the
+        // clock without debiting). When `lastUpdateTime < periodFinish`, `leftover` already covers the same
+        // slice — only carry the excess above `leftover` to avoid double-counting in `merged`.
+        uint256 carryStranded = 0;
+        if (pool.periodFinish > 0 && block.timestamp >= pool.periodFinish && pool.availableRewards > leftover) {
+            carryStranded = pool.availableRewards - leftover;
+        }
 
         uint256 merged = actualAmount + leftover + carryStranded;
         r.newRate = merged / duration;

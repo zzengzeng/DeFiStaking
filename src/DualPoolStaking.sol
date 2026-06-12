@@ -363,6 +363,7 @@ contract DualPoolStaking is Ownable, AccessControl, ReentrancyGuard, Pausable {
     /// @param newModule Non-zero module address.
     function setUserModule(address newModule) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (newModule == address(0)) revert StakingExecutionErrors.ZeroAddress();
+        if (newModule.code.length == 0) revert StakingExecutionErrors.NotAContract(newModule);
         address oldModule = userModule;
         userModule = newModule;
         emit UserModuleUpdated(oldModule, newModule, block.timestamp);
@@ -373,6 +374,7 @@ contract DualPoolStaking is Ownable, AccessControl, ReentrancyGuard, Pausable {
     /// @param newModule Non-zero module address.
     function setAdminModule(address newModule) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (newModule == address(0)) revert StakingExecutionErrors.ZeroAddress();
+        if (newModule.code.length == 0) revert StakingExecutionErrors.NotAContract(newModule);
         address oldModule = adminModule;
         adminModule = newModule;
         emit AdminModuleUpdated(oldModule, newModule, block.timestamp);
@@ -465,9 +467,11 @@ contract DualPoolStaking is Ownable, AccessControl, ReentrancyGuard, Pausable {
         _delegateTo(adminModule, abi.encodeWithSignature("executeSetLockDuration(uint256)", newLockDuration));
     }
 
-    /// @notice Caller repays bad debt with reward tokens (`ADMIN_ROLE`).
-    function resolveBadDebt(uint256 amount) external onlyRole(ADMIN_ROLE) nonReentrant {
-        _delegateTo(adminModule, abi.encodeWithSignature("executeResolveBadDebt(address,uint256)", msg.sender, amount));
+    /// @notice Repays bad debt with reward tokens pulled from `payer` (`ADMIN_ROLE`).
+    /// @dev Production: `DualPoolStakingAdmin` passes `msg.sender` (Timelock) as `payer`; do not use Core `msg.sender` (the facade).
+    function resolveBadDebt(address payer, uint256 amount) external onlyRole(ADMIN_ROLE) nonReentrant {
+        if (payer == address(0)) revert StakingExecutionErrors.ZeroAddress();
+        _delegateTo(adminModule, abi.encodeWithSignature("executeResolveBadDebt(address,uint256)", payer, amount));
     }
 
     /// @notice Recovers non-liability ERC20 balances (`ADMIN_ROLE`).

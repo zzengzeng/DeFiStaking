@@ -385,7 +385,7 @@ export function GovernanceTimelockCards({ minDelayGovernance, minDelaySuper, tlG
         <p className="text-[11px] text-zinc-500">无参数。执行前请确认链上 unclaimedFeesB &gt; 0。</p>
       </GovernanceCard>
 
-      <GovernanceCard title="resolveBadDebt" hint="治理方偿还坏账（需事先 approve TokenB 给核心）" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "resolveBadDebt", args: [badDebtRepayValue ?? 0n] })} {...govCardProps} disabledReason={badDebtError} executeRows={() => [{ label: "TokenB", value: badDebtRepay }, { label: "globalBadDebt", value: staking.globalBadDebt?.toString() ?? "—" }]}>
+      <GovernanceCard title="resolveBadDebt" hint="Timelock 需持有 TokenB 并 approve 给 DualPoolStaking 核心" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "resolveBadDebt", args: [badDebtRepayValue ?? 0n] })} {...govCardProps} disabledReason={badDebtError} executeRows={() => [{ label: "TokenB", value: badDebtRepay }, { label: "globalBadDebt", value: staking.globalBadDebt?.toString() ?? "—" }]}>
         <FieldLabel>还款 TokenB 数量<input value={badDebtRepay} onChange={(e) => setBadDebtRepay(e.target.value)} className={inputClass} /></FieldLabel>
       </GovernanceCard>
 
