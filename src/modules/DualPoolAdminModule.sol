@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Pool, PoolInfo, PendingOp} from "../StakeTypes.sol";
+import {FOTTransferLib} from "../libraries/FOTTransferLib.sol";
 import {PoolAccrualLib} from "../libraries/PoolAccrualLib.sol";
 import {NotifyRewardLib} from "../libraries/NotifyRewardLib.sol";
 import {RewardReanchorLib} from "../libraries/RewardReanchorLib.sol";
@@ -80,7 +81,7 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
         if (maxTransferFeeBP > BASIS_POINTS) revert StakingExecutionErrors.InvalidMaxTransferFeeBp();
         uint256 effectiveDuration = _effectiveNotifyDuration(poolAState, duration);
 
-        _updateGlobalA();
+        _catchUpGlobalA();
         uint256 balBefore = rewardToken.balanceOf(address(this));
         rewardToken.safeTransferFrom(sender, address(this), amount);
         uint256 actualAmount = rewardToken.balanceOf(address(this)) - balBefore;
@@ -112,7 +113,7 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
         if (maxTransferFeeBP > BASIS_POINTS) revert StakingExecutionErrors.InvalidMaxTransferFeeBp();
         uint256 effectiveDuration = _effectiveNotifyDuration(poolBState, duration);
 
-        _updateGlobalB();
+        _catchUpGlobalB();
         uint256 balBefore = rewardToken.balanceOf(address(this));
         rewardToken.safeTransferFrom(sender, address(this), amount);
         uint256 actualAmount = rewardToken.balanceOf(address(this)) - balBefore;
@@ -138,8 +139,8 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
     /// @param to Destination pool for credit.
     /// @param amount Reward token wei to move.
     function executeRebalanceBudgets(Pool from, Pool to, uint256 amount) external {
-        _updateGlobalA();
-        _updateGlobalB();
+        _catchUpGlobalA();
+        _catchUpGlobalB();
         StakingAdminLib.executeRebalanceBudgets(poolAState, poolBState, from, to, amount, _reanchorCaps());
         _assertInvariantB();
         emit BudgetRebalanced(from, to, amount, block.timestamp);
@@ -157,7 +158,7 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
         }
         unclaimedFeesB = 0;
         emit FeesClaimed(feeRecipient, fees, block.timestamp);
-        rewardToken.safeTransfer(feeRecipient, fees);
+        FOTTransferLib.transferGross(rewardToken, feeRecipient, fees, maxTransferFeeBP, BASIS_POINTS);
     }
 
     /// @notice Updates Pool B withdrawal-related fees (`setFees` delegate path).
@@ -182,18 +183,20 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
     }
 
     /// @notice Sets `feeRecipient` (`setFeeRecipient` delegate path).
-    /// @param newRecipient New fee sweep recipient; must not be zero.
+    /// @param newRecipient New fee sweep recipient; must not be zero or the core itself.
     function executeSetFeeRecipient(address newRecipient) external {
         if (newRecipient == address(0)) revert StakingExecutionErrors.ZeroAddress();
+        if (newRecipient == address(this)) revert StakingExecutionErrors.InvalidRecipient(newRecipient);
         address oldRecipient = feeRecipient;
         feeRecipient = newRecipient;
         emit FeeRecipientUpdated(oldRecipient, newRecipient, block.timestamp);
     }
 
     /// @notice Sets `forfeitedRecipient` (`setForfeitedRecipient` delegate path).
-    /// @param newRecipient New forfeited-flow recipient; must not be zero.
+    /// @param newRecipient New forfeited-flow recipient; must not be zero or the core itself.
     function executeSetForfeitedRecipient(address newRecipient) external {
         if (newRecipient == address(0)) revert StakingExecutionErrors.ZeroAddress();
+        if (newRecipient == address(this)) revert StakingExecutionErrors.InvalidRecipient(newRecipient);
         address oldRecipient = forfeitedRecipient;
         forfeitedRecipient = newRecipient;
         emit ForfeitedRecipientUpdated(oldRecipient, newRecipient, block.timestamp);
@@ -275,6 +278,8 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
     /// @param sender Payer whose reward tokens are pulled with `transferFrom`.
     /// @param amount Requested repayment amount (actual credited via balance delta in library).
     function executeResolveBadDebt(address sender, uint256 amount) external {
+        _catchUpGlobalA();
+        _catchUpGlobalB();
         StakingAdminLib.ResolveBadDebtParams memory params =
             StakingAdminLib.ResolveBadDebtParams({rewardToken: rewardToken, from: sender, amount: amount});
         StakingAdminLib.ResolveBadDebtResult memory res =
@@ -309,9 +314,10 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
 
     /// @notice Finalizes shutdown (`forceShutdownFinalize` delegate path).
     function executeForceShutdownFinalize() external {
-        _updateGlobalA();
-        _updateGlobalB();
+        _catchUpGlobalA();
+        _catchUpGlobalB();
         uint256 uf = unclaimedFeesB;
+        unclaimedFeesB = 0;
         StakingAdminLib.ForceShutdownFinalizeParams memory params = StakingAdminLib.ForceShutdownFinalizeParams({
             shutdown: shutdown,
             rewardToken: rewardToken,
@@ -324,7 +330,6 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
             bookedUserRewardsB: bookedUserRewardsB
         });
         StakingAdminLib.executeForceShutdownFinalize(poolAState, poolBState, params);
-        unclaimedFeesB = 0;
         emit ProtocolShutdownComplete(block.timestamp);
     }
 

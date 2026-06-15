@@ -191,6 +191,11 @@ contract DualPoolStaking is Ownable, AccessControl, ReentrancyGuard, Pausable {
         if (maxTotalSupplyBForRewardRateCap_ == 0) {
             revert StakingExecutionErrors.ZeroAmount();
         }
+        uint256 minCapForNonZeroRewardRate =
+            (BASIS_POINTS * SECONDS_PER_YEAR + MAX_APR_BP - 1) / MAX_APR_BP;
+        if (maxTotalSupplyBForRewardRateCap_ < minCapForNonZeroRewardRate) {
+            revert StakingExecutionErrors.ZeroRewardRate(maxTotalSupplyBForRewardRateCap_, minCapForNonZeroRewardRate);
+        }
         poolAState.stakingToken = IERC20(tokenA);
         poolBState.stakingToken = IERC20(tokenB);
         rewardToken = IERC20(tokenB);
@@ -487,7 +492,7 @@ contract DualPoolStaking is Ownable, AccessControl, ReentrancyGuard, Pausable {
     }
 
     /// @notice Finalizes shutdown (`ADMIN_ROLE`).
-    function forceShutdownFinalize() external onlyRole(ADMIN_ROLE) {
+    function forceShutdownFinalize() external onlyRole(ADMIN_ROLE) nonReentrant {
         _delegateTo(adminModule, abi.encodeWithSignature("executeForceShutdownFinalize()"));
     }
 

@@ -6,6 +6,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {Pool, PoolInfo, UserInfo} from "../StakeTypes.sol";
+import {FOTTransferLib} from "./FOTTransferLib.sol";
 import {RewardReanchorLib} from "./RewardReanchorLib.sol";
 import {StakingExecutionErrors} from "../StakingExecutionErrors.sol";
 
@@ -59,6 +60,10 @@ library StakingAdminLib {
         bool shutdown;
         /// @notice User receiving principal and partial rewards per liquidity rules.
         address user;
+        /// @notice FOT outbound tax ceiling for TokenA (`0` = standard ERC20).
+        uint256 maxTransferFeeBP;
+        /// @notice Basis-point denominator (`10_000`).
+        uint256 basisPoints;
     }
 
     /// @notice Parameters for Pool B emergency principal exit.
@@ -69,6 +74,10 @@ library StakingAdminLib {
         bool shutdown;
         /// @notice User receiving principal and partial rewards per liquidity rules.
         address user;
+        /// @notice FOT outbound tax ceiling for TokenB (`0` = standard ERC20).
+        uint256 maxTransferFeeBP;
+        /// @notice Basis-point denominator (`10_000`).
+        uint256 basisPoints;
     }
 
     /// @notice Parameters for `executeResolveBadDebt` (pull + allocate).
@@ -284,7 +293,7 @@ library StakingAdminLib {
             RewardReanchorLib.reanchorOnBudgetInjection(poolB, caps);
         }
 
-        poolA.stakingToken.safeTransfer(p.user, stakedAmount);
+        FOTTransferLib.transferGross(poolA.stakingToken, p.user, stakedAmount, p.maxTransferFeeBP, p.basisPoints);
     }
 
     /// @notice Emergency Pool B exit: returns principal, clears lock maps, and rebalances rewards similarly to Pool A path.
@@ -336,7 +345,7 @@ library StakingAdminLib {
         unlockTimeB[p.user] = 0;
         stakeTimestampB[p.user] = 0;
 
-        poolB.stakingToken.safeTransfer(p.user, stakedAmount);
+        FOTTransferLib.transferGross(poolB.stakingToken, p.user, stakedAmount, p.maxTransferFeeBP, p.basisPoints);
     }
 
     /// @notice Amounts applied toward Pool A / Pool B bad debt during `executeResolveBadDebt`.

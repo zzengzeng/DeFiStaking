@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {Pool} from "../StakeTypes.sol";
+import {Pool, PoolInfo} from "../StakeTypes.sol";
 import {PoolAccrualLib} from "../libraries/PoolAccrualLib.sol";
 import {PoolBCompoundLib} from "../libraries/PoolBCompoundLib.sol";
 import {ForceClaimAllLib} from "../libraries/ForceClaimAllLib.sol";
@@ -50,7 +50,7 @@ contract DualPoolUserModule is DualPoolStorageLayout {
         if (shutdown) revert StakingExecutionErrors.ShutdownModeActive();
         if (amount == 0) revert StakingExecutionErrors.ZeroAmount();
         if (maxTransferFeeBP > BASIS_POINTS) revert StakingExecutionErrors.InvalidMaxTransferFeeBp();
-        _updateGlobalA();
+        _catchUpExpiredGlobalA();
         _settleUserA(user);
 
         PoolAStakeLib.StakeAParams memory params = PoolAStakeLib.StakeAParams({
@@ -78,7 +78,7 @@ contract DualPoolUserModule is DualPoolStorageLayout {
         if (shutdown) revert StakingExecutionErrors.ShutdownModeActive();
         if (amount == 0) revert StakingExecutionErrors.ZeroAmount();
         if (maxTransferFeeBP > BASIS_POINTS) revert StakingExecutionErrors.InvalidMaxTransferFeeBp();
-        _updateGlobalB();
+        _catchUpExpiredGlobalB();
         _settleUserB(user);
 
         PoolBStakeLib.StakeBParams memory params = PoolBStakeLib.StakeBParams({
@@ -104,7 +104,7 @@ contract DualPoolUserModule is DualPoolStorageLayout {
     /// @param amount Principal to withdraw before fees/penalties.
     function executeWithdrawB(address user, uint256 amount) external {
         if (emergencyMode && !shutdown) revert EmergencyModeActive();
-        _updateGlobalB();
+        _catchUpExpiredGlobalB();
         _settleUserB(user);
 
         PoolBWithdrawLib.WithdrawBParams memory params = PoolBWithdrawLib.WithdrawBParams({
@@ -115,7 +115,8 @@ contract DualPoolUserModule is DualPoolStorageLayout {
             withdrawFeeBP: withdrawFeeBP,
             midTermFeeBP: midTermFeeBP,
             basisPoints: BASIS_POINTS,
-            reanchorCaps: _reanchorCaps()
+            reanchorCaps: _reanchorCaps(),
+            maxTransferFeeBP: maxTransferFeeBP
         });
 
         PoolBWithdrawLib.WithdrawBResult memory res =
@@ -131,9 +132,9 @@ contract DualPoolUserModule is DualPoolStorageLayout {
     /// @param amount Principal to return to `user`.
     function executeWithdrawA(address user, uint256 amount) external {
         if (emergencyMode && !shutdown) revert EmergencyModeActive();
-        _updateGlobalA();
+        _catchUpExpiredGlobalA();
         _settleUserA(user);
-        PoolAStakeLib.executeWithdrawA(poolAState, userInfoA, user, amount);
+        PoolAStakeLib.executeWithdrawA(poolAState, userInfoA, user, amount, maxTransferFeeBP, BASIS_POINTS);
         _assertInvariantB();
         emit Withdrawn(user, amount, 0, false, Pool.A);
     }
@@ -146,14 +147,16 @@ contract DualPoolUserModule is DualPoolStorageLayout {
         if (lastClaimTime[user] != 0 && block.timestamp < lastClaimTime[user] + claimCooldown) {
             revert StakingExecutionErrors.UnlockTimePending(lastClaimTime[user] + claimCooldown, block.timestamp);
         }
-        _updateGlobalA();
+        _catchUpExpiredGlobalA();
         _settleUserA(user);
         PoolSingleClaimLib.ClaimParams memory claimParamsA = PoolSingleClaimLib.ClaimParams({
             rewardToken: rewardToken,
             claimer: user,
             minClaimAmount: minClaimAmount,
             badDebtPoolA: poolAState.badDebt,
-            badDebtPoolB: poolBState.badDebt
+            badDebtPoolB: poolBState.badDebt,
+            maxTransferFeeBP: maxTransferFeeBP,
+            basisPoints: BASIS_POINTS
         });
         uint256 reward = PoolSingleClaimLib.executeClaim(poolAState, userInfoA[user], lastClaimTime, claimParamsA);
         bookedUserRewardsA -= reward;
@@ -169,14 +172,16 @@ contract DualPoolUserModule is DualPoolStorageLayout {
         if (lastClaimTime[user] != 0 && block.timestamp < lastClaimTime[user] + claimCooldown) {
             revert StakingExecutionErrors.UnlockTimePending(lastClaimTime[user] + claimCooldown, block.timestamp);
         }
-        _updateGlobalB();
+        _catchUpExpiredGlobalB();
         _settleUserB(user);
         PoolSingleClaimLib.ClaimParams memory claimParamsB = PoolSingleClaimLib.ClaimParams({
             rewardToken: rewardToken,
             claimer: user,
             minClaimAmount: minClaimAmount,
             badDebtPoolA: poolAState.badDebt,
-            badDebtPoolB: poolBState.badDebt
+            badDebtPoolB: poolBState.badDebt,
+            maxTransferFeeBP: maxTransferFeeBP,
+            basisPoints: BASIS_POINTS
         });
         uint256 reward = PoolSingleClaimLib.executeClaim(poolBState, userInfoB[user], lastClaimTime, claimParamsB);
         bookedUserRewardsB -= reward;
@@ -197,8 +202,8 @@ contract DualPoolUserModule is DualPoolStorageLayout {
             revert StakingExecutionErrors.UnlockTimePending(lastClaimTime[user] + claimCooldown, block.timestamp);
         }
 
-        _updateGlobalA();
-        _updateGlobalB();
+        _catchUpExpiredGlobalA();
+        _catchUpExpiredGlobalB();
         _settleUserA(user);
         _settleUserB(user);
 
@@ -207,7 +212,9 @@ contract DualPoolUserModule is DualPoolStorageLayout {
             user: user,
             minClaimAmount: minClaimAmount,
             unclaimedFeesB: unclaimedFeesB,
-            shutdown: shutdown
+            shutdown: shutdown,
+            maxTransferFeeBP: maxTransferFeeBP,
+            basisPoints: BASIS_POINTS
         });
 
         ForceClaimAllLib.ForceClaimResult memory fc =
@@ -224,8 +231,8 @@ contract DualPoolUserModule is DualPoolStorageLayout {
     function executeCompoundB(address user) external {
         if (emergencyMode) revert EmergencyModeActive();
         if (shutdown) revert StakingExecutionErrors.ShutdownModeActive();
-        _updateGlobalA();
-        _updateGlobalB();
+        _catchUpExpiredGlobalA();
+        _catchUpExpiredGlobalB();
         // M-2: same cooldown semantics as claim — first compound allowed when `lastClaimTime` is still zero.
         if (lastClaimTime[user] != 0 && block.timestamp < lastClaimTime[user] + claimCooldown) {
             revert StakingExecutionErrors.UnlockTimePending(lastClaimTime[user] + claimCooldown, block.timestamp);
@@ -259,14 +266,21 @@ contract DualPoolUserModule is DualPoolStorageLayout {
     /// @notice Emergency Pool A principal exit for delegatecall from the core.
     /// @param user Account whose Pool A position is force-closed to zero.
     function executeEmergencyWithdrawA(address user) external {
+        if (!emergencyMode) revert StakingExecutionErrors.NotInEmergency();
+        if (shutdown) revert StakingExecutionErrors.ShutdownModeActive();
         // Accrue through `now` and settle so `userInfoA.rewards` / `totalPending` match the index (avoids ghost pending).
-        _updateGlobalA();
-        _updateGlobalB();
+        _catchUpExpiredGlobalA();
+        _catchUpExpiredGlobalB();
         _settleUserA(user);
         _settleUserB(user);
         uint256 rewardSnapA = userInfoA[user].rewards;
-        StakingAdminLib.EmergencyWithdrawAParams memory params =
-            StakingAdminLib.EmergencyWithdrawAParams({emergencyMode: emergencyMode, shutdown: shutdown, user: user});
+        StakingAdminLib.EmergencyWithdrawAParams memory params = StakingAdminLib.EmergencyWithdrawAParams({
+            emergencyMode: emergencyMode,
+            shutdown: shutdown,
+            user: user,
+            maxTransferFeeBP: maxTransferFeeBP,
+            basisPoints: BASIS_POINTS
+        });
         uint256 stakedAmount =
             StakingAdminLib.executeEmergencyWithdrawA(poolAState, poolBState, userInfoA, params, _reanchorCaps());
         bookedUserRewardsA -= rewardSnapA;
@@ -277,13 +291,20 @@ contract DualPoolUserModule is DualPoolStorageLayout {
     /// @notice Emergency Pool B principal exit for delegatecall from the core.
     /// @param user Account whose Pool B position is force-closed to zero.
     function executeEmergencyWithdrawB(address user) external {
-        _updateGlobalA();
-        _updateGlobalB();
+        if (!emergencyMode) revert StakingExecutionErrors.NotInEmergency();
+        if (shutdown) revert StakingExecutionErrors.ShutdownModeActive();
+        _catchUpExpiredGlobalA();
+        _catchUpExpiredGlobalB();
         _settleUserA(user);
         _settleUserB(user);
         uint256 rewardSnapB = userInfoB[user].rewards;
-        StakingAdminLib.EmergencyWithdrawBParams memory params =
-            StakingAdminLib.EmergencyWithdrawBParams({emergencyMode: emergencyMode, shutdown: shutdown, user: user});
+        StakingAdminLib.EmergencyWithdrawBParams memory params = StakingAdminLib.EmergencyWithdrawBParams({
+            emergencyMode: emergencyMode,
+            shutdown: shutdown,
+            user: user,
+            maxTransferFeeBP: maxTransferFeeBP,
+            basisPoints: BASIS_POINTS
+        });
         uint256 stakedAmount = StakingAdminLib.executeEmergencyWithdrawB(
             poolBState, userInfoB, unlockTimeB, stakeTimestampB, params, _reanchorCaps()
         );
@@ -318,6 +339,40 @@ contract DualPoolUserModule is DualPoolStorageLayout {
             PoolAccrualLib.updateGlobal(poolBState, MAX_DELTA_TIME, PRECISION, DUST_TOLERANCE);
         if (ge.insufficient) emit InsufficientBudget(Pool.B, ge.shortfall, block.timestamp);
         if (ge.dust) emit DustAccumulated(Pool.B, ge.dustWei, block.timestamp);
+    }
+
+    /// @dev A stale schedule can be re-anchored only after its old emission window is fully accounted.
+    ///      Otherwise a new stake could join before `lastUpdateTime` reaches `periodFinish` and share old rewards.
+    function _catchUpExpiredGlobalA() internal {
+        _catchUpExpiredGlobal(poolAState, Pool.A);
+    }
+
+    /// @dev Same stale-schedule catch-up for Pool B.
+    function _catchUpExpiredGlobalB() internal {
+        _catchUpExpiredGlobal(poolBState, Pool.B);
+    }
+
+    function _catchUpExpiredGlobal(PoolInfo storage pool, Pool p) private {
+        uint256 cap = block.timestamp < pool.periodFinish ? block.timestamp : pool.periodFinish;
+        uint256 iterations;
+        while (pool.lastUpdateTime < cap) {
+            uint256 prev = pool.lastUpdateTime;
+            if (p == Pool.A) {
+                _updateGlobalA();
+            } else {
+                _updateGlobalB();
+            }
+            if (pool.lastUpdateTime == prev) break;
+            unchecked {
+                ++iterations;
+            }
+            if (iterations > MAX_DURATION / MAX_DELTA_TIME + 2) {
+                revert StakingExecutionErrors.PauseCatchUpIncomplete(cap, pool.lastUpdateTime);
+            }
+        }
+        if (pool.lastUpdateTime < cap) {
+            revert StakingExecutionErrors.PauseCatchUpIncomplete(cap, pool.lastUpdateTime);
+        }
     }
 
     /// @dev Settles Pool A rewards for `user` against `accRewardPerToken`.

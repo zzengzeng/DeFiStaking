@@ -2,18 +2,16 @@
 pragma solidity ^0.8.20;
 
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-
 import {PoolInfo, UserInfo} from "../StakeTypes.sol";
+import {FOTTransferLib} from "./FOTTransferLib.sol";
 import {RewardReanchorLib} from "./RewardReanchorLib.sol";
 import {StakingExecutionErrors} from "../StakingExecutionErrors.sol";
 
 /// @title PoolBWithdrawLib
 /// @notice Linked library: Pool B withdraw, fees, penalties, and optional early-exit forfeiture logic.
 /// @dev Early exit before `unlockTimeB` forfeits accrued `userB.rewards` back to `availableRewards` and charges `penaltyfeeBP` on principal.
+///      Outbound TokenB FOT tax is borne by the user (PRD §4.6); protocol fees stay on-contract.
 library PoolBWithdrawLib {
-    using SafeERC20 for IERC20;
 
     /// @notice Intermediate fee/penalty breakdown for a single withdraw evaluation.
     struct WithdrawCalc {
@@ -43,6 +41,8 @@ library PoolBWithdrawLib {
         uint256 basisPoints;
         /// @notice Schedule caps for post-forfeiture `rewardRate` re-anchor.
         RewardReanchorLib.ReanchorCaps reanchorCaps;
+        /// @notice FOT outbound tax ceiling (`0` = standard ERC20).
+        uint256 maxTransferFeeBP;
     }
 
     /// @notice Outputs for `executeWithdrawB` (caller aggregates fees into `unclaimedFeesB` if needed).
@@ -145,7 +145,9 @@ library PoolBWithdrawLib {
         userB.rewardPaid = poolB.accRewardPerToken;
         poolB.totalStaked -= p.amount;
 
-        poolB.stakingToken.safeTransfer(p.user, netAmount);
+        FOTTransferLib.transferGross(
+            poolB.stakingToken, p.user, netAmount, p.maxTransferFeeBP, p.basisPoints
+        );
 
         r.feeOrPenaltyForEvent = calc.fee + calc.penalty;
         r.isEarlyForEvent = calc.isEarly;

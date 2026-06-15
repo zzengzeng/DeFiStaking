@@ -95,7 +95,14 @@ library PoolBStakeLib {
         uint256 remainingTime = poolB.periodFinish > block.timestamp ? poolB.periodFinish - block.timestamp : 0;
         if (poolB.totalStaked > 0 && poolB.availableRewards > 0) {
             if (remainingTime > 0 && isFirstDeposit) {
-                poolB.rewardRate = poolB.availableRewards / remainingTime;
+                RewardReanchorLib.applyCappedRateForRemainingWindow(
+                    poolB,
+                    remainingTime,
+                    p.maxTotalSupplyBForRewardRateCap,
+                    p.maxAprBp,
+                    p.basisPoints,
+                    p.secondsPerYear
+                );
             } else if (remainingTime == 0) {
                 RewardReanchorLib.reanchorStaleSchedule(
                     poolB,

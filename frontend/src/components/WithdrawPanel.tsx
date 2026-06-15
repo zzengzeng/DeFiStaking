@@ -33,6 +33,8 @@ type Props = {
   onWithdraw: (value: string) => Promise<unknown>;
   disabled?: boolean;
   tokenSymbol?: string;
+  /** FOT outbound tax ceiling from core (`0` = standard ERC20). */
+  maxTransferFeeBP?: bigint;
   /** 默认：有 suggestion 时显示 B 池费率说明 */
   showFeeTiers?: boolean;
 };
@@ -66,6 +68,7 @@ export function WithdrawPanel({
   onWithdraw,
   disabled,
   tokenSymbol = "TokenB",
+  maxTransferFeeBP = 0n,
   showFeeTiers,
 }: Props) {
   const feeTiersVisible = showFeeTiers ?? Boolean(suggestion);
@@ -303,6 +306,7 @@ export function WithdrawPanel({
           feeBp={preview.feeBp}
           penaltyBp={preview.penaltyBp}
           tokenSymbol={tokenSymbol}
+          maxTransferFeeBP={maxTransferFeeBP}
         />
         {feeTiersVisible ? (
           <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-2 text-xs text-zinc-400">

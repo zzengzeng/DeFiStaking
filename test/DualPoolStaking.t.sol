@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {Test, console} from "forge-std/Test.sol";
+import {Test, Vm, console} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
@@ -15,6 +15,31 @@ import {DualPoolUserModule} from "../src/modules/DualPoolUserModule.sol";
 import {DualPoolAdminModule} from "../src/modules/DualPoolAdminModule.sol";
 import {Pool, PoolInfo} from "../src/StakeTypes.sol";
 import {StakingExecutionErrors} from "../src/StakingExecutionErrors.sol";
+import {RewardReanchorLib} from "../src/libraries/RewardReanchorLib.sol";
+
+contract ReanchorHarness {
+    PoolInfo internal pool;
+
+    function seed(uint256 availableRewards, uint256 periodFinish, uint256 lastUpdateTime) external {
+        pool.availableRewards = availableRewards;
+        pool.periodFinish = periodFinish;
+        pool.lastUpdateTime = lastUpdateTime;
+    }
+
+    function applyActive(uint256 remainingTime) external {
+        RewardReanchorLib.applyCappedRateForRemainingWindow(
+            pool, remainingTime, 10_000_000 ether, 20_000, 10_000, 31_536_000
+        );
+    }
+
+    function snapshot()
+        external
+        view
+        returns (uint256 rewardRate, uint256 periodFinish, uint256 lastUpdateTime, uint256 availableRewards)
+    {
+        return (pool.rewardRate, pool.periodFinish, pool.lastUpdateTime, pool.availableRewards);
+    }
+}
 
 /// @title DualPoolStakingTest
 /// @notice Foundry tests for `DualPoolStaking` with `DualPoolUserModule` / `DualPoolAdminModule` wired similarly to `script/DualPoolStaking.s.sol`.
@@ -75,6 +100,13 @@ contract DualPoolStakingTest is Test {
         vm.stopPrank();
         dualPoolStaking.enableEmergencyMode();
         stakingAdmin.activateShutdown();
+    }
+
+    /// @dev Mirrors `RewardReanchorLib.deriveMaxRewardRate` for notify / re-anchor cap assertions.
+    function _maxRewardRate(DualPoolStaking s) internal view returns (uint256) {
+        return RewardReanchorLib.deriveMaxRewardRate(
+            s.maxTotalSupplyBForRewardRateCap(), s.MAX_APR_BP(), s.BASIS_POINTS(), s.SECONDS_PER_YEAR()
+        );
     }
 
     /// @dev Same TokenB backing check as `DualPoolUserModule._assertInvariantB` (`DUST_TOLERANCE == 10`).
@@ -1842,10 +1874,24 @@ contract DualPoolStakingTest is Test {
         stakingAdmin.setFeeRecipient(address(0));
     }
 
+    function testSetFeeRecipientCoreReverts() public {
+        vm.expectRevert(
+            abi.encodeWithSelector(StakingExecutionErrors.InvalidRecipient.selector, address(dualPoolStaking))
+        );
+        stakingAdmin.setFeeRecipient(address(dualPoolStaking));
+    }
+
     function testSetForfeitedRecipient() public {
         address newRecipient = address(0x5678);
         stakingAdmin.setForfeitedRecipient(newRecipient);
         assertEq(dualPoolStaking.forfeitedRecipient(), newRecipient);
+    }
+
+    function testSetForfeitedRecipientCoreReverts() public {
+        vm.expectRevert(
+            abi.encodeWithSelector(StakingExecutionErrors.InvalidRecipient.selector, address(dualPoolStaking))
+        );
+        stakingAdmin.setForfeitedRecipient(address(dualPoolStaking));
     }
 
     function testSetRewardDurationA() public {
@@ -2824,7 +2870,6 @@ contract DualPoolStakingTest is Test {
         uint256 firstDuration = 60 days;
         uint256 secondAmount = 200 ether;
         uint256 secondDuration = 30 days;
-        uint256 strandedHalf = firstAmount / 2;
 
         rewardToken.approve(address(dualPoolStaking), type(uint256).max);
         dualPoolStaking.notifyRewardAmountA(firstAmount, firstDuration);
@@ -2840,16 +2885,120 @@ contract DualPoolStakingTest is Test {
         dualPoolStaking.notifyRewardAmountA(secondAmount, secondDuration);
 
         PoolInfo memory pa = dualPoolStaking.poolA();
-        assertEq(pa.rewardRate, (secondAmount + strandedHalf) / secondDuration, "rate must merge leftover once");
-        assertApproxEqAbs(
-            pa.availableRewards, strandedHalf + secondAmount, 1e15, "budget must not inflate merged rate"
-        );
+        assertApproxEqAbs(pa.totalPending, firstAmount, 1e15, "first schedule must be accounted before notify");
+        assertApproxEqAbs(pa.availableRewards, secondAmount, 1e15, "new schedule should not include old owed rewards");
+        assertEq(pa.rewardRate, secondAmount / secondDuration, "rate must use only new amount plus tiny remainder");
         assertEq(pa.badDebt, 0, "double-count would emit past budget and accrue badDebt");
 
         vm.warp(pa.periodFinish);
         vm.prank(user);
         dualPoolStaking.claimA();
         assertEq(dualPoolStaking.poolA().badDebt, 0, "full emission must not leave badDebt");
+        _assertTokenBBalanceInvariant(dualPoolStaking);
+    }
+
+    /// @notice Long-idle claims must settle the full elapsed reward window, not only one MAX_DELTA_TIME chunk.
+    function testClaimAfterLongIdleSettlesFullExpiredWindowA() public {
+        uint256 rewardAmount = 120 ether;
+        uint256 duration = 120 days;
+        rewardToken.approve(address(dualPoolStaking), type(uint256).max);
+        dualPoolStaking.notifyRewardAmountA(rewardAmount, duration);
+
+        vm.startPrank(user);
+        stakingToken.approve(address(dualPoolStaking), DEFAULT_STAKE);
+        dualPoolStaking.stakeA(DEFAULT_STAKE);
+        vm.warp(block.timestamp + duration + 10 days);
+
+        uint256 beforeBal = rewardToken.balanceOf(user);
+        dualPoolStaking.claimA();
+        assertApproxEqAbs(rewardToken.balanceOf(user) - beforeBal, rewardAmount, 1e15);
+        vm.stopPrank();
+    }
+
+    /// @notice A second notify after an expired staked period must not let later stakers share the old schedule.
+    function testNotifyAfterLongIdleDoesNotRescheduleOldRewardsToLateStakerA() public {
+        uint256 firstAmount = 120 ether;
+        uint256 firstDuration = 120 days;
+        uint256 secondAmount = 30 ether;
+        uint256 secondDuration = 30 days;
+        address lateUser = address(2);
+        stakingToken.mint(lateUser, DEFAULT_STAKE);
+
+        rewardToken.approve(address(dualPoolStaking), type(uint256).max);
+        dualPoolStaking.notifyRewardAmountA(firstAmount, firstDuration);
+
+        vm.startPrank(user);
+        stakingToken.approve(address(dualPoolStaking), DEFAULT_STAKE);
+        dualPoolStaking.stakeA(DEFAULT_STAKE);
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + firstDuration + 10 days);
+        rewardToken.mint(address(this), secondAmount);
+        dualPoolStaking.notifyRewardAmountA(secondAmount, secondDuration);
+
+        vm.startPrank(lateUser);
+        stakingToken.approve(address(dualPoolStaking), DEFAULT_STAKE);
+        dualPoolStaking.stakeA(DEFAULT_STAKE);
+        vm.stopPrank();
+
+        PoolInfo memory pa = dualPoolStaking.poolA();
+        assertApproxEqAbs(pa.totalPending, firstAmount, 1e15, "old schedule must already be pending");
+        assertApproxEqAbs(pa.availableRewards, secondAmount, 1e15, "late staker can only share new schedule");
+
+        vm.warp(block.timestamp + secondDuration);
+
+        uint256 earlyBefore = rewardToken.balanceOf(user);
+        vm.prank(user);
+        dualPoolStaking.claimA();
+        uint256 earlyClaimed = rewardToken.balanceOf(user) - earlyBefore;
+
+        vm.warp(block.timestamp + dualPoolStaking.claimCooldown() + 1);
+        uint256 lateBefore = rewardToken.balanceOf(lateUser);
+        vm.prank(lateUser);
+        dualPoolStaking.claimA();
+        uint256 lateClaimed = rewardToken.balanceOf(lateUser) - lateBefore;
+
+        assertGt(earlyClaimed, firstAmount, "early staker receives old schedule plus new share");
+        assertLt(lateClaimed, secondAmount, "late staker receives only a share of the second schedule");
+    }
+
+    /// @notice Expired staked pool + long idle: a new staker must not share the old emission window.
+    function testStakeAfterLongIdleExpiredPoolDoesNotShareOldRewardsA() public {
+        uint256 rewardAmount = 120 ether;
+        uint256 duration = 120 days;
+        address lateUser = address(2);
+        stakingToken.mint(lateUser, DEFAULT_STAKE);
+
+        rewardToken.approve(address(dualPoolStaking), type(uint256).max);
+        dualPoolStaking.notifyRewardAmountA(rewardAmount, duration);
+
+        vm.startPrank(user);
+        stakingToken.approve(address(dualPoolStaking), DEFAULT_STAKE);
+        dualPoolStaking.stakeA(DEFAULT_STAKE);
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + duration + 10 days);
+
+        vm.startPrank(lateUser);
+        stakingToken.approve(address(dualPoolStaking), DEFAULT_STAKE);
+        dualPoolStaking.stakeA(DEFAULT_STAKE);
+        vm.stopPrank();
+
+        (, uint256 lateRewards,) = dualPoolStaking.userInfoA(lateUser);
+        PoolInfo memory pa = dualPoolStaking.poolA();
+
+        assertEq(lateRewards, 0, "late staker must not receive expired-period rewards");
+        assertLe(pa.availableRewards, 1e15, "only rate-rounding remainder may remain");
+        assertApproxEqAbs(pa.totalPending, rewardAmount, 1e15, "expired rewards are pending before late stake shares");
+        assertEq(pa.badDebt, 0);
+
+        vm.prank(user);
+        dualPoolStaking.claimA();
+        assertApproxEqAbs(rewardToken.balanceOf(user), 1000 ether + rewardAmount, 1e15, "old staker claims old rewards");
+
+        vm.prank(lateUser);
+        vm.expectRevert(StakingExecutionErrors.NoRewardsToClaim.selector);
+        dualPoolStaking.claimA();
         _assertTokenBBalanceInvariant(dualPoolStaking);
     }
 
@@ -2879,6 +3028,109 @@ contract DualPoolStakingTest is Test {
         }
 
         vm.stopPrank();
+    }
+
+    /// @notice Empty-pool first stake with short `remainingTime` must clamp `rewardRate` to the notify APR ceiling.
+    function testFirstDepositReanchorClampsToMaxRewardRate() public {
+        uint256 rewardAmount = 1_000_000 ether;
+        uint256 duration = 365 days;
+        rewardToken.mint(address(this), rewardAmount);
+        rewardToken.approve(address(dualPoolStaking), type(uint256).max);
+        dualPoolStaking.notifyRewardAmountA(rewardAmount, duration);
+
+        vm.warp(block.timestamp + duration - 1 days);
+
+        PoolInfo memory beforeStake = dualPoolStaking.poolA();
+        uint256 remainingTime = beforeStake.periodFinish - block.timestamp;
+        uint256 uncappedRate = beforeStake.availableRewards / remainingTime;
+        uint256 maxRate = _maxRewardRate(dualPoolStaking);
+        assertGt(uncappedRate, maxRate, "fixture must exceed APR cap");
+
+        vm.startPrank(user);
+        stakingToken.approve(address(dualPoolStaking), DEFAULT_STAKE);
+        dualPoolStaking.stakeA(DEFAULT_STAKE);
+        vm.stopPrank();
+
+        PoolInfo memory afterStake = dualPoolStaking.poolA();
+        assertEq(afterStake.rewardRate, maxRate, "first deposit must clamp to max reward rate");
+        assertLt(afterStake.rewardRate, uncappedRate, "uncapped rate would exceed ceiling");
+    }
+
+    /// @notice After all stakers exit (`totalStaked == 0`), the next first deposit re-anchors with the same cap.
+    function testSecondRoundFirstDepositClampsToMaxRewardRate() public {
+        uint256 rewardAmount = 1_000_000 ether;
+        uint256 duration = 365 days;
+        rewardToken.mint(address(this), rewardAmount);
+        rewardToken.approve(address(dualPoolStaking), type(uint256).max);
+        dualPoolStaking.notifyRewardAmountA(rewardAmount, duration);
+
+        vm.warp(block.timestamp + duration - 1 days);
+
+        uint256 maxRate = _maxRewardRate(dualPoolStaking);
+
+        vm.startPrank(user);
+        stakingToken.approve(address(dualPoolStaking), DEFAULT_STAKE);
+        dualPoolStaking.stakeA(DEFAULT_STAKE);
+        assertEq(dualPoolStaking.poolA().rewardRate, maxRate, "first deposit clamped");
+
+        dualPoolStaking.withdrawA(DEFAULT_STAKE);
+        assertEq(dualPoolStaking.poolA().totalStaked, 0, "pool empty for second-round first deposit");
+
+        stakingToken.approve(address(dualPoolStaking), DEFAULT_STAKE);
+        dualPoolStaking.stakeA(DEFAULT_STAKE);
+        assertEq(dualPoolStaking.poolA().rewardRate, maxRate, "second-round first deposit must clamp");
+        vm.stopPrank();
+    }
+
+    /// @notice Active-window re-anchor must not overwrite the schedule with `rewardRate == 0` for tiny budgets.
+    function testActiveReanchorMicroEmissionAvoidsZeroRate() public {
+        ReanchorHarness h = new ReanchorHarness();
+        uint256 available = 3;
+        uint256 remainingTime = 100;
+
+        vm.warp(1000);
+        h.seed(available, block.timestamp + remainingTime, block.timestamp);
+        h.applyActive(remainingTime);
+
+        (uint256 rewardRate, uint256 periodFinish, uint256 lastUpdateTime, uint256 availableRewards) = h.snapshot();
+        assertEq(rewardRate, 1, "tiny active budget must use micro-emission");
+        assertEq(periodFinish, block.timestamp + available, "micro-emission drains the exact tiny budget");
+        assertEq(lastUpdateTime, block.timestamp, "micro-emission resets the accrual start");
+        assertEq(availableRewards, available, "budget remains available for accrual to debit");
+    }
+
+    /// @notice `reanchorOnBudgetInjection` on an active window clamps like first-deposit re-anchor (rebalance path).
+    function testRebalanceIntoActivePoolBClampsRewardRate() public {
+        uint256 rewardA = 1_000_000 ether;
+        uint256 durationA = 365 days;
+        rewardToken.mint(address(this), rewardA + 2000 ether);
+        rewardToken.approve(address(dualPoolStaking), type(uint256).max);
+
+        dualPoolStaking.notifyRewardAmountA(rewardA, durationA);
+        vm.warp(block.timestamp + durationA + 1);
+
+        uint256 rewardB = 1000 ether;
+        uint256 durationB = 1 days;
+        dualPoolStaking.notifyRewardAmountB(rewardB, durationB);
+
+        vm.startPrank(user);
+        rewardToken.approve(address(dualPoolStaking), type(uint256).max);
+        dualPoolStaking.stakeB(HALF_STAKE);
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + durationB - 60);
+
+        uint256 remTime = dualPoolStaking.poolB().periodFinish - block.timestamp;
+        uint256 amountToMove = dualPoolStaking.poolA().availableRewards;
+        assertGt(amountToMove, 0, "pool A must hold stranded budget");
+
+        stakingAdmin.rebalanceBudgets(Pool.A, Pool.B, amountToMove);
+
+        PoolInfo memory pb = dualPoolStaking.poolB();
+        uint256 uncappedRate = pb.availableRewards / remTime;
+        uint256 maxRate = _maxRewardRate(dualPoolStaking);
+        assertGt(uncappedRate, maxRate, "fixture must exceed APR cap");
+        assertEq(pb.rewardRate, maxRate, "budget injection must clamp to max reward rate");
     }
 
     /// @dev Deploys core + delegate modules (same wiring as `setUp`, different tokens).
@@ -2941,6 +3193,13 @@ contract DualPoolStakingTest is Test {
     function testDualPoolStakingZeroMaxSupplyReverts() public {
         vm.expectRevert(StakingExecutionErrors.ZeroAmount.selector);
         new DualPoolStaking(address(stakingToken), address(rewardToken), 0);
+    }
+
+    function testDualPoolStakingTinyMaxSupplyRateCapReverts() public {
+        vm.expectRevert(
+            abi.encodeWithSelector(StakingExecutionErrors.ZeroRewardRate.selector, uint256(1), uint256(15_768_000))
+        );
+        new DualPoolStaking(address(stakingToken), address(rewardToken), 1);
     }
 
     /// @notice Pool B stake path rejects TokenB FOT when implied fee exceeds `maxTransferFeeBP` (same rule as notify).
@@ -3197,6 +3456,102 @@ contract DualPoolStakingTest is Test {
         tokenA.approve(address(s), type(uint256).max);
         vm.expectRevert(StakingExecutionErrors.ExcessiveTransferFee.selector);
         s.stakeA(100 ether);
+        vm.stopPrank();
+    }
+
+    /// @notice Outbound `claimB` transfers booked gross; FOT tax is borne by the user wallet (not grossed-up by the pool).
+    function testClaimBFOTUserBearsOutboundTax() public {
+        MockERC20 tokenA = new MockERC20("TKA5", "TKA5");
+        MockFOTERC20 tokenB = new MockFOTERC20("TKBF", "TKBF", 500);
+        uint256 feeBps = 500;
+        DualPoolStaking s = _deployWiredDualPool(address(tokenA), address(tokenB));
+
+        tokenB.mint(address(this), 10_000 ether);
+        tokenB.approve(address(s), type(uint256).max);
+        s.notifyRewardAmountB(SAFE_REWARD_AMOUNT, SAFE_DURATION);
+        vm.warp(block.timestamp + SAFE_DURATION + 1);
+        s.notifyRewardAmountB(SAFE_REWARD_AMOUNT, SAFE_DURATION);
+
+        vm.startPrank(user);
+        tokenB.mint(user, 1000 ether);
+        tokenB.approve(address(s), type(uint256).max);
+        s.stakeB(DEFAULT_STAKE);
+        vm.warp(block.timestamp + SAFE_DURATION);
+
+        vm.recordLogs();
+        uint256 balBefore = tokenB.balanceOf(user);
+        s.claimB();
+        uint256 received = tokenB.balanceOf(user) - balBefore;
+        assertGt(received, 0);
+
+        uint256 grossPaidB;
+        uint256 outboundGross;
+        uint256 outboundNet;
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 claimedTopic = keccak256("Claimed(address,uint256,uint256,uint256)");
+        bytes32 outboundTopic = keccak256("OutboundTransfer(address,address,uint256,uint256)");
+        for (uint256 i; i < logs.length; ++i) {
+            if (logs[i].topics[0] == claimedTopic) {
+                (, grossPaidB,) = abi.decode(logs[i].data, (uint256, uint256, uint256));
+            } else if (logs[i].topics[0] == outboundTopic) {
+                (outboundGross, outboundNet) = abi.decode(logs[i].data, (uint256, uint256));
+            }
+        }
+        assertGt(grossPaidB, 0);
+        assertApproxEqAbs(received, grossPaidB * (10_000 - feeBps) / 10_000, 1);
+        assertEq(outboundGross, grossPaidB, "protocol accounts gross payout");
+        assertEq(outboundNet, received, "event records user net after FOT tax");
+        vm.stopPrank();
+    }
+
+    /// @notice Outbound `withdrawB` sends protocol-net principal gross; FOT outbound tax reduces wallet balance.
+    function testWithdrawBFOTUserBearsOutboundTax() public {
+        MockERC20 tokenA = new MockERC20("TKA6", "TKA6");
+        MockFOTERC20 tokenB = new MockFOTERC20("TKBF2", "TKBF2", 500);
+        uint256 feeBps = 500;
+        DualPoolStaking s = _deployWiredDualPool(address(tokenA), address(tokenB));
+
+        vm.startPrank(user);
+        tokenB.mint(user, 1000 ether);
+        tokenB.approve(address(s), type(uint256).max);
+        s.stakeB(DEFAULT_STAKE);
+        (uint256 staked,,) = s.userInfoB(user);
+        assertGt(staked, 0);
+
+        uint256 stakeTs = s.stakeTimestampB(user);
+        uint256 unlock = s.unlockTimeB(user);
+        vm.warp(stakeTs + 181 days);
+        if (block.timestamp < unlock) vm.warp(unlock);
+
+        uint256 balBefore = tokenB.balanceOf(user);
+        s.withdrawB(staked);
+        uint256 received = tokenB.balanceOf(user) - balBefore;
+        uint256 expectedWallet = staked * (10_000 - feeBps) / 10_000;
+
+        assertApproxEqAbs(received, expectedWallet, 1);
+        vm.stopPrank();
+    }
+
+    /// @notice Outbound claim reverts when TokenB FOT exceeds `maxTransferFeeBP` (symmetric with inbound stake/notify).
+    function testClaimBFOTRevertsWhenOutboundTaxBeyondCap() public {
+        MockERC20 tokenA = new MockERC20("TKA7", "TKA7");
+        MockFOTERC20 tokenB = new MockFOTERC20("TKBF3", "TKBF3", 500);
+        DualPoolStaking s = _deployWiredDualPool(address(tokenA), address(tokenB));
+
+        tokenB.mint(address(this), 10_000 ether);
+        tokenB.approve(address(s), type(uint256).max);
+        s.notifyRewardAmountB(SAFE_REWARD_AMOUNT, SAFE_DURATION);
+        vm.warp(block.timestamp + SAFE_DURATION + 1);
+        s.notifyRewardAmountB(SAFE_REWARD_AMOUNT, SAFE_DURATION);
+
+        vm.startPrank(user);
+        tokenB.mint(user, 1000 ether);
+        tokenB.approve(address(s), type(uint256).max);
+        s.stakeB(DEFAULT_STAKE);
+        vm.warp(block.timestamp + SAFE_DURATION);
+        tokenB.setFeeBps(2000);
+        vm.expectRevert(StakingExecutionErrors.ExcessiveTransferFee.selector);
+        s.claimB();
         vm.stopPrank();
     }
 

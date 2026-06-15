@@ -77,6 +77,9 @@ abstract contract StakingExecutionErrors {
     error TokenRecoveryRestricted();
     /// @notice Zero address passed where a non-zero address is required.
     error ZeroAddress();
+    /// @notice Recipient address is operationally unsafe for the requested payout / sweep path.
+    /// @param recipient Address rejected by the operation.
+    error InvalidRecipient(address recipient);
     /// @notice Module pointer must reference an address with deployed bytecode (EOA / empty / destroyed).
     /// @param module Address that failed `extcodesize` check.
     error NotAContract(address module);

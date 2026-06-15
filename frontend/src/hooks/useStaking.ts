@@ -80,6 +80,7 @@ export function useStaking() {
       { address: STAKING, abi: ABI, functionName: "midTermFeeBP" },
       { address: STAKING, abi: ABI, functionName: "penaltyfeeBP" },
       { address: STAKING, abi: ABI, functionName: "unclaimedFeesB" },
+      { address: STAKING, abi: ABI, functionName: "maxTransferFeeBP" },
     ];
     if (!address) return base;
     return [
@@ -114,6 +115,7 @@ export function useStaking() {
     const midTermFeeBP = pick<bigint>(d, 9, 0n);
     const penaltyfeeBP = pick<bigint>(d, 10, 0n);
     const unclaimedFeesB = pick<bigint>(d, 11, 0n);
+    const maxTransferFeeBP = pick<bigint>(d, 12, 0n);
 
     const status: ProtocolStatus = shutdown ? "SHUTDOWN" : emergencyMode ? "EMERGENCY" : paused ? "PAUSED" : "NORMAL";
     const globalRequired =
@@ -127,11 +129,11 @@ export function useStaking() {
       (poolB?.dust ?? 0n);
     const globalBadDebt = (poolA?.badDebt ?? 0n) + (poolB?.badDebt ?? 0n);
 
-    const userA = address ? pick(d, 12, undefined) : undefined;
-    const userB = address ? pick(d, 13, undefined) : undefined;
-    const unlockTimeB = address ? pick<bigint>(d, 14, 0n) : 0n;
-    const stakeTimestampB = address ? pick<bigint>(d, 15, 0n) : 0n;
-    const lastClaimTime = address ? pick<bigint>(d, 16, 0n) : 0n;
+    const userA = address ? pick(d, 13, undefined) : undefined;
+    const userB = address ? pick(d, 14, undefined) : undefined;
+    const unlockTimeB = address ? pick<bigint>(d, 15, 0n) : 0n;
+    const stakeTimestampB = address ? pick<bigint>(d, 16, 0n) : 0n;
+    const lastClaimTime = address ? pick<bigint>(d, 17, 0n) : 0n;
 
     return {
       status,
@@ -146,6 +148,7 @@ export function useStaking() {
       midTermFeeBP,
       penaltyfeeBP,
       unclaimedFeesB,
+      maxTransferFeeBP,
       userA,
       userB,
       unlockTimeB,

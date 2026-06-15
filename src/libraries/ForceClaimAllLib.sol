@@ -2,17 +2,18 @@
 pragma solidity ^0.8.20;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 import {PoolInfo, UserInfo} from "../StakeTypes.sol";
+import {FOTTransferLib} from "./FOTTransferLib.sol";
 import {StakingExecutionErrors} from "../StakingExecutionErrors.sol";
 
 /// @title ForceClaimAllLib
 /// @notice Linked library: `forceClaimAll` settlement across pools with partial pay, debt, and dust handling.
-/// @dev Computes spendable TokenB as `balance - (poolB.totalStaked + unclaimedFeesB)` then allocates sequentially to Pool A then B rewards.
+/// @dev Liquidation policy: spendable TokenB is `balance - (poolB.totalStaked + unclaimedFeesB)`, then allocated
+///      sequentially to Pool A then Pool B rewards. It intentionally does not reserve `availableRewards` because this
+///      path is available only during shutdown or bad debt, where unpaid user rewards take priority over future budgets.
 library ForceClaimAllLib {
-    using SafeERC20 for IERC20;
 
     /// @notice Inputs for `executeForceClaimAll`.
     struct ForceClaimParams {
@@ -26,6 +27,10 @@ library ForceClaimAllLib {
         uint256 unclaimedFeesB;
         /// @notice When true, bypasses `BelowMinClaim` for small totals if bad debt is also zero (see revert tree).
         bool shutdown;
+        /// @notice FOT outbound tax ceiling (`0` = standard ERC20).
+        uint256 maxTransferFeeBP;
+        /// @notice Basis-point denominator (`10_000`).
+        uint256 basisPoints;
     }
 
     /// @notice Partial payment breakdown for analytics and dust/bad-debt routing.
@@ -119,7 +124,7 @@ library ForceClaimAllLib {
 
         uint256 paidTotal = r.payA + r.payB;
         if (paidTotal > 0) {
-            p.rewardToken.safeTransfer(p.user, paidTotal);
+            FOTTransferLib.transferGross(p.rewardToken, p.user, paidTotal, p.maxTransferFeeBP, p.basisPoints);
         }
     }
 }

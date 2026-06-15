@@ -22,6 +22,10 @@ export function mapContractError(error: unknown): string {
   if (text.includes("TimelockNotFound")) return "未找到可取消的 timelock 操作。";
   if (text.includes("ForceClaimAllNotAvailable")) return "forceClaimAll 仅在关停或存在坏账时可用，请使用 claimA/claimB。";
   if (text.includes("EmergencyModeActive") || text.includes("EmergencyActive")) return "协议处于 Emergency 模式，当前操作不可用。";
+  if (text.includes("InvalidRecipient")) return "收款地址不可用：不能设置为质押合约自身，请更换治理金库或多签地址。";
+  if (text.includes("ExcessiveTransferFee")) return "代币转账税超过协议当前 maxTransferFeeBP 容忍上限，交易已保护性回滚。";
+  if (text.includes("InvalidMaxTransferFeeBp")) return "maxTransferFeeBP 参数无效，不能超过 10000 bp。";
+  if (text.includes("NotAContract")) return "模块地址无合约代码，请确认部署地址和网络。";
   if (text.includes("InvariantViolation")) {
     return "奖励池资金与负债校验未通过（InvariantViolation）。请先由运营向质押合约注入 TokenB（notifyReward），或向合约直接转入少量 TokenB 补足账面缺口后再试。";
   }

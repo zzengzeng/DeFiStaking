@@ -11,6 +11,7 @@ import { ForceClaimAllButton } from "@/components/ForceClaimAllButton";
 import { StakeCard } from "@/components/StakeCard";
 import { WithdrawPanel } from "@/components/WithdrawPanel";
 import { DeploymentMismatchAlert } from "@/components/DeploymentMismatchAlert";
+import { FotClaimHint } from "@/components/FotClaimHint";
 import { contractAddresses } from "@/contracts/addresses";
 import { usePoolB } from "@/hooks/usePoolB";
 import { useWriteWithStatus } from "@/hooks/useWriteWithStatus";
@@ -182,6 +183,7 @@ export default function PoolBPage() {
           protocolStatus={pool.status}
           maxWithdrawWei={user.staked}
           tokenSymbol="TokenB"
+          maxTransferFeeBP={pool.maxTransferFeeBP}
           onWithdraw={(v) => runWithdraw(v)}
           disabled={!pool.canWithdraw || busy}
         />
@@ -217,6 +219,7 @@ export default function PoolBPage() {
         {cooldownLabel ? (
           <p className="mt-2 text-xs text-amber-200/90">Claim cooldown: {cooldownLabel} remaining</p>
         ) : null}
+        <FotClaimHint grossRewards={user.rewards} maxTransferFeeBP={pool.maxTransferFeeBP} />
         <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
           <button
             type="button"

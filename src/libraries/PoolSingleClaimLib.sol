@@ -2,17 +2,16 @@
 pragma solidity ^0.8.20;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {PoolInfo, UserInfo} from "../StakeTypes.sol";
+import {FOTTransferLib} from "./FOTTransferLib.sol";
 import {StakingExecutionErrors} from "../StakingExecutionErrors.sol";
 
 /// @title PoolSingleClaimLib
 /// @notice Linked library: single-pool reward claim with min-claim, bad-debt, and on-hand liquidity checks.
-/// @dev Pays out the core `rewardToken` (TokenB); requires `balanceOf(this) >= reward` after pending accounting.
+/// @dev Pays out the core `rewardToken` (TokenB). Ledger `rewards` is the **gross** vault transfer amount;
+///      FOT transfer tax on outbound is borne by the user (see PRD §4.6).
 library PoolSingleClaimLib {
-    using SafeERC20 for IERC20;
-
     /// @notice Static parameters for `executeClaim` (global config + cross-pool bad-debt guard).
     struct ClaimParams {
         /// @notice ERC20 used for payout (TokenB).
@@ -25,14 +24,14 @@ library PoolSingleClaimLib {
         uint256 badDebtPoolA;
         /// @notice Pool B `badDebt` snapshot; both must be zero to allow claim.
         uint256 badDebtPoolB;
+        /// @notice FOT outbound tax ceiling (`0` = standard ERC20, no post-transfer check).
+        uint256 maxTransferFeeBP;
+        /// @notice Basis-point denominator (`10_000`).
+        uint256 basisPoints;
     }
 
-    /// @notice Pays `userInfo.rewards` to `p.claimer` in reward token if all checks pass; updates pending and cooldown.
-    /// @param pool Pool being claimed against (A or B).
-    /// @param userInfo User ledger row for that pool.
-    /// @param lastClaimTime Per-user cooldown map (keyed by `p.claimer`).
-    /// @param p Claim parameters (`ClaimParams`).
-    /// @return reward Amount transferred out (equals pre-call `userInfo.rewards`).
+    /// @notice Pays `userInfo.rewards` to `p.claimer` if all checks pass; updates pending and cooldown.
+    /// @return reward Gross amount sent from the vault (wallet net may be lower under FOT TokenB).
     function executeClaim(
         PoolInfo storage pool,
         UserInfo storage userInfo,
@@ -62,6 +61,6 @@ library PoolSingleClaimLib {
         pool.totalPending -= reward;
         userInfo.rewards = 0;
         lastClaimTime[p.claimer] = block.timestamp;
-        p.rewardToken.safeTransfer(p.claimer, reward);
+        FOTTransferLib.transferGross(p.rewardToken, p.claimer, reward, p.maxTransferFeeBP, p.basisPoints);
     }
 }

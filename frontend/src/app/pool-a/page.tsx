@@ -10,6 +10,7 @@ import { StakeCard } from "@/components/StakeCard";
 import { ForceClaimAllButton } from "@/components/ForceClaimAllButton";
 import { WithdrawPanel } from "@/components/WithdrawPanel";
 import { DeploymentMismatchAlert } from "@/components/DeploymentMismatchAlert";
+import { FotClaimHint } from "@/components/FotClaimHint";
 import { contractAddresses } from "@/contracts/addresses";
 import { usePoolA } from "@/hooks/usePoolA";
 import { usePoolAStakeSince } from "@/hooks/usePoolAStakeSince";
@@ -158,6 +159,7 @@ export default function PoolAPage() {
           protocolStatus={pool.status}
           maxWithdrawWei={userStakeA}
           tokenSymbol="TokenA"
+          maxTransferFeeBP={pool.maxTransferFeeBP}
           showFeeTiers={false}
           onWithdraw={(v) => runWithdraw(v)}
           disabled={!pool.canWithdraw || busy || userStakeA <= 0n}
@@ -183,6 +185,7 @@ export default function PoolAPage() {
         {cooldownLabel ? (
           <p className="mt-2 text-xs text-amber-200/90">Claim cooldown: {cooldownLabel} remaining</p>
         ) : null}
+        <FotClaimHint grossRewards={pendingA} maxTransferFeeBP={pool.maxTransferFeeBP} />
         <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
           <button
             type="button"

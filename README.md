@@ -184,7 +184,7 @@ constructor(
 | `withdrawA(amount)` / `withdrawB(amount)` | 提款（A 无锁无费；B 含 Early Exit / Mature 费率阶梯） |
 | `claimA()` / `claimB()` | 分池领取 TokenB 奖励（共享 `claimCooldown`、`minClaimAmount`） |
 | `compoundB()` | A+B 已确权奖励全部转入 Pool B 本金 |
-| `forceClaimAll()` | 跨池领取；正常态各池须满足 `minClaimAmount`；停机/坏账时可部分兑付 |
+| `forceClaimAll()` | 跨池领取；正常态各池须满足 `minClaimAmount`；停机/坏账时可部分兑付，清算余额只隔离 Pool B 本金与未提手续费 |
 | `emergencyWithdrawA()` / `emergencyWithdrawB()` | 紧急模式分池退出本金；事件含 `principal` 与 `rewardsForfeited` |
 
 ### 运维入口（OPERATOR_ROLE，0h）
@@ -298,6 +298,17 @@ make deploy NETWORK=sepolia
 - **WADP 防套利** — 追加质押不得重置费率阶梯；`PoolBWadpLib` 使用 Ceil 避免向下偏置
 - **MAX_DELTA_TIME（30 天）** — 单次时间差上限，防溢出
 - **Dust 回收** — 截断粉尘累积至 `DUST_TOLERANCE` 后回灌预算
+
+### 上线前风险假设
+
+生产部署前必须逐项确认 [`PRD.md`](PRD.md) §10 的风险假设与验收清单，尤其是：
+
+- 治理/模块升级由 Timelock + 多签控制，并保存模块 bytecode hash
+- TokenA/TokenB 不得是 rebasing、ERC777 钩子、黑名单或恶意回调资产
+- FOT TokenB 出账税费由用户承担，前端必须展示 gross 与 net
+- 所有奖励、预算、退出、停机、坏账入口必须完成过期周期 catch-up
+- BadDebt 修复路径必须确认真实付款人能向 Core 补款
+- 监控必须覆盖不变量、坏账、FOT 差额、pause/emergency/shutdown 与 stale schedule
 
 ### 规格文档
 

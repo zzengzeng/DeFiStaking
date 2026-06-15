@@ -1,6 +1,7 @@
 "use client";
 
 import { bpToPercent, formatToken } from "@/lib/format";
+import { walletReceiveAfterFee } from "@/lib/fot";
 
 type Props = {
   netAmount: bigint;
@@ -9,18 +10,50 @@ type Props = {
   feeBp: bigint;
   penaltyBp: bigint;
   tokenSymbol?: string;
+  /** When > 0, outbound FOT tax is borne by the user; show gross vs estimated wallet net. */
+  maxTransferFeeBP?: bigint;
 };
 
-export function WithdrawPreview({ netAmount, feeAmount, penaltyAmount, feeBp, penaltyBp, tokenSymbol = "TokenB" }: Props) {
+export function WithdrawPreview({
+  netAmount,
+  feeAmount,
+  penaltyAmount,
+  feeBp,
+  penaltyBp,
+  tokenSymbol = "TokenB",
+  maxTransferFeeBP = 0n,
+}: Props) {
   const netDisplay = netAmount < 0n ? 0n : netAmount;
+  const fotActive = maxTransferFeeBP > 0n;
+  const walletEst = walletReceiveAfterFee(netDisplay, maxTransferFeeBP);
   return (
     <div className="grid min-w-0 gap-2 rounded-xl border border-zinc-800 bg-zinc-950 p-3 text-sm">
-      <div className="flex min-w-0 flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between">
-        <span className="shrink-0 text-zinc-400">You Receive</span>
-        <span className="min-w-0 break-words text-right font-medium text-emerald-300 sm:text-left">
-          {formatToken(netDisplay)} {tokenSymbol}
-        </span>
-      </div>
+      {fotActive ? (
+        <>
+          <div className="flex min-w-0 flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between">
+            <span className="shrink-0 text-zinc-400">Contract sends (gross)</span>
+            <span className="min-w-0 break-words text-right font-medium text-zinc-200 sm:text-left">
+              {formatToken(netDisplay)} {tokenSymbol}
+            </span>
+          </div>
+          <div className="flex min-w-0 flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between">
+            <span className="shrink-0 text-zinc-400">Est. wallet receive</span>
+            <span className="min-w-0 break-words text-right font-medium text-emerald-300 sm:text-left">
+              {formatToken(walletEst)} {tokenSymbol}
+            </span>
+          </div>
+          <p className="text-xs text-amber-200/80">
+            FOT token: transfer tax (up to {bpToPercent(maxTransferFeeBP)}) is borne by you, not subsidized by the pool.
+          </p>
+        </>
+      ) : (
+        <div className="flex min-w-0 flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between">
+          <span className="shrink-0 text-zinc-400">You Receive</span>
+          <span className="min-w-0 break-words text-right font-medium text-emerald-300 sm:text-left">
+            {formatToken(netDisplay)} {tokenSymbol}
+          </span>
+        </div>
+      )}
       <div className="flex min-w-0 flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between">
         <span className="text-zinc-400">Fee</span>
         <span className="min-w-0 break-words text-right sm:text-left">

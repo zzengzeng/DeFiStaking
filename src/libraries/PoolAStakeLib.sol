@@ -5,6 +5,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {PoolInfo, UserInfo} from "../StakeTypes.sol";
+import {FOTTransferLib} from "./FOTTransferLib.sol";
 import {RewardReanchorLib} from "./RewardReanchorLib.sol";
 import {StakingExecutionErrors} from "../StakingExecutionErrors.sol";
 
@@ -42,11 +43,15 @@ library PoolAStakeLib {
     /// @param userInfoA Pool A per-user mapping.
     /// @param user Account whose stake is reduced.
     /// @param amount Principal amount to withdraw (must be `> 0` and `<= user.staked`).
+    /// @param maxTransferFeeBP FOT outbound tax ceiling for TokenA (`0` = standard ERC20).
+    /// @param basisPoints Basis-point denominator (`10_000`).
     function executeWithdrawA(
         PoolInfo storage poolA,
         mapping(address => UserInfo) storage userInfoA,
         address user,
-        uint256 amount
+        uint256 amount,
+        uint256 maxTransferFeeBP,
+        uint256 basisPoints
     ) external {
         UserInfo storage userA = userInfoA[user];
         if (amount == 0) {
@@ -59,7 +64,7 @@ library PoolAStakeLib {
         userA.staked -= amount;
         userA.rewardPaid = poolA.accRewardPerToken;
         poolA.totalStaked -= amount;
-        poolA.stakingToken.safeTransfer(user, amount);
+        FOTTransferLib.transferGross(poolA.stakingToken, user, amount, maxTransferFeeBP, basisPoints);
     }
 
     /// @notice Stakes Pool A for `p.user`; returns actually received amount after FOT checks.
@@ -98,7 +103,14 @@ library PoolAStakeLib {
         uint256 remainingTime = poolA.periodFinish > block.timestamp ? poolA.periodFinish - block.timestamp : 0;
         if (poolA.totalStaked > 0 && poolA.availableRewards > 0) {
             if (remainingTime > 0 && isFirstDeposit) {
-                poolA.rewardRate = poolA.availableRewards / remainingTime;
+                RewardReanchorLib.applyCappedRateForRemainingWindow(
+                    poolA,
+                    remainingTime,
+                    p.maxTotalSupplyBForRewardRateCap,
+                    p.maxAprBp,
+                    p.basisPoints,
+                    p.secondsPerYear
+                );
             } else if (remainingTime == 0) {
                 RewardReanchorLib.reanchorStaleSchedule(
                     poolA,

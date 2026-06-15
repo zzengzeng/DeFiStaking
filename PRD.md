@@ -24,8 +24,9 @@
 | **不变量弹性豁免** | `_assertInvariantB()` 在 Normal 模式失败时必 revert；在 **EmergencyWithdraw** 路径下仅警告不回滚。 |
 | **WADP 防套利** | 任何追加质押行为必须通过时间加权算法重算持仓起点，严禁通过 1 wei 追加重置费率阶梯。 |
 | **TVL 校验完整性** | 所有 Stake 操作的 Cap 检查必须包含 **“真实入账的拟新增量”**，防范闪电贷瞬时攻击与 FOT 额度虚占。 |
-| **空池重锚** | 当池子为空时奖励不释放；`periodFinish` 已过期但预算仍在时由 `RewardReanchorLib` 重排；首位质押/复利进 B 池时按剩余窗口或预算重锚 `rewardRate`（见 **§4.5**）。 |
+| **空池重锚** | 当池子为空时奖励不释放；`periodFinish` 已过期但预算仍在时由 `RewardReanchorLib` 重排；首位质押/复利进 B 池时按剩余窗口重锚 `rewardRate`，**活跃窗口与过期窗口均受 `MAX_REWARD_RATE_*` 约束**（见 **§4.5**）。 |
 | **用户奖励账本对账** | Core 维护 `bookedUserRewardsA/B`（各池 `userInfo*.rewards` 之和），与 `totalPending` 对账，支撑停机 `forceShutdownFinalize` 与 orphan pending 清扫（见 **§3.2**、**§7.4**）。 |
+| **FOT 税费由用户承担** | 入账与出账均不由池子补贴 FOT 税；`maxTransferFeeBP` 对称封顶；前端须展示「合约转出额 vs 预计到手」（见 **§4.6**）。 |
 
 ### 1.3 文档范围
 
@@ -362,7 +363,7 @@ function _updateGlobalX() internal {
 
 ```
 
-> **补充机制：空池重锚 (Re-anchor)** — 详见 **§4.5**。当 `totalStakedX == 0` 时 `_updateGlobalX` 不消耗 `availableRewards`；在 `stakeX` / `compoundB` 增加 B 池本金后须重锚 `rewardRate`，防止预算空转或 APR 被空置期稀释。
+> **补充机制：空池重锚 (Re-anchor)** — 详见 **§4.5**。当 `totalStakedX == 0` 时 `_updateGlobalX` 不消耗 `availableRewards`；在 `stakeX` / `compoundB` 增加 B 池本金后须重锚 `rewardRate`（活跃窗受 `MAX_REWARD_RATE_X` clamp），防止预算空转或 APR 被空置期稀释，同时避免短窗口无界抬高瞬时发射速率。
 
 ### 4.2 用户奖励结算 _settleUserX(user)
 
@@ -451,15 +452,50 @@ function _updateWADP(
 
 ### 4.5 空池 / 过期窗口重锚（`RewardReanchorLib`）
 
-在 **`stakeA` / `stakeB` / `compoundB`** 增加本金后，若 `availableRewardsX > 0` 且 `totalStakedX > 0`，按剩余排放窗口重算速率：
+在 **`stakeA` / `stakeB` / `compoundB`** 增加本金后，若 `availableRewardsX > 0` 且 `totalStakedX > 0`，按剩余排放窗口重算速率。另：**`availableRewards` 在活跃窗口内被动增长**（Pool B Early Exit 罚金/没收、`rebalanceBudgets` 调入、`resolveBadDebt` 盈余等）时，由 **`RewardReanchorLib.reanchorOnBudgetInjection`** 刷新 `rewardRate`（与下表活跃窗路径共用同一 cap 逻辑）。
 
 | 条件 | 行为 |
 | --- | --- |
-| **首笔进池**（`totalStaked` 由 0 变 >0）且 `remainingTime = periodFinish - now > 0` | `rewardRate = availableRewards / remainingTime`（压缩剩余窗口，抬高 APR） |
+| **首笔进池**（`totalStaked` 由 0 变 >0，含全员撤出后的「第二轮首笔」）且 `remainingTime = periodFinish - now > 0` | 调用 **`RewardReanchorLib.applyCappedRateForRemainingWindow`**：`rawRate = availableRewards / remainingTime`，`rewardRate = min(rawRate, MAX_REWARD_RATE_X)`（压缩剩余窗口、抬高 APR，**但不突破 notify 同源速率上限**） |
+| **活跃窗预算注入**（`remainingTime > 0` 且 `availableRewards` 增长） | 同上 **`applyCappedRateForRemainingWindow`**（`reanchorOnBudgetInjection` 活跃分支） |
 | **`remainingTime == 0`**（`periodFinish` 已过）且 `availableRewards > 0` | 调用 **`RewardReanchorLib.reanchorStaleSchedule`**：用当前 `availableRewards` 按 `MIN_REWARD_RATE_DURATION`～`MAX_DURATION` 与 `MAX_REWARD_RATE_*` 上限重设 `rewardRate`、`periodFinish`、`lastUpdateTime` |
 | 否则 | 不重锚 |
 
+**速率上限（与 `NotifyRewardLib` / 附录 A 一致）**
+
+$$
+MAX\_REWARD\_RATE\_X = \frac{\text{maxTotalSupplyBForRewardRateCap} \times MAX\_APR\_BP}{BASIS\_POINTS \times SECONDS\_PER\_YEAR}
+$$
+
+**超额预算处理**：当 `rawRate > MAX_REWARD_RATE_X` 时，**clamp 而非 revert**；未按 `rawRate` 即时排完的预算保留在 `availableRewards`，由后续 accrual、`reanchorStaleSchedule`（`remainingTime` 归零后）或运维 `notify` 的 `carryStranded` 继续释放。**不重锚路径与 notify 的差异**：`notify` 对超 cap 的 `newRate` 仍 **revert**（`RewardRateExceedsMax`），因属主动注资；用户侧/被动注入重锚则优先保证可继续排放。
+
 **Operator 二次注资**：若上一周期在空池下结束导致 `availableRewards` 滞留，下一次 `notifyRewardAmount*` 须将 **`carryStranded = availableRewards`**（当 `now >= periodFinish`）并入 `merged = actualAmount + leftover + carryStranded` 再算新速率（`NotifyRewardLib`，见 **§6.2**）。
+
+### 4.6 FOT（Fee-On-Transfer）税费承担原则
+
+本协议对 FOT 类 ERC20 采用**对称、由用户承担**的税费模型：池子金库不为用户补贴链上转账税，避免不可持续的隐性补贴与账本/物理余额长期偏离。
+
+| 方向 | 行为 | 账本语义 |
+| --- | --- | --- |
+| **入账**（`stakeA` / `stakeB` / `notifyRewardAmount*`） | `balanceOf` 前后差得到 `received`；若隐含税率超过 `maxTransferFeeBP` 则 `ExcessiveTransferFee` | `user.staked`、`availableRewards` 等按 **实收 net** 记账 |
+| **出账**（`claimA` / `claimB` / `withdrawA` / `withdrawB` / `forceClaimAll` / `emergencyWithdraw*` / `claimFees`） | 按账面 **gross** 调用 `transfer`；**不 gross-up**；转出后校验收款方 implied fee ≤ `maxTransferFeeBP` | `user.rewards`、提现 `netAmount` 等为合约转出额；钱包实收可能更低 |
+
+**链上辅助**：`FOTTransferLib.walletReceiveAfterFee(gross, maxTransferFeeBP, BASIS_POINTS)` 与 `transferGross` 供库内及链下预览共用同一公式。
+
+**前端要求（产品）**
+
+* 当 `maxTransferFeeBP > 0` 时，Claim / Withdraw 预览须区分：
+  * **合约转出额**（链上 `rewards` 或扣费后本金净额）；
+  * **预计钱包到手**（按 `maxTransferFeeBP` 上限估算，非保证值；实际以 Token 合约税率为准）。
+* 标准 ERC20 生产部署应将 `maxTransferFeeBP` 设为 **0**（跳过出账税后校验，行为等同普通 `safeTransfer`）。
+
+**合理性说明（设计取舍）**
+
+* FOT 税是 Token 合约属性，任意钱包间转账均可能扣税；由协议池子补贴会使金库持续失血且难以审计。
+* 入账已按实收 net 记账，出账由用户承担转出税在语义上**对称、可预期**。
+* 行业常见做法为披露税率 + 前端估算到手；本协议以 `maxTransferFeeBP` 提供链上封顶保护，拒绝超出容忍度的恶意高税 Token。
+
+> **非 FOT 费用**：Pool B 的 `withdrawFeeBP` / `midTermFeeBP` / `penaltyfeeBP` 等**协议费**仍按 PRD 既有流向表处理（留池或记入 `unclaimedFeesB`），与 FOT 链上转账税无关。
 
 ---
 
@@ -505,7 +541,9 @@ require(maxTVLCapX == 0 || totalStakedX + received <= maxTVLCapX, "CAP_EXCEEDED"
 uint256 remainingTime = periodFinishX > block.timestamp ? periodFinishX - block.timestamp : 0;
 if (totalStakedX > 0 && availableRewardsX > 0) {
     if (remainingTime > 0 && isFirstDeposit) {
-        rewardRateX = availableRewardsX / remainingTime;
+        RewardReanchorLib.applyCappedRateForRemainingWindow(
+            poolX, remainingTime, maxTotalSupplyBForRewardRateCap, MAX_APR_BP, BASIS_POINTS, SECONDS_PER_YEAR
+        );
     } else if (remainingTime == 0) {
         RewardReanchorLib.reanchorStaleSchedule(poolX, MIN_REWARD_RATE_DURATION, MAX_DURATION, ...);
     }
@@ -569,7 +607,8 @@ if (totalStakedX > 0 && availableRewardsX > 0) {
 步骤 10：判断 Pool B 重锚（与 §4.5 一致；`wasEmptyB` 或 `remTime == 0` 路径）
   uint256 remTime = periodFinishB > block.timestamp ? periodFinishB - block.timestamp : 0;
   if (poolB.totalStaked > 0 && poolB.availableRewards > 0) {
-      if (wasEmptyB && remTime > 0) rewardRateB = availableRewardsB / remTime;
+      if (wasEmptyB && remTime > 0)
+          RewardReanchorLib.applyCappedRateForRemainingWindow(poolB, remTime, ...);
       else if (remTime == 0) RewardReanchorLib.reanchorStaleSchedule(...);
   }
   bookedUserRewardsA -= rA; bookedUserRewardsB -= rB;  // 与 rewards 清零同步
@@ -622,7 +661,12 @@ availableRewardsB += rB;
 
 // 步骤 4：罚金计算与路由（留在合约，不对外转账）
 uint256 penalty = amount * penaltyfeeBP / BASIS_POINTS;
-availableRewardsB += penalty;  
+availableRewardsB += penalty;
+
+// 步骤 4b：活跃窗预算增长后重锚（与 §4.5 一致，受 MAX_REWARD_RATE_B 约束）
+if (rB > 0 || penalty > 0) {
+    RewardReanchorLib.reanchorOnBudgetInjection(poolB, reanchorCaps);
+}
 
 // 步骤 5：强固化债务快照 (Fail-safe)
 userRewardPaidB[user] = accRewardPerTokenB;
@@ -716,8 +760,9 @@ function forceClaimAll() external nonReentrant {
         if (rB > 0) require(rB >= minClaimAmount);
     }
     
-    // 【核心修复】：精准扣除受保护的“硬性锁定资金”（本金+未提手续费）
-    // 防止极端坏账时 forceClaimAll 穿透并吃掉其他 Pool B 用户的本金
+    // 清算策略：仅隔离硬性锁定资金（Pool B 本金 + 未提手续费）。
+    // 不再隔离 availableRewards / dust，因为该入口只在停机或坏账下开放；
+    // 此时已确权用户奖励优先于未来预算，兑付顺序为 Pool A -> Pool B。
     uint256 balanceB = rewardTokenB.balanceOf(address(this));
     uint256 lockedB = totalStakedB + unclaimedFeesB;
     uint256 remain = balanceB > lockedB ? balanceB - lockedB : 0;
@@ -856,7 +901,7 @@ emit RewardNotified(Pool.X, actualAmount, effectiveDuration, newRate);
 
 必须实现以下函数以消耗事件定义。合约层为 **`onlyRole(ADMIN_ROLE)`**（及 `nonReentrant` 等）；**生产环境**下须由 **`TimelockController` 在达到 `minDelay`（例如 ≥48h）后** 调用治理门面再触发 Core（见 **§2.1.1**）。伪代码中的 `timelocked(48 hours)` **仅表示产品级延迟要求**，**不**表示在 Core 上实现同名修饰符。
 
-* `rebalanceBudgets(Pool from, Pool to, uint256 amt)`: `require(badDebtA == 0 && badDebtB == 0)`，触发 `BudgetRebalanced`。
+* `rebalanceBudgets(Pool from, Pool to, uint256 amt)`: `require(badDebtA == 0 && badDebtB == 0)`；目标池在活跃排放窗内须触发 **`reanchorOnBudgetInjection`**（`applyCappedRateForRemainingWindow`），触发 `BudgetRebalanced`。
 * `claimFees()`: Admin 提取 `unclaimedFeesB`，提取后清零，外转 TokenB。
 * `setTVLCapX(uint256 cap)`: 触发 `TVLCapUpdated`。
 * `setMinStakeAmountX(uint256 amt)`: 触发 `MinStakeAmountUpdated`。
@@ -1122,7 +1167,7 @@ error StillStaked();
 
 | 场景 | 处理规则与底层逻辑 |
 | --- | --- |
-| **空池首笔注入** | 采用 **Re-anchor（重锚）算法**。不推延周期，首位用户进入时按剩余预算重算 `rewardRate`，防止 APR 被前期空置时间稀释。 |
+| **空池首笔注入** | 采用 **Re-anchor（重锚）算法**。不推延周期，首位用户进入时按剩余预算重算 `rewardRate`（`min(available/remainingTime, MAX_REWARD_RATE_X)`），防止 APR 被前期空置时间稀释，同时封堵短窗口超高瞬时 APR（含闪电贷抢首笔、池子清零后再首笔）。 |
 | **巨鲸追加仓位** | 取 `max(oldUnlock, now+lockDuration)`。大额资金追加无法压缩原有解锁时间，强制遵守锁定期限。 |
 | **WADP 与 Lock 差异** | 属故意设计：提现费率由 WADP 加权更新（平滑后退），而锁定周期受 `Rolling Lock` 约束全额延长。 |
 | **CompoundB 豁免 Cap** | 复投产生的增加不占用 TVL Cap 配额限制，防止池子接近饱满时直接卡死用户的自动复投。 |
@@ -1152,7 +1197,7 @@ error StillStaked();
 | **WADP 费率计时** (防套利) | $T_{new}=\left\lceil\frac{(Staked_{old} \times T_{old})+(Amount_{new} \times Now)}{Staked_{old}+Amount_{new}}\right\rceil$（`PoolBWadpLib`，Ceil） |
 | **新奖励速率** (notify) | $rewardRate=\frac{actual+leftover+carryStranded}{effectiveDuration}$；`duration==0` → `effectiveDuration=pool.rewardDuration` |
 | **过期窗重锚** (stake/compound) | `remainingTime==0` 且 `availableRewards>0` → `RewardReanchorLib.reanchorStaleSchedule` |
-| **首笔进池重锚** | `isFirstDeposit && remainingTime>0` → `rewardRate=availableRewards/remainingTime` |
+| **活跃窗重锚** (首笔进池 / 预算注入) | `remainingTime>0` 且预算需重排 → `rawRate=availableRewards/remainingTime`，`rewardRate=min(rawRate, MAX_REWARD_RATE_X)`（`applyCappedRateForRemainingWindow` / `reanchorOnBudgetInjection`） |
 | **停机 orphan** | $orphan_X=totalPending_X-bookedUserRewards_X$；finalize 后 $totalPending_X \leftarrow bookedUserRewards_X$ |
 | **Early Exit 罚金（Pool B）** | $Penalty=\frac{Amount \times penaltyfeeBP}{10000}$ |
 | **minEarlyExit 约束** (防零，Pool B) | $minEarlyExitAmountB \ge \lceil \frac{BASIS\_POINTS}{penaltyfeeBP} \rceil$ |
@@ -1161,3 +1206,55 @@ error StillStaked();
 | **最大速率约束** (上限保护) | $MAX\_REWARD\_RATE\_X=\frac{\text{maxTotalSupplyBForRewardRateCap} \times MAX\_APR\_BP}{10000 \times SECONDS\_PER\_YEAR}$（构造函数写入的 cap；**非** `notify` 时刻 `totalSupply()`） |
 | **Excess TokenB 可回收量** | $Excess=BalanceB-(TotalStakedB+TotalPending_{A+B}+AvailableRewards_{A+B}+UnclaimedFeesB+Dust_{A}+Dust_{B})$（与 §2.2 / §7.6、`recoverToken` 链上一致） |
 | **Shutdown 有序退出检查** | require(!emergencyMode 或 shutdownMode) |
+
+---
+
+## 10. 上线前风险假设与验收清单
+
+本节列出合约无法单方面消除、但生产上线前必须由治理、运营、前端和监控共同承认并落实的风险假设。任何一项不满足，都应视为上线阻断项或降级上线项。
+
+### 10.1 必须写入上线公告/审计范围的风险假设
+
+| 假设 | 必须满足的上线条件 | 失效后的影响 |
+| --- | --- | --- |
+| **治理密钥安全** | `DEFAULT_ADMIN_ROLE`、Timelock proposer/executor、Admin 门面 owner 必须由多签/Timelock 控制；模块替换、超级权限变更延迟建议 ≥72h。 | 可替换 delegatecall 模块或重配关键权限，等价于协议升级/接管风险。 |
+| **模块地址有效性** | `setUserModule` / `setAdminModule` 目标地址必须为已部署合约，并在上线记录中保存 bytecode hash、源码版本、部署交易。 | delegatecall 到错误模块会导致入口异常、交易空执行或状态破坏。 |
+| **Operator 热权限边界** | `OPERATOR_ROLE` 仅用于 `pause`、`enableEmergencyMode`、`notifyRewardAmount*`；不得同时持有 Admin/Super 权限；地址应独立于治理门面。 | 热钱包被盗可暂停、进入紧急模式或注入异常奖励预算。 |
+| **TokenA/TokenB 类型限制** | TokenB 必须 18 decimals；TokenA 与 TokenB 不得是 ERC777 钩子资产；不支持 rebasing、黑名单、恶意 `balanceOf`、回调型或可阻断转账资产。 | 不变量、真实入账、奖励分配或退出路径可能失真或被阻断。 |
+| **FOT TokenB 出账税费由用户承担** | 前端与公告必须展示合约转出 gross、用户预计到手 net、最大税费保护 `maxTransferFeeBP`；链上账本按 gross 核销。 | 用户实际到账少于 claim/withdraw 账面金额，属于代币税费经济结果而非协议补贴项。 |
+| **长时间无人交互的奖励结算** | 所有会影响奖励预算、用户份额、领取、退出、重排期、坏账修复和停机的入口必须先 catch-up 到 `min(block.timestamp, periodFinish)`，不能只推进一次 `MAX_DELTA_TIME`。 | 旧周期奖励可能被新用户分走、重复排期、跳过确权或产生非预期坏账。 |
+| **BadDebt 修复路径资金来源** | 生产路径中 `resolveBadDebt` 的付款人必须能真实向 Core 转账/授权；若通过治理门面调用，必须由门面持币或采用先转入/专用 payer 设计。 | 坏账无法修复，`recoverToken`、预算调拨等依赖无坏账的治理操作被永久阻断。 |
+| **Shutdown 终态语义** | `forceShutdownFinalize` 是防死锁终态工具，调用前必须完成全局 catch-up，并明确 residual/orphan pending 的清扫归属。 | 终态后仍有用户留仓时，可能出现用户预期与清算政策不一致。 |
+| **forceClaimAll 部分兑付顺序** | 坏账/停机下允许按物理余额部分兑付；链上只保护 Pool B 本金与未提手续费，不保护 `availableRewards` 等未来预算；A/B 池兑付顺序与 unpaid 事件是既定政策，前端必须清晰展示。 | 用户可能误以为所有池子等比例兑付，或误以为未来预算仍被隔离，导致争议。 |
+| **链下监控依赖** | 监控必须覆盖 `InvariantViolated`、`InsufficientBudget`、`BadDebtResolved*`、`OutboundTransfer`、pause/emergency/shutdown、rewardRate/availableRewards 异常。 | 异常会计状态无法被及时发现，治理响应滞后。 |
+
+### 10.2 上线前必须调整/确认的实现项
+
+1. **全入口 catch-up 规则**
+   `stake*`、`notifyRewardAmount*`、`rebalanceBudgets`、`resolveBadDebt` 余款重排期、`forceShutdownFinalize`、`claim*`、`withdraw*`、`emergencyWithdraw*`、`compoundB`、`forceClaimAll` 必须统一使用 catch-up 语义：当旧周期已经过期时，应循环推进到 `periodFinish`，再执行会改变用户份额、预算或终态的逻辑。
+
+2. **活跃预算不可直接搬走**
+   `rebalanceBudgets` 在移动预算前必须先结算源池和目标池，并禁止或正确重排正在排放中的源池预算。不得出现 `availableRewards` 被移走但 `rewardRate` 仍按旧计划继续扣减的状态。
+
+3. **FOT 出账可观测性**
+   出账路径必须记录 gross 与 net，用户承担税费，但协议必须让前端和索引器能证明差额来自 Token 税费，而不是协议少付。
+
+4. **坏账修复生产路径**
+   若 Timelock 通过 `DualPoolStakingAdmin` 门面调用 Core，则不能默认 Core 从 Timelock 拉款。上线前必须确认资金路径：门面持币并授权、先转入 Core 后核销、或调整接口传入真实 payer。
+
+5. **模块升级校验**
+   模块 setter 除非已在链上强制 `code.length > 0`，否则部署流程必须把“地址有代码、bytecode hash 匹配、角色延迟生效”作为上线脚本断言和多签检查项。
+
+6. **前端风险展示**
+   claim/withdraw/forceClaimAll 需展示 FOT gross/net、坏账下 partial payout、停机/紧急模式状态、Timelock 延迟、Operator 热权限说明，不得只展示理想到账金额。
+
+### 10.3 生产监控阈值
+
+| 指标 | 触发动作 |
+| --- | --- |
+| `badDebtA > 0 || badDebtB > 0` | 立即阻断 TokenB recover/rebalance 操作；准备 `resolveBadDebt`。 |
+| `balanceB + badDebt + DUST_TOLERANCE < requiredB` | 触发 P0 告警，优先 pause，再评估 emergency。 |
+| `block.timestamp > periodFinish` 且 `availableRewards > 0` | 标记为 stale schedule，下一次用户/运维入口必须完成 catch-up 或重锚。 |
+| `rewardRate == 0 && availableRewards > 0 && periodFinish > block.timestamp` | 标记为 dust-like emission window，需要治理重排或等待下次 notify 合并。 |
+| `OutboundTransfer.grossAmount > netReceived` | 前端/索引器展示 FOT 税费，若超过 `maxTransferFeeBP` 应回滚或告警。 |
+| pause 超过 `UNPAUSE_COOLDOWN` | 检查 catch-up 完整性后才允许治理 unpause。 |
