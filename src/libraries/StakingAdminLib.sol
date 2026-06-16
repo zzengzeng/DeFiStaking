@@ -205,7 +205,10 @@ library StakingAdminLib {
     /// @param poolA Pool A storage.
     /// @param poolB Pool B storage.
     /// @param p Shutdown finalization parameters (`ForceShutdownFinalizeParams`).
-    /// @dev `residual` is `availableRewards` + fee/dust buckets + **orphan** pending (`totalPending - bookedUserRewards`) per pool so users who exited principal during shutdown can still claim accrued `userInfo.rewards` after finalize.
+    /// @dev `residual` is `availableRewards` + fee/dust buckets. If no principal remains staked, it also includes
+    ///      orphan pending (`totalPending - bookedUserRewards`) because all withdraw paths settle users first. If the
+    ///      deadlock bypass is used while stake remains, unsettled pending must stay in `totalPending` so remaining
+    ///      stakers can later settle and claim pre-finalize rewards.
     function executeForceShutdownFinalize(
         PoolInfo storage poolA,
         PoolInfo storage poolB,
@@ -224,6 +227,7 @@ library StakingAdminLib {
         _terminateEmission(poolA);
         _terminateEmission(poolB);
 
+        bool hasRemainingStake = poolA.totalStaked != 0 || poolB.totalStaked != 0;
         uint256 bookedA = p.bookedUserRewardsA;
         uint256 bookedB = p.bookedUserRewardsB;
         if (bookedA > poolA.totalPending || bookedB > poolB.totalPending) {
@@ -232,11 +236,16 @@ library StakingAdminLib {
         uint256 orphanA = poolA.totalPending - bookedA;
         uint256 orphanB = poolB.totalPending - bookedB;
 
-        uint256 residual = poolA.availableRewards + poolB.availableRewards + p.unclaimedFeesAtCall + poolA.dust
-            + poolB.dust + orphanA + orphanB;
+        uint256 residual =
+            poolA.availableRewards + poolB.availableRewards + p.unclaimedFeesAtCall + poolA.dust + poolB.dust;
+        if (!hasRemainingStake) {
+            residual += orphanA + orphanB;
+        }
 
-        poolA.totalPending = bookedA;
-        poolB.totalPending = bookedB;
+        if (!hasRemainingStake) {
+            poolA.totalPending = bookedA;
+            poolB.totalPending = bookedB;
+        }
         poolA.availableRewards = 0;
         poolB.availableRewards = 0;
         poolA.dust = 0;

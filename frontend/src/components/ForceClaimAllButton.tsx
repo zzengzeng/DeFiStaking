@@ -23,7 +23,7 @@ export function ForceClaimAllButton({ onConfirmed }: Props) {
     <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 sm:p-4">
       <h3 className="text-sm font-semibold text-amber-100">跨池领取 (forceClaimAll)</h3>
       <p className="mt-1 text-[11px] leading-relaxed text-amber-200/80">
-        一次性结算 Pool A + B 的 TokenB 奖励。仅在关停或存在坏账时开放；关停下可绕过单池最低领取门槛。
+        一次性结算 Pool A + B 的 TokenB 奖励。仅在关停或存在坏账时开放；按链上残值部分兑付，顺序为 A 后 B。
       </p>
       <p className="mt-2 text-sm text-zinc-400">
         合计待领: <span className="font-mono text-emerald-300/90">{formatToken(force.totalRewards)}</span> TokenB

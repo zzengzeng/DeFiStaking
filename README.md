@@ -310,6 +310,19 @@ make deploy NETWORK=sepolia
 - BadDebt 修复路径必须确认真实付款人能向 Core 补款
 - 监控必须覆盖不变量、坏账、FOT 差额、pause/emergency/shutdown 与 stale schedule
 
+### 安全运营文档
+
+上线前还必须补齐并演练以下安全运营材料：
+
+- [`SECURITY.md`](SECURITY.md)：漏洞披露、响应 SLA、协调披露与 bounty 状态
+- [`docs/security/dependencies.md`](docs/security/dependencies.md)：外部合约、服务、RPC、oracle/无 oracle 声明与生产地址登记
+- [`docs/security/incident-response.md`](docs/security/incident-response.md)：P0/P1 响应、pause/emergency/shutdown 决策树、通讯模板
+- [`docs/security/key-management.md`](docs/security/key-management.md)：多签、硬件密钥、多人审批、换钥与上线阻断项
+- [`docs/security/threat-model.md`](docs/security/threat-model.md)：主要攻击路径、用户滥用风险与必须测试的防线
+- [`docs/security/security-owners.md`](docs/security/security-owners.md)：安全负责人、评审要求、员工身份/背景检查记录要求
+
+CI 必须至少运行 `forge fmt --check`、`forge build --sizes`、`forge test -vvv` 与 Slither 静态分析；高危发现不得带入生产。
+
 ### 规格文档
 
 详见 [`PRD.md`](PRD.md) — 含完整公式、不变量推导、`EmergencyWithdrawn` 字段语义、事件/错误全集与边界场景。

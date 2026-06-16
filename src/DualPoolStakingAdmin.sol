@@ -59,10 +59,6 @@ contract DualPoolStakingAdmin {
         core.claimFees();
     }
 
-    function cancelTimelock(bytes32 opId) external onlyGovernanceTimelock {
-        core.cancelTimelock(opId);
-    }
-
     function setFeeRecipient(address newRecipient) external onlyGovernanceTimelock {
         core.setFeeRecipient(newRecipient);
     }

@@ -1,12 +1,14 @@
 # ForceClaimAllLib
-[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/c3cdaa9f3e5e324db578e81e0109756c6d9d8922/src/libraries/ForceClaimAllLib.sol)
+[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/699d0d97f5ced33dab5ac0c4d8ce25e0620ec92b/src/libraries/ForceClaimAllLib.sol)
 
 **Title:**
 ForceClaimAllLib
 
 Linked library: `forceClaimAll` settlement across pools with partial pay, debt, and dust handling.
 
-Computes spendable TokenB as `balance - (poolB.totalStaked + unclaimedFeesB)` then allocates sequentially to Pool A then B rewards.
+Liquidation policy: spendable TokenB is `balance - (poolB.totalStaked + unclaimedFeesB)`, then allocated
+sequentially to Pool A then Pool B rewards. It intentionally does not reserve `availableRewards` because this
+path is available only during shutdown or bad debt, where unpaid user rewards take priority over future budgets.
 
 
 ## Functions
@@ -22,7 +24,11 @@ function _applyUnpaidToDebtAndDust(PoolInfo storage poolA, PoolInfo storage pool
 
 ### executeForceClaimAll
 
-Settles both pools’ rewards for `p.user` under shutdown / liquidity rules; may pay partially.
+Settles both pools’ rewards for `p.user`; may pay partially when liquidity is short.
+
+When **not** `shutdown` and both pools have zero `badDebt`, each pool with `rewards > 0` must be `>= minClaimAmount`
+(same anti-dust rule as single-pool claims—cannot sum two sub-threshold pools via this path). Shutdown or any pool
+bad debt relaxes that check so small balances can still be cleared with partial pay.
 
 
 ```solidity
@@ -64,12 +70,16 @@ struct ForceClaimParams {
     IERC20 rewardToken;
     /// @notice User whose both pools’ `rewards` fields are cleared.
     address user;
-    /// @notice Minimum total claimable to allow force path when no bad debt and not shutdown.
+    /// @notice Minimum claim threshold (wei); **per-pool** when `!shutdown` and no bad debt—same semantics as `claimA`/`claimB`.
     uint256 minClaimAmount;
     /// @notice Pool B fees reserved on-contract (reduces spendable remainder in liability calc).
     uint256 unclaimedFeesB;
     /// @notice When true, bypasses `BelowMinClaim` for small totals if bad debt is also zero (see revert tree).
     bool shutdown;
+    /// @notice FOT outbound tax ceiling (`0` = standard ERC20).
+    uint256 maxTransferFeeBP;
+    /// @notice Basis-point denominator (`10_000`).
+    uint256 basisPoints;
 }
 ```
 

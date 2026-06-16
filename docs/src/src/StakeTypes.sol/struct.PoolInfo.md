@@ -1,5 +1,5 @@
 # PoolInfo
-[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/c3cdaa9f3e5e324db578e81e0109756c6d9d8922/src/StakeTypes.sol)
+[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/699d0d97f5ced33dab5ac0c4d8ce25e0620ec92b/src/StakeTypes.sol)
 
 On-chain accounting snapshot for one pool (staking asset, issuance state, caps).
 
@@ -32,7 +32,7 @@ uint256 dust;
 uint256 tvlCap;
 /// @notice Minimum stake per transaction for the pool.
 uint256 minStakeAmount;
-/// @notice Default reward duration parameter used by notify / admin flows.
+/// @notice Default emission length for `notifyRewardAmount*` when the caller passes `duration == 0` (seconds); must be `0` (unset) or within `[MIN_REWARD_RATE_DURATION, MAX_DURATION]` when set via admin.
 uint256 rewardDuration;
 }
 ```

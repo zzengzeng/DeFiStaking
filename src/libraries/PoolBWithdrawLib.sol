@@ -12,7 +12,6 @@ import {StakingExecutionErrors} from "../StakingExecutionErrors.sol";
 /// @dev Early exit before `unlockTimeB` forfeits accrued `userB.rewards` back to `availableRewards` and charges `penaltyfeeBP` on principal.
 ///      Outbound TokenB FOT tax is borne by the user (PRD §4.6); protocol fees stay on-contract.
 library PoolBWithdrawLib {
-
     /// @notice Intermediate fee/penalty breakdown for a single withdraw evaluation.
     struct WithdrawCalc {
         /// @notice Schedule-based withdraw fee (not early exit) in TokenB wei.
@@ -145,9 +144,7 @@ library PoolBWithdrawLib {
         userB.rewardPaid = poolB.accRewardPerToken;
         poolB.totalStaked -= p.amount;
 
-        FOTTransferLib.transferGross(
-            poolB.stakingToken, p.user, netAmount, p.maxTransferFeeBP, p.basisPoints
-        );
+        FOTTransferLib.transferGross(poolB.stakingToken, p.user, netAmount, p.maxTransferFeeBP, p.basisPoints);
 
         r.feeOrPenaltyForEvent = calc.fee + calc.penalty;
         r.isEarlyForEvent = calc.isEarly;

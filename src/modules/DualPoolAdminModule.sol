@@ -3,7 +3,7 @@ pragma solidity ^0.8.20;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {Pool, PoolInfo, PendingOp} from "../StakeTypes.sol";
+import {Pool, PoolInfo} from "../StakeTypes.sol";
 import {FOTTransferLib} from "../libraries/FOTTransferLib.sol";
 import {PoolAccrualLib} from "../libraries/PoolAccrualLib.sol";
 import {NotifyRewardLib} from "../libraries/NotifyRewardLib.sol";
@@ -29,6 +29,8 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
     /// @param minRequired Derived minimum allowed value.
     /// @param currentValue Value that failed the check.
     error MinEarlyExitAmountTooLow(uint256 minRequired, uint256 currentValue);
+    /// @dev Same selector as `StakingExecutionErrors.InvalidRecipient`; local copy for module-scoped revert.
+    error InvalidRecipient(address recipient);
     /// @notice Reward notify and several other admin paths are blocked while emergency mode is active.
     error EmergencyModeActive();
     /// @notice Attempted `minClaimAmount` above `MAX_MIN_CLAIM_AMOUNT`.
@@ -41,10 +43,6 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
     /// @param unpauseAt Required earliest unpause time.
     /// @param currentTime Current timestamp.
     error UnpauseCooldownPending(uint256 unpauseAt, uint256 currentTime);
-    /// @notice `executeCancelTimelock` referenced a missing `opId`.
-    /// @param opId Unknown timelock key.
-    error TimelockNotFound(bytes32 opId);
-
     event RewardNotified(Pool indexed pool, uint256 amount, uint256 duration, uint256 rate);
     event BudgetRebalanced(Pool indexed from, Pool indexed to, uint256 amount, uint256 timestamp);
     event FeesClaimed(address indexed recipient, uint256 amount, uint256 timestamp);
@@ -67,7 +65,6 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
     event EmergencyModeActivated(address indexed by, uint256 timestamp);
     event Paused(address indexed by, uint256 timestamp);
     event Unpaused(address indexed by, uint256 timestamp);
-    event TimelockCancelled(bytes32 indexed opId, bytes32 indexed paramsHash, uint256 cancelledAt);
 
     /// @notice Funds Pool A rewards from `sender` and schedules emissions (`notifyRewardAmountA` delegate path).
     /// @dev Reverts `ExcessiveTransferFee` if balance delta vs `amount` exceeds `maxTransferFeeBP` (same rule as `stakeB` on TokenB).
@@ -139,6 +136,9 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
     /// @param to Destination pool for credit.
     /// @param amount Reward token wei to move.
     function executeRebalanceBudgets(Pool from, Pool to, uint256 amount) external {
+        if (emergencyMode) revert EmergencyModeActive();
+        if (shutdown) revert StakingExecutionErrors.ShutdownModeActive();
+        if (amount == 0) revert StakingExecutionErrors.ZeroAmount();
         _catchUpGlobalA();
         _catchUpGlobalB();
         StakingAdminLib.executeRebalanceBudgets(poolAState, poolBState, from, to, amount, _reanchorCaps());
@@ -186,7 +186,7 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
     /// @param newRecipient New fee sweep recipient; must not be zero or the core itself.
     function executeSetFeeRecipient(address newRecipient) external {
         if (newRecipient == address(0)) revert StakingExecutionErrors.ZeroAddress();
-        if (newRecipient == address(this)) revert StakingExecutionErrors.InvalidRecipient(newRecipient);
+        if (newRecipient == address(this)) revert InvalidRecipient(newRecipient);
         address oldRecipient = feeRecipient;
         feeRecipient = newRecipient;
         emit FeeRecipientUpdated(oldRecipient, newRecipient, block.timestamp);
@@ -196,7 +196,7 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
     /// @param newRecipient New forfeited-flow recipient; must not be zero or the core itself.
     function executeSetForfeitedRecipient(address newRecipient) external {
         if (newRecipient == address(0)) revert StakingExecutionErrors.ZeroAddress();
-        if (newRecipient == address(this)) revert StakingExecutionErrors.InvalidRecipient(newRecipient);
+        if (newRecipient == address(this)) revert InvalidRecipient(newRecipient);
         address oldRecipient = forfeitedRecipient;
         forfeitedRecipient = newRecipient;
         emit ForfeitedRecipientUpdated(oldRecipient, newRecipient, block.timestamp);
@@ -388,17 +388,6 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
         unpauseAt = 0;
         _unpause();
         emit Unpaused(sender, block.timestamp);
-    }
-
-    /// @notice Clears `pendingOps[opId]` (`cancelTimelock` delegate path).
-    /// @param opId Timelock key to delete.
-    function executeCancelTimelock(bytes32 opId) external {
-        PendingOp memory op = pendingOps[opId];
-        if (op.executeAfter == 0) {
-            revert TimelockNotFound(opId);
-        }
-        delete pendingOps[opId];
-        emit TimelockCancelled(opId, op.paramsHash, block.timestamp);
     }
 
     /// @dev Writes `tvlCap` and emits `TVLCapUpdated`.

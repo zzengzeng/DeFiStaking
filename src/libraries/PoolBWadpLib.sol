@@ -14,11 +14,12 @@ library PoolBWadpLib {
     /// @param oldTimestamp Prior WADP (`0` means treat as fresh-only path via `oldStaked == 0`).
     /// @param addedAmount New principal wei credited this step.
     /// @param currentTimestamp Reference time for the new leg (caller passes `block.timestamp`).
-    function weightedAvgDepositTimestamp(uint256 oldStaked, uint256 oldTimestamp, uint256 addedAmount, uint256 currentTimestamp)
-        internal
-        pure
-        returns (uint256)
-    {
+    function weightedAvgDepositTimestamp(
+        uint256 oldStaked,
+        uint256 oldTimestamp,
+        uint256 addedAmount,
+        uint256 currentTimestamp
+    ) internal pure returns (uint256) {
         if (oldStaked == 0) return currentTimestamp;
         if (addedAmount == 0) return oldTimestamp;
         uint256 weightedOld = oldStaked * oldTimestamp;

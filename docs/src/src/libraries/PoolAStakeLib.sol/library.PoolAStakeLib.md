@@ -1,5 +1,5 @@
 # PoolAStakeLib
-[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/c3cdaa9f3e5e324db578e81e0109756c6d9d8922/src/libraries/PoolAStakeLib.sol)
+[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/699d0d97f5ced33dab5ac0c4d8ce25e0620ec92b/src/libraries/PoolAStakeLib.sol)
 
 **Title:**
 PoolAStakeLib
@@ -22,7 +22,9 @@ function executeWithdrawA(
     PoolInfo storage poolA,
     mapping(address => UserInfo) storage userInfoA,
     address user,
-    uint256 amount
+    uint256 amount,
+    uint256 maxTransferFeeBP,
+    uint256 basisPoints
 ) external;
 ```
 **Parameters**
@@ -33,6 +35,8 @@ function executeWithdrawA(
 |`userInfoA`|`mapping(address => UserInfo)`|Pool A per-user mapping.|
 |`user`|`address`|Account whose stake is reduced.|
 |`amount`|`uint256`|Principal amount to withdraw (must be `> 0` and `<= user.staked`).|
+|`maxTransferFeeBP`|`uint256`|FOT outbound tax ceiling for TokenA (`0` = standard ERC20).|
+|`basisPoints`|`uint256`|Basis-point denominator (`10_000`).|
 
 
 ### executeStakeA
@@ -77,6 +81,16 @@ struct StakeAParams {
     uint256 maxTransferFeeBP;
     /// @notice Denominator for basis-point checks (typically `10_000`).
     uint256 basisPoints;
+    /// @notice Minimum notify duration / re-anchor window (matches core `MIN_REWARD_RATE_DURATION`).
+    uint256 minRewardRateDuration;
+    /// @notice Maximum reward schedule length (matches core `MAX_DURATION`).
+    uint256 maxRewardDuration;
+    /// @notice Max APR in basis points for rate cap (matches core `MAX_APR_BP`).
+    uint256 maxAprBp;
+    /// @notice Seconds per year for APR cap (matches core `SECONDS_PER_YEAR`).
+    uint256 secondsPerYear;
+    /// @notice Deploy-time TokenB supply ceiling for max reward rate (matches core cap).
+    uint256 maxTotalSupplyBForRewardRateCap;
 }
 ```
 

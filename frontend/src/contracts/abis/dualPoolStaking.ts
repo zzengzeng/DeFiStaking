@@ -1,36 +1,6 @@
 export const dualPoolStakingAbi = [
   {
     type: "event",
-    name: "TimelockScheduled",
-    anonymous: false,
-    inputs: [
-      { indexed: true, name: "opId", type: "bytes32" },
-      { indexed: true, name: "paramsHash", type: "bytes32" },
-      { indexed: false, name: "executeAfter", type: "uint256" },
-    ],
-  },
-  {
-    type: "event",
-    name: "TimelockConsumed",
-    anonymous: false,
-    inputs: [
-      { indexed: true, name: "opId", type: "bytes32" },
-      { indexed: true, name: "paramsHash", type: "bytes32" },
-      { indexed: false, name: "executedAt", type: "uint256" },
-    ],
-  },
-  {
-    type: "event",
-    name: "TimelockCancelled",
-    anonymous: false,
-    inputs: [
-      { indexed: true, name: "opId", type: "bytes32" },
-      { indexed: true, name: "paramsHash", type: "bytes32" },
-      { indexed: false, name: "cancelledAt", type: "uint256" },
-    ],
-  },
-  {
-    type: "event",
     name: "EmergencyWithdrawn",
     anonymous: false,
     inputs: [
@@ -39,6 +9,30 @@ export const dualPoolStakingAbi = [
       { indexed: false, name: "rewardsForfeited", type: "uint256" },
       { indexed: true, name: "pool", type: "uint8" },
       { indexed: false, name: "withdrawnAt", type: "uint256" },
+    ],
+  },
+  {
+    type: "event",
+    name: "ForceClaimed",
+    anonymous: false,
+    inputs: [
+      { indexed: true, name: "user", type: "address" },
+      { indexed: false, name: "paidA", type: "uint256" },
+      { indexed: false, name: "paidB", type: "uint256" },
+      { indexed: false, name: "unpaidA", type: "uint256" },
+      { indexed: false, name: "unpaidB", type: "uint256" },
+      { indexed: false, name: "timestamp", type: "uint256" },
+    ],
+  },
+  {
+    type: "event",
+    name: "OutboundTransfer",
+    anonymous: false,
+    inputs: [
+      { indexed: true, name: "token", type: "address" },
+      { indexed: true, name: "to", type: "address" },
+      { indexed: false, name: "grossAmount", type: "uint256" },
+      { indexed: false, name: "netReceived", type: "uint256" },
     ],
   },
   {
@@ -130,7 +124,6 @@ export const dualPoolStakingAbi = [
   { type: "function", name: "paused", stateMutability: "view", inputs: [], outputs: [{ type: "bool" }] },
   { type: "function", name: "emergencyMode", stateMutability: "view", inputs: [], outputs: [{ type: "bool" }] },
   { type: "function", name: "shutdown", stateMutability: "view", inputs: [], outputs: [{ type: "bool" }] },
-  { type: "function", name: "pendingOps", stateMutability: "view", inputs: [{ name: "opId", type: "bytes32" }], outputs: [{ name: "executeAfter", type: "uint256" }, { name: "paramsHash", type: "bytes32" }] },
   { type: "function", name: "stakeA", stateMutability: "nonpayable", inputs: [{ name: "amount", type: "uint256" }], outputs: [] },
   { type: "function", name: "withdrawA", stateMutability: "nonpayable", inputs: [{ name: "amount", type: "uint256" }], outputs: [] },
   { type: "function", name: "claimA", stateMutability: "nonpayable", inputs: [], outputs: [] },
@@ -177,7 +170,6 @@ export const dualPoolStakingAbi = [
   { type: "function", name: "pause", stateMutability: "nonpayable", inputs: [], outputs: [] },
   { type: "function", name: "unpause", stateMutability: "nonpayable", inputs: [], outputs: [] },
   { type: "function", name: "enableEmergencyMode", stateMutability: "nonpayable", inputs: [], outputs: [] },
-  { type: "function", name: "cancelTimelock", stateMutability: "nonpayable", inputs: [{ name: "opId", type: "bytes32" }], outputs: [] },
   { type: "function", name: "ADMIN_ROLE", stateMutability: "view", inputs: [], outputs: [{ type: "bytes32" }] },
   { type: "function", name: "OPERATOR_ROLE", stateMutability: "view", inputs: [], outputs: [{ type: "bytes32" }] },
   {

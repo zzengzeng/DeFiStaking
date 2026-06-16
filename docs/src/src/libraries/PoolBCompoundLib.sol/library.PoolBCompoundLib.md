@@ -1,5 +1,5 @@
 # PoolBCompoundLib
-[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/c3cdaa9f3e5e324db578e81e0109756c6d9d8922/src/libraries/PoolBCompoundLib.sol)
+[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/699d0d97f5ced33dab5ac0c4d8ce25e0620ec92b/src/libraries/PoolBCompoundLib.sol)
 
 **Title:**
 PoolBCompoundLib
@@ -19,15 +19,6 @@ Same rolling-lock rule as `PoolBStakeLib._updateRollingLock`.
 function _updateRollingLock(uint256 oldUnlockTime, uint256 _lockDuration) private view returns (uint256);
 ```
 
-### _updateWADP
-
-Same weighted-average timestamp rule as `PoolBStakeLib._updateWADP`.
-
-
-```solidity
-function _updateWADP(uint256 oldStaked, uint256 oldTimestamp, uint256 addedAmount) private view returns (uint256);
-```
-
 ### _applyCompoundIntoPoolB
 
 Mutates Pool B stake, TVL, lock maps, and optionally recomputes `rewardRate` when Pool B was empty.
@@ -39,8 +30,7 @@ function _applyCompoundIntoPoolB(
     UserInfo storage userB,
     mapping(address => uint256) storage unlockTimeB,
     mapping(address => uint256) storage stakeTimestampB,
-    address user,
-    uint256 lockDuration,
+    CompoundBParams memory p,
     uint256 compoundTotal
 ) private returns (uint256 newUserStakedB, uint256 newUnlockTimeB);
 ```
@@ -93,6 +83,12 @@ struct CompoundBParams {
     address user;
     /// @notice Rolling lock duration applied after compounding (same semantics as stake).
     uint256 lockDuration;
+    uint256 minRewardRateDuration;
+    uint256 maxRewardDuration;
+    uint256 maxAprBp;
+    uint256 basisPoints;
+    uint256 secondsPerYear;
+    uint256 maxTotalSupplyBForRewardRateCap;
 }
 ```
 

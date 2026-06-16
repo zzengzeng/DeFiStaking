@@ -64,12 +64,7 @@ library RewardReanchorLib {
         uint256 rem = pool.periodFinish > block.timestamp ? pool.periodFinish - block.timestamp : 0;
         if (rem > 0) {
             applyCappedRateForRemainingWindow(
-                pool,
-                rem,
-                caps.maxTotalSupplyBForRewardRateCap,
-                caps.maxAprBp,
-                caps.basisPoints,
-                caps.secondsPerYear
+                pool, rem, caps.maxTotalSupplyBForRewardRateCap, caps.maxAprBp, caps.basisPoints, caps.secondsPerYear
             );
             return;
         }

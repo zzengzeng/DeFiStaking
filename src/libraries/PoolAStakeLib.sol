@@ -104,12 +104,7 @@ library PoolAStakeLib {
         if (poolA.totalStaked > 0 && poolA.availableRewards > 0) {
             if (remainingTime > 0 && isFirstDeposit) {
                 RewardReanchorLib.applyCappedRateForRemainingWindow(
-                    poolA,
-                    remainingTime,
-                    p.maxTotalSupplyBForRewardRateCap,
-                    p.maxAprBp,
-                    p.basisPoints,
-                    p.secondsPerYear
+                    poolA, remainingTime, p.maxTotalSupplyBForRewardRateCap, p.maxAprBp, p.basisPoints, p.secondsPerYear
                 );
             } else if (remainingTime == 0) {
                 RewardReanchorLib.reanchorStaleSchedule(

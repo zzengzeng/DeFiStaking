@@ -9,7 +9,7 @@ import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IER
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 
-import {Pool, PoolInfo, UserInfo, PendingOp} from "./StakeTypes.sol";
+import {Pool, PoolInfo, UserInfo} from "./StakeTypes.sol";
 import {StakingExecutionErrors} from "./StakingExecutionErrors.sol";
 
 /// @notice Minimal view into the canonical ERC-1820 registry for ERC777 deployment checks.
@@ -24,7 +24,7 @@ interface IERC1820Registry {
 
 /// @title DualPoolStaking
 /// @notice Dual-pool staking and rewards **core**: user and admin **execution** is delegated to external modules via `delegatecall`.
-/// @dev Wire `userModule` / `adminModule` immediately after deploy. Storage layout must match `DualPoolStorageLayout` and module bytecode expectations. Constants, `OP_*` ids, and role semantics follow the project PRD. Inline `//` comments on immutables document tuning knobs; prefer reading NatSpec on entrypoints for behavior.
+/// @dev Wire `userModule` / `adminModule` immediately after deploy. Storage layout must match `DualPoolStorageLayout` and module bytecode expectations.
 contract DualPoolStaking is Ownable, AccessControl, ReentrancyGuard, Pausable {
     using SafeERC20 for IERC20;
 
@@ -46,27 +46,6 @@ contract DualPoolStaking is Ownable, AccessControl, ReentrancyGuard, Pausable {
     uint256 public constant UNPAUSE_COOLDOWN = 1 days; // Cooldown period after unpausing the contract before certain actions can be taken, used to prevent abuse of the pause/unpause functionality and allow users time to react to changes in the contract's state
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE"); // Role identifier for admin role, which can be granted to addresses that are allowed to perform administrative actions such as updating contract parameters or managing emergency mode
     bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE"); // Role identifier for operator role, which can be granted to addresses that are allowed to perform operational actions such as executing time-locked operations or managing reward distributions
-
-    bytes32 public constant OP_SET_FEES = keccak256("SET_FEES"); // Operation identifier for setting fees, used in the pendingOps mapping to manage time-locked operations related to updating fee parameters such as early exit penalty, withdrawal fee, and mid-term fee
-    bytes32 public constant OP_SET_LOCK_DURATION = keccak256("SET_LOCK_DURATION"); // Operation identifier for setting lock duration, used in the pendingOps mapping to manage time-locked operations related to updating the lock duration for staked tokens in Pool B, which affects when users can withdraw without penalties
-    bytes32 public constant OP_REBALANCE_BUDGETS = keccak256("REBALANCE_BUDGETS"); // Operation identifier for rebalancing budgets, used in the pendingOps mapping to manage time-locked operations related to adjusting the available rewards and reward rates for both pools, which may be necessary to maintain accurate reward distribution and account for changes in staking activity or reward funding
-    bytes32 public constant OP_SET_TVL_CAP_A = keccak256("SET_TVL_CAP_A"); // Operation identifier for setting TVL cap for Pool A, used in the pendingOps mapping to manage time-locked operations related to updating the total value locked (TVL) cap for Pool A, which can be used to limit the maximum amount of tokens that can be staked in Pool A to manage risk and ensure sustainable reward distribution
-    bytes32 public constant OP_SET_TVL_CAP_B = keccak256("SET_TVL_CAP_B"); // Operation identifier for setting TVL cap for Pool B, used in the pendingOps mapping to manage time-locked operations related to updating the total value locked (TVL) cap for Pool B, which can be used to limit the maximum amount of tokens that can be staked in Pool B to manage risk and ensure sustainable reward distribution
-    bytes32 public constant OP_SET_MIN_STAKE_A = keccak256("SET_MIN_STAKE_A"); // Operation identifier for setting minimum stake amount for Pool A, used in the pendingOps mapping to manage time-locked operations related to updating the minimum amount of tokens required to stake in Pool A, which can be used to encourage meaningful participation and prevent spam or dust stakes
-    bytes32 public constant OP_SET_MIN_STAKE_B = keccak256("SET_MIN_STAKE_B"); // Operation identifier for setting minimum stake amount for Pool B, used in the pendingOps mapping to manage time-locked operations related to updating the minimum amount of tokens required to stake in Pool B, which can be used to encourage meaningful participation and prevent spam or dust stakes
-    bytes32 public constant OP_SET_REWARD_DURATION_A = keccak256("SET_REWARD_DURATION_A"); // Operation identifier for setting reward duration for Pool A, used in the pendingOps mapping to manage time-locked operations related to updating the duration of reward periods for Pool A, which can affect how rewards are distributed over time and can be used to adjust incentives for staking in Pool A
-    bytes32 public constant OP_SET_REWARD_DURATION_B = keccak256("SET_REWARD_DURATION_B"); // Operation identifier for setting reward duration for Pool B, used in the pendingOps mapping to manage time-locked operations related to updating the duration of reward periods for Pool B, which can affect how rewards are distributed over time and can be used to adjust incentives for staking in Pool B
-    bytes32 public constant OP_SET_MIN_CLAIM_AMOUNT = keccak256("SET_MIN_CLAIM_AMOUNT"); // Operation identifier for setting minimum claim amount, used in the pendingOps mapping to manage time-locked operations related to updating the minimum amount of rewards that a user must have accrued before they can claim their rewards, which can be used to encourage users to accumulate more rewards before claiming and reduce transaction costs associated with small claims
-    bytes32 public constant OP_RECOVER_TOKEN = keccak256("RECOVER_TOKEN"); // Operation identifier for recovering tokens, used in the pendingOps mapping to manage time-locked operations related to recovering tokens that may have been accidentally sent to the contract or need to be recovered for other reasons, which can help maintain the integrity of the contract and ensure that users can retrieve their assets if necessary
-    bytes32 public constant OP_CLAIM_FEES = keccak256("CLAIM_FEES"); // Operation identifier for claiming fees, used in the pendingOps mapping to manage time-locked operations related to claiming the accumulated fees from withdrawals and early exit penalties in Pool B, which can be claimed by the fee recipient to collect the fees generated by the contract's operations
-    bytes32 public constant OP_SHUTDOWN = keccak256("SHUTDOWN"); // Operation identifier for shutting down the contract, used in the pendingOps mapping to manage time-locked operations related to activating emergency mode or shutting down the contract, which can allow for certain actions to be taken that are not normally permitted, such as allowing users to withdraw without penalties or claim rewards without restrictions, in response to emergencies or other situations that require immediate action
-    bytes32 public constant OP_RESOLVE_BAD_DEBT = keccak256("RESOLVE_BAD_DEBT"); // Operation identifier for resolving bad debt
-    bytes32 public constant OP_NOTIFY_REWARD_A = keccak256("NOTIFY_REWARD_A"); // Operation identifier for notifying reward amount for Pool A, used in the pendingOps mapping to manage time-locked operations related to adding new rewards and setting new reward periods for Pool A, which can affect the incentives for staking in Pool A and allow the owner to manage the reward distribution over time
-    bytes32 public constant OP_NOTIFY_REWARD_B = keccak256("NOTIFY_REWARD_B"); // Operation identifier for notifying reward amount for Pool B, used in the pendingOps mapping to manage time-locked operations related to adding new rewards and setting new reward periods for Pool B, which can affect the incentives for staking in Pool B and allow the owner to manage the reward distribution over time
-    bytes32 public constant OP_SET_FEE_RECIPIENT = keccak256("SET_FEE_RECIPIENT"); // Operation identifier for setting fee recipient
-    bytes32 public constant OP_SET_FORFEITED_RECIPIENT = keccak256("SET_FORFEITED_RECIPIENT"); // Operation identifier for setting forfeited recipient
-    bytes32 public constant OP_SET_MIN_EARLY_EXIT_B = keccak256("SET_MIN_EARLY_EXIT_B"); // Operation identifier for setting minimum early-exit amount for Pool B
-    bytes32 public constant OP_SET_MAX_TRANSFER_FEE_BP = keccak256("SET_MAX_TRANSFER_FEE_BP"); // Operation identifier for setting max transfer fee tolerance
 
     uint256 public lockDuration = 7 days; // Duration for which staked tokens in Pool B are locked, during which early exit penalties apply if withdrawn
     uint256 public claimCooldown = 1 days; // Cooldown period between claims to prevent abuse of the claim function and ensure fair distribution of rewards
@@ -105,8 +84,6 @@ contract DualPoolStaking is Ownable, AccessControl, ReentrancyGuard, Pausable {
     error InvariantViolation(uint256 actual, uint256 required);
     /// @notice Operation blocked while emergency mode is active (unless explicitly allowed elsewhere).
     error EmergencyModeActive();
-    /// @notice Timelock scheduling hook (reserved / unused in current bytecode paths).
-    error TimelockCreated(bytes32 opId, uint256 executeAfter);
     /// @notice Reserved zero-duration error (unused in current paths).
     error ZeroDuration();
     /// @notice ERC777 ERC-1820 implementer detected where hooks are forbidden.
@@ -167,7 +144,6 @@ contract DualPoolStaking is Ownable, AccessControl, ReentrancyGuard, Pausable {
     mapping(address => uint256) public unlockTimeB; // Mapping of user address to the timestamp when their staked tokens in Pool B can be withdrawn without penalty
     mapping(address => uint256) public stakeTimestampB; // Mapping of user address to the timestamp when they last staked in Pool B, used for calculating mid-term fees
     mapping(address => uint256) public lastClaimTime; // Mapping of user address to the timestamp when they last claimed rewards, used for enforcing claim cooldown
-    mapping(bytes32 => PendingOp) public pendingOps; // Mapping of operation identifiers to their pending operation details, used for managing time-locked operations
     address public userModule;
     address public adminModule;
     /// @dev Deploy-time TokenB supply ceiling for reward-rate cap (see PRD `MAX_REWARD_RATE_*`).
@@ -191,8 +167,7 @@ contract DualPoolStaking is Ownable, AccessControl, ReentrancyGuard, Pausable {
         if (maxTotalSupplyBForRewardRateCap_ == 0) {
             revert StakingExecutionErrors.ZeroAmount();
         }
-        uint256 minCapForNonZeroRewardRate =
-            (BASIS_POINTS * SECONDS_PER_YEAR + MAX_APR_BP - 1) / MAX_APR_BP;
+        uint256 minCapForNonZeroRewardRate = (BASIS_POINTS * SECONDS_PER_YEAR + MAX_APR_BP - 1) / MAX_APR_BP;
         if (maxTotalSupplyBForRewardRateCap_ < minCapForNonZeroRewardRate) {
             revert StakingExecutionErrors.ZeroRewardRate(maxTotalSupplyBForRewardRateCap_, minCapForNonZeroRewardRate);
         }
@@ -211,7 +186,8 @@ contract DualPoolStaking is Ownable, AccessControl, ReentrancyGuard, Pausable {
         feeRecipient = msg.sender;
         forfeitedRecipient = msg.sender;
         _assertNoERC777HooksRegistered();
-        _assertStakingTokenAHasNoERC777Hooks(tokenA);
+        _assertTokenHasNoERC777Hooks(tokenA);
+        _assertTokenHasNoERC777Hooks(tokenB);
     }
 
     /// @notice Stakes TokenA into Pool A for `msg.sender` via `userModule.executeStakeA`.
@@ -306,17 +282,14 @@ contract DualPoolStaking is Ownable, AccessControl, ReentrancyGuard, Pausable {
         _delegateTo(userModule, abi.encodeWithSignature("executeEmergencyWithdrawB(address)", msg.sender));
     }
 
-    /// @notice Clears `pendingOps[opId]` on-chain metadata (`ADMIN_ROLE`).
-    /// @param opId Operation id to cancel.
-    function cancelTimelock(bytes32 opId) external onlyRole(ADMIN_ROLE) {
-        _delegateTo(adminModule, abi.encodeWithSignature("executeCancelTimelock(bytes32)", opId));
-    }
-
     /// @notice Moves reward budget between pools (`ADMIN_ROLE`).
     /// @param from Source pool.
     /// @param to Destination pool.
     /// @param amount Reward token amount.
     function rebalanceBudgets(Pool from, Pool to, uint256 amount) external onlyRole(ADMIN_ROLE) nonReentrant {
+        if (emergencyMode) revert EmergencyModeActive();
+        if (shutdown) revert StakingExecutionErrors.ShutdownModeActive();
+        if (amount == 0) revert StakingExecutionErrors.ZeroAmount();
         _delegateTo(
             adminModule, abi.encodeWithSignature("executeRebalanceBudgets(uint8,uint8,uint256)", from, to, amount)
         );
@@ -346,15 +319,16 @@ contract DualPoolStaking is Ownable, AccessControl, ReentrancyGuard, Pausable {
         }
     }
 
-    /// @dev Rejects ERC777-style hooks registered on the Pool A staking token to reduce callback / reentrancy surface.
-    /// @param tokenA Pool A staking token address checked on ERC-1820.
-    function _assertStakingTokenAHasNoERC777Hooks(address tokenA) internal view {
+    /// @dev Rejects ERC777-style hooks on a deploy-time token (ERC-1820 `TokensRecipient` / `TokensSender`).
+    ///      Constructor calls this for `tokenA` (Pool A stake) and `tokenB` (Pool B stake + rewards) to block transfer callbacks that could bypass CEI.
+    /// @param token Token address probed on ERC-1820 when the registry is deployed on-chain.
+    function _assertTokenHasNoERC777Hooks(address token) internal view {
         if (ERC1820_REGISTRY_ADDR.code.length == 0) {
             return;
         }
         address recipientImpl =
-            IERC1820Registry(ERC1820_REGISTRY_ADDR).getInterfaceImplementer(tokenA, ERC777_RECIPIENT_HASH);
-        address senderImpl = IERC1820Registry(ERC1820_REGISTRY_ADDR).getInterfaceImplementer(tokenA, ERC777_SENDER_HASH);
+            IERC1820Registry(ERC1820_REGISTRY_ADDR).getInterfaceImplementer(token, ERC777_RECIPIENT_HASH);
+        address senderImpl = IERC1820Registry(ERC1820_REGISTRY_ADDR).getInterfaceImplementer(token, ERC777_SENDER_HASH);
         if (recipientImpl != address(0)) {
             revert ERC777HookImplementerDetected(recipientImpl);
         }

@@ -115,8 +115,8 @@ contract DualPoolStakingTest is Test {
         PoolInfo memory pb = s.poolB();
         IERC20 tok = IERC20(address(s.rewardToken()));
         uint256 actual = tok.balanceOf(address(s)) + pa.badDebt + pb.badDebt;
-        uint256 required = pb.totalStaked + pa.totalPending + pb.totalPending + pa.availableRewards + pb.availableRewards
-            + s.unclaimedFeesB() + pa.dust + pb.dust;
+        uint256 required = pb.totalStaked + pa.totalPending + pb.totalPending + pa.availableRewards
+            + pb.availableRewards + s.unclaimedFeesB() + pa.dust + pb.dust;
         assertGe(actual + 10, required, "TokenB invariant (balance+badDebt >= liabilities)");
     }
 
@@ -892,7 +892,9 @@ contract DualPoolStakingTest is Test {
         stakingToken.approve(address(dualPoolStaking), DEFAULT_STAKE);
         dualPoolStaking.stakeA(DEFAULT_STAKE);
 
-        vm.expectRevert(abi.encodeWithSelector(StakingExecutionErrors.InsufficientBalance.selector, 200 ether, DEFAULT_STAKE));
+        vm.expectRevert(
+            abi.encodeWithSelector(StakingExecutionErrors.InsufficientBalance.selector, 200 ether, DEFAULT_STAKE)
+        );
         dualPoolStaking.withdrawA(200 ether);
         vm.stopPrank();
     }
@@ -977,7 +979,9 @@ contract DualPoolStakingTest is Test {
         rewardToken.approve(address(dualPoolStaking), DEFAULT_STAKE);
         dualPoolStaking.stakeB(DEFAULT_STAKE);
 
-        vm.expectRevert(abi.encodeWithSelector(StakingExecutionErrors.InsufficientBalance.selector, 200 ether, DEFAULT_STAKE));
+        vm.expectRevert(
+            abi.encodeWithSelector(StakingExecutionErrors.InsufficientBalance.selector, 200 ether, DEFAULT_STAKE)
+        );
         dualPoolStaking.withdrawB(200 ether);
         vm.stopPrank();
     }
@@ -1464,11 +1468,11 @@ contract DualPoolStakingTest is Test {
         // Warp to just before cooldown
         vm.warp(unpauseAt - 1);
 
-        vm.expectRevert(abi.encodeWithSelector(
-            bytes4(keccak256("UnpauseCooldownPending(uint256,uint256)")),
-            unpauseAt,
-            block.timestamp
-        ));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                bytes4(keccak256("UnpauseCooldownPending(uint256,uint256)")), unpauseAt, block.timestamp
+            )
+        );
         stakingAdmin.unpause();
     }
 
@@ -2243,6 +2247,24 @@ contract DualPoolStakingTest is Test {
         assertEq(dualPoolStaking.poolA().badDebt, 0, "blocked rebalance must not leave latent badDebt");
     }
 
+    function testRebalanceZeroAmountReverts() public {
+        vm.expectRevert(StakingExecutionErrors.ZeroAmount.selector);
+        stakingAdmin.rebalanceBudgets(Pool.A, Pool.B, 0);
+    }
+
+    function testRebalanceAfterEmergencyModeReverts() public {
+        dualPoolStaking.enableEmergencyMode();
+        vm.expectRevert(DualPoolStaking.EmergencyModeActive.selector);
+        stakingAdmin.rebalanceBudgets(Pool.A, Pool.B, 1 ether);
+    }
+
+    function testRebalanceAfterShutdownReverts() public {
+        dualPoolStaking.enableEmergencyMode();
+        stakingAdmin.activateShutdown();
+        vm.expectRevert(DualPoolStaking.EmergencyModeActive.selector);
+        stakingAdmin.rebalanceBudgets(Pool.A, Pool.B, 1 ether);
+    }
+
     function testRebalanceSamePoolReverts() public {
         vm.expectRevert(StakingExecutionErrors.SamePool.selector);
         stakingAdmin.rebalanceBudgets(Pool.A, Pool.A, 1 ether);
@@ -2515,13 +2537,6 @@ contract DualPoolStakingTest is Test {
         // No excess TokenA — should revert
         vm.expectRevert(StakingExecutionErrors.TokenRecoveryRestricted.selector);
         stakingAdmin.recoverToken(address(stakingToken), address(0xCAFE), 1);
-    }
-
-    function testCancelTimelockNotFound() public {
-        bytes32 opId = dualPoolStaking.OP_SET_FEES();
-        // This opId doesn't exist in pendingOps, so it should revert
-        vm.expectRevert();
-        stakingAdmin.cancelTimelock(opId);
     }
 
     // ==================== Multi-User Integration Tests ====================
@@ -3018,9 +3033,8 @@ contract DualPoolStakingTest is Test {
 
         // After first deposit, rewardRate should be re-anchored
         PoolInfo memory p = dualPoolStaking.poolA();
-        uint256 remainingTime = beforeNotify.periodFinish > block.timestamp
-            ? beforeNotify.periodFinish - block.timestamp
-            : 0;
+        uint256 remainingTime =
+            beforeNotify.periodFinish > block.timestamp ? beforeNotify.periodFinish - block.timestamp : 0;
 
         if (remainingTime > 0) {
             uint256 expectedRate = beforeNotify.availableRewards / remainingTime;
@@ -3376,7 +3390,43 @@ contract DualPoolStakingTest is Test {
         assertEq(dualPoolStaking.poolA().badDebt, 0);
     }
 
-    /// @notice Shutdown finalize sweeps stranded operator budget + orphan pending to `feeRecipient` while zeroing pool buckets.
+    /// @notice Deadlock-bypass finalize with remaining stake preserves unsettled pending for later user settlement/claim.
+    function testForceShutdownFinalizeDeadlockBypassPreservesUnsettledPending() public {
+        uint256 rewardAmount = SAFE_REWARD_AMOUNT;
+        uint256 duration = SAFE_DURATION;
+        rewardToken.approve(address(dualPoolStaking), type(uint256).max);
+        dualPoolStaking.notifyRewardAmountA(rewardAmount, duration);
+
+        vm.startPrank(user);
+        stakingToken.approve(address(dualPoolStaking), DEFAULT_STAKE);
+        dualPoolStaking.stakeA(DEFAULT_STAKE);
+        vm.stopPrank();
+
+        vm.prank(address(this));
+        dualPoolStaking.enableEmergencyMode();
+        stakingAdmin.activateShutdown();
+
+        vm.warp(dualPoolStaking.shutdownAt() + dualPoolStaking.SHUTDOWN_DEADLOCK_BYPASS() + 1);
+        stakingAdmin.forceShutdownFinalize();
+
+        uint256 pendingAfterFinalize = dualPoolStaking.poolA().totalPending;
+        assertEq(dualPoolStaking.bookedUserRewardsA(), 0, "user has not settled yet");
+        assertGt(pendingAfterFinalize, rewardAmount - 1e12, "pending remains claimable");
+
+        vm.prank(user);
+        dualPoolStaking.withdrawA(DEFAULT_STAKE);
+        assertEq(dualPoolStaking.bookedUserRewardsA(), pendingAfterFinalize, "withdraw settles pre-finalize rewards");
+
+        uint256 userRewardBefore = rewardToken.balanceOf(user);
+        vm.prank(user);
+        dualPoolStaking.claimA();
+        assertEq(rewardToken.balanceOf(user) - userRewardBefore, pendingAfterFinalize);
+        assertEq(dualPoolStaking.poolA().totalPending, 0);
+        assertEq(dualPoolStaking.bookedUserRewardsA(), 0);
+        _assertTokenBBalanceInvariant(dualPoolStaking);
+    }
+
+    /// @notice Shutdown finalize without remaining stake sweeps stranded operator budget + orphan pending to `feeRecipient` while zeroing pool buckets.
     function testForceShutdownFinalizeSendsResidualToFeeRecipient() public {
         address feeSink = address(0xC0FFEE);
         stakingAdmin.setFeeRecipient(feeSink);
@@ -3401,7 +3451,10 @@ contract DualPoolStakingTest is Test {
     }
 
     /// @dev `PoolBWadpLib` uses OZ `Math.mulDiv` with `Ceil` rounding; fuzz against an independent ceil reference.
-    function testFuzz_WadpMatchesOpenZeppelinCeil(uint128 oldStaked, uint128 added, uint32 tOld, uint32 tNew) public pure {
+    function testFuzz_WadpMatchesOpenZeppelinCeil(uint128 oldStaked, uint128 added, uint32 tOld, uint32 tNew)
+        public
+        pure
+    {
         uint256 o = bound(uint256(oldStaked), 1, 1e24);
         uint256 a = bound(uint256(added), 1, 1e24);
         vm.assume(tNew >= tOld);

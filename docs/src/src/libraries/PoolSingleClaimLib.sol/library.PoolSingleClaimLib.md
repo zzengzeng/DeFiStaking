@@ -1,18 +1,19 @@
 # PoolSingleClaimLib
-[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/c3cdaa9f3e5e324db578e81e0109756c6d9d8922/src/libraries/PoolSingleClaimLib.sol)
+[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/699d0d97f5ced33dab5ac0c4d8ce25e0620ec92b/src/libraries/PoolSingleClaimLib.sol)
 
 **Title:**
 PoolSingleClaimLib
 
 Linked library: single-pool reward claim with min-claim, bad-debt, and on-hand liquidity checks.
 
-Pays out the core `rewardToken` (TokenB); requires `balanceOf(this) >= reward` after pending accounting.
+Pays out the core `rewardToken` (TokenB). Ledger `rewards` is the **gross** vault transfer amount;
+FOT transfer tax on outbound is borne by the user (see PRD §4.6).
 
 
 ## Functions
 ### executeClaim
 
-Pays `userInfo.rewards` to `p.claimer` in reward token if all checks pass; updates pending and cooldown.
+Pays `userInfo.rewards` to `p.claimer` if all checks pass; updates pending and cooldown.
 
 
 ```solidity
@@ -23,20 +24,11 @@ function executeClaim(
     ClaimParams memory p
 ) external returns (uint256 reward);
 ```
-**Parameters**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`pool`|`PoolInfo`|Pool being claimed against (A or B).|
-|`userInfo`|`UserInfo`|User ledger row for that pool.|
-|`lastClaimTime`|`mapping(address => uint256)`|Per-user cooldown map (keyed by `p.claimer`).|
-|`p`|`ClaimParams`|Claim parameters (`ClaimParams`).|
-
 **Returns**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`reward`|`uint256`|Amount transferred out (equals pre-call `userInfo.rewards`).|
+|`reward`|`uint256`|Gross amount sent from the vault (wallet net may be lower under FOT TokenB).|
 
 
 ## Structs
@@ -56,6 +48,10 @@ struct ClaimParams {
     uint256 badDebtPoolA;
     /// @notice Pool B `badDebt` snapshot; both must be zero to allow claim.
     uint256 badDebtPoolB;
+    /// @notice FOT outbound tax ceiling (`0` = standard ERC20, no post-transfer check).
+    uint256 maxTransferFeeBP;
+    /// @notice Basis-point denominator (`10_000`).
+    uint256 basisPoints;
 }
 ```
 

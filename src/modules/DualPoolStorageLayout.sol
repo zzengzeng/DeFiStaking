@@ -7,7 +7,7 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 
-import {PoolInfo, UserInfo, PendingOp} from "../StakeTypes.sol";
+import {PoolInfo, UserInfo} from "../StakeTypes.sol";
 
 /// @title DualPoolStorageLayout
 /// @notice Abstract base holding **exact** storage field order shared by `DualPoolStaking` and delegatecall modules.
@@ -38,27 +38,6 @@ abstract contract DualPoolStorageLayout is Ownable, AccessControl, ReentrancyGua
     uint256 public constant UNPAUSE_COOLDOWN = 1 days;
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
     bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
-
-    bytes32 public constant OP_SET_FEES = keccak256("SET_FEES");
-    bytes32 public constant OP_SET_LOCK_DURATION = keccak256("SET_LOCK_DURATION");
-    bytes32 public constant OP_REBALANCE_BUDGETS = keccak256("REBALANCE_BUDGETS");
-    bytes32 public constant OP_SET_TVL_CAP_A = keccak256("SET_TVL_CAP_A");
-    bytes32 public constant OP_SET_TVL_CAP_B = keccak256("SET_TVL_CAP_B");
-    bytes32 public constant OP_SET_MIN_STAKE_A = keccak256("SET_MIN_STAKE_A");
-    bytes32 public constant OP_SET_MIN_STAKE_B = keccak256("SET_MIN_STAKE_B");
-    bytes32 public constant OP_SET_REWARD_DURATION_A = keccak256("SET_REWARD_DURATION_A");
-    bytes32 public constant OP_SET_REWARD_DURATION_B = keccak256("SET_REWARD_DURATION_B");
-    bytes32 public constant OP_SET_MIN_CLAIM_AMOUNT = keccak256("SET_MIN_CLAIM_AMOUNT");
-    bytes32 public constant OP_RECOVER_TOKEN = keccak256("RECOVER_TOKEN");
-    bytes32 public constant OP_CLAIM_FEES = keccak256("CLAIM_FEES");
-    bytes32 public constant OP_SHUTDOWN = keccak256("SHUTDOWN");
-    bytes32 public constant OP_RESOLVE_BAD_DEBT = keccak256("RESOLVE_BAD_DEBT");
-    bytes32 public constant OP_NOTIFY_REWARD_A = keccak256("NOTIFY_REWARD_A");
-    bytes32 public constant OP_NOTIFY_REWARD_B = keccak256("NOTIFY_REWARD_B");
-    bytes32 public constant OP_SET_FEE_RECIPIENT = keccak256("SET_FEE_RECIPIENT");
-    bytes32 public constant OP_SET_FORFEITED_RECIPIENT = keccak256("SET_FORFEITED_RECIPIENT");
-    bytes32 public constant OP_SET_MIN_EARLY_EXIT_B = keccak256("SET_MIN_EARLY_EXIT_B");
-    bytes32 public constant OP_SET_MAX_TRANSFER_FEE_BP = keccak256("SET_MAX_TRANSFER_FEE_BP");
 
     /// @notice Rolling Pool B lock duration applied on each stake/compound (seconds).
     uint256 public lockDuration = 7 days;
@@ -113,10 +92,7 @@ abstract contract DualPoolStorageLayout is Ownable, AccessControl, ReentrancyGua
     mapping(address => uint256) public stakeTimestampB;
     /// @notice Last timestamp a user invoked claim / compound / force-claim (cooldown enforcement).
     mapping(address => uint256) public lastClaimTime;
-    /// @notice Optional timelock metadata keyed by governance operation id.
-    mapping(bytes32 => PendingOp) public pendingOps;
     /// @notice `delegatecall` target for all user stake/withdraw/claim bodies (`DualPoolUserModule`).
-    /// @dev Must mirror `DualPoolStaking` slot order after `pendingOps` (delegatecall layout).
     address public userModule;
     /// @notice `delegatecall` target for admin/operator notify and parameter mutations (`DualPoolAdminModule`).
     address public adminModule;

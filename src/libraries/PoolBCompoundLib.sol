@@ -66,12 +66,7 @@ library PoolBCompoundLib {
         if (wasEmptyB && poolB.availableRewards > 0) {
             if (remTime > 0) {
                 RewardReanchorLib.applyCappedRateForRemainingWindow(
-                    poolB,
-                    remTime,
-                    p.maxTotalSupplyBForRewardRateCap,
-                    p.maxAprBp,
-                    p.basisPoints,
-                    p.secondsPerYear
+                    poolB, remTime, p.maxTotalSupplyBForRewardRateCap, p.maxAprBp, p.basisPoints, p.secondsPerYear
                 );
             } else {
                 RewardReanchorLib.reanchorStaleSchedule(

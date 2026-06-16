@@ -1,10 +1,10 @@
 # StakingAdminLib
-[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/c3cdaa9f3e5e324db578e81e0109756c6d9d8922/src/libraries/StakingAdminLib.sol)
+[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/699d0d97f5ced33dab5ac0c4d8ce25e0620ec92b/src/libraries/StakingAdminLib.sol)
 
 **Title:**
 StakingAdminLib
 
-Linked library: admin, emergency, fee, recovery, shutdown, and bad-debt execution bodies used via `DualPoolAdminModule` (`delegatecall` from core) or direct `external` calls from `DualPoolStakingOld`.
+Linked library: admin, emergency, recovery, shutdown, and bad-debt execution bodies used via `DualPoolAdminModule` (`delegatecall` from core) or direct `external` calls from `DualPoolStakingOld`. Pool B fee sweeps live on the cores / admin module (`claimFees`) with CEI ordering.
 
 Every `execute*` entrypoint assumes the caller has already enforced pause/emergency/role gates unless noted.
 
@@ -36,14 +36,48 @@ function _requiredRewardBacking(PoolInfo storage poolA, PoolInfo storage poolB, 
 |`<none>`|`uint256`|Required TokenB backing in wei for solvent recovery checks.|
 
 
+### _terminateEmission
+
+Stops the active emission schedule so post-finalize user paths cannot accrue against swept `availableRewards`.
+
+
+```solidity
+function _terminateEmission(PoolInfo storage pool) private;
+```
+
+### _reservedEmissionBudget
+
+Budget still scheduled for `[lastUpdateTime, periodFinish]` at `rewardRate`; must stay in `availableRewards`.
+
+
+```solidity
+function _reservedEmissionBudget(PoolInfo storage pool) private view returns (uint256);
+```
+
+### _movableRebalanceBudget
+
+Max reward wei movable from `pool` without breaking its active or unfinished emission schedule.
+Caller should run `PoolAccrualLib.updateGlobal` for both pools first so `lastUpdateTime` / `availableRewards` reflect accrual.
+
+
+```solidity
+function _movableRebalanceBudget(PoolInfo storage pool) private view returns (uint256);
+```
+
 ### executeRebalanceBudgets
 
 Moves `amount` of `availableRewards` from `from` pool to `to` pool (no bad debt, distinct pools).
 
 
 ```solidity
-function executeRebalanceBudgets(PoolInfo storage poolA, PoolInfo storage poolB, Pool from, Pool to, uint256 amount)
-    external;
+function executeRebalanceBudgets(
+    PoolInfo storage poolA,
+    PoolInfo storage poolB,
+    Pool from,
+    Pool to,
+    uint256 amount,
+    RewardReanchorLib.ReanchorCaps memory caps
+) external;
 ```
 **Parameters**
 
@@ -54,23 +88,7 @@ function executeRebalanceBudgets(PoolInfo storage poolA, PoolInfo storage poolB,
 |`from`|`Pool`|Source pool enum.|
 |`to`|`Pool`|Destination pool enum.|
 |`amount`|`uint256`|Reward token wei to move between `availableRewards` buckets.|
-
-
-### executeClaimFees
-
-Transfers accumulated Pool B fees (`fees`) to `feeRecipient` using the reward token.
-
-
-```solidity
-function executeClaimFees(IERC20 rewardToken, address feeRecipient, uint256 fees) external;
-```
-**Parameters**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`rewardToken`|`IERC20`|TokenB ERC20 instance.|
-|`feeRecipient`|`address`|Recipient; must be non-zero.|
-|`fees`|`uint256`|Amount to transfer (caller typically passes full `unclaimedFeesB`).|
+|`caps`|`RewardReanchorLib.ReanchorCaps`||
 
 
 ### executeRecoverToken
@@ -92,9 +110,9 @@ function executeRecoverToken(PoolInfo storage poolA, PoolInfo storage poolB, Rec
 
 ### executeForceShutdownFinalize
 
-Terminal shutdown step: zeros pending/available/dust buckets and sends residual reward token to `feeRecipient` when allowed.
+Terminal shutdown step: sweeps **non-user** reward token residue to `feeRecipient` and retains per-pool `totalPending` equal to booked user rewards.
 
-`residual` includes `poolA.dust + poolB.dust` so sub-`DUST_TOLERANCE` accrual dust is swept with the final transfer (avoids wei permanently stuck in the core).
+`residual` is `availableRewards` + fee/dust buckets + **orphan** pending (`totalPending - bookedUserRewards`) per pool so users who exited principal during shutdown can still claim accrued `userInfo.rewards` after finalize.
 
 
 ```solidity
@@ -117,13 +135,17 @@ function executeForceShutdownFinalize(
 
 Emergency Pool A exit: returns principal and rebalances unpaid rewards into Pool B budget per rules.
 
+Caller must run `PoolAccrualLib.updateGlobal` for both pools and `settleUser` for the exiting user (and peers if needed)
+**before** this call so `userInfo.rewards` matches `accRewardPerToken` and `totalPending` is not left inconsistent.
+
 
 ```solidity
 function executeEmergencyWithdrawA(
     PoolInfo storage poolA,
     PoolInfo storage poolB,
     mapping(address => UserInfo) storage userInfoA,
-    EmergencyWithdrawAParams memory p
+    EmergencyWithdrawAParams memory p,
+    RewardReanchorLib.ReanchorCaps memory caps
 ) external returns (uint256 stakedAmount);
 ```
 **Parameters**
@@ -134,6 +156,7 @@ function executeEmergencyWithdrawA(
 |`poolB`|`PoolInfo`|Pool B storage (receives rebalanced `availableRewards` from unpaid A rewards).|
 |`userInfoA`|`mapping(address => UserInfo)`|Pool A user mapping.|
 |`p`|`EmergencyWithdrawAParams`|Emergency parameters (`EmergencyWithdrawAParams`).|
+|`caps`|`RewardReanchorLib.ReanchorCaps`||
 
 **Returns**
 
@@ -146,6 +169,8 @@ function executeEmergencyWithdrawA(
 
 Emergency Pool B exit: returns principal, clears lock maps, and rebalances rewards similarly to Pool A path.
 
+Same pre-condition as `executeEmergencyWithdrawA`: global accrual + `settleUser` for the claimant must run first.
+
 
 ```solidity
 function executeEmergencyWithdrawB(
@@ -153,7 +178,8 @@ function executeEmergencyWithdrawB(
     mapping(address => UserInfo) storage userInfoB,
     mapping(address => uint256) storage unlockTimeB,
     mapping(address => uint256) storage stakeTimestampB,
-    EmergencyWithdrawBParams memory p
+    EmergencyWithdrawBParams memory p,
+    RewardReanchorLib.ReanchorCaps memory caps
 ) external returns (uint256 stakedAmount);
 ```
 **Parameters**
@@ -165,6 +191,7 @@ function executeEmergencyWithdrawB(
 |`unlockTimeB`|`mapping(address => uint256)`|Pool B unlock map (zeroed for user).|
 |`stakeTimestampB`|`mapping(address => uint256)`|Pool B weighted time map (zeroed for user).|
 |`p`|`EmergencyWithdrawBParams`|Emergency parameters (`EmergencyWithdrawBParams`).|
+|`caps`|`RewardReanchorLib.ReanchorCaps`||
 
 **Returns**
 
@@ -179,9 +206,12 @@ Pulls reward tokens from `p.from` and applies them against `badDebt` buckets, re
 
 
 ```solidity
-function executeResolveBadDebt(PoolInfo storage poolA, PoolInfo storage poolB, ResolveBadDebtParams memory p)
-    external
-    returns (ResolveBadDebtResult memory r);
+function executeResolveBadDebt(
+    PoolInfo storage poolA,
+    PoolInfo storage poolB,
+    ResolveBadDebtParams memory p,
+    RewardReanchorLib.ReanchorCaps memory caps
+) external returns (ResolveBadDebtResult memory r);
 ```
 **Parameters**
 
@@ -190,6 +220,7 @@ function executeResolveBadDebt(PoolInfo storage poolA, PoolInfo storage poolB, R
 |`poolA`|`PoolInfo`|Pool A storage.|
 |`poolB`|`PoolInfo`|Pool B storage.|
 |`p`|`ResolveBadDebtParams`|Pull parameters (`ResolveBadDebtParams`).|
+|`caps`|`RewardReanchorLib.ReanchorCaps`||
 
 **Returns**
 
@@ -238,6 +269,10 @@ struct ForceShutdownFinalizeParams {
     uint256 deadlockBypass;
     /// @notice `unclaimedFeesB` captured at call time for residual accounting.
     uint256 unclaimedFeesAtCall;
+    /// @notice Aggregate of all Pool A `userInfo.rewards` at call time (must remain claimable after finalize).
+    uint256 bookedUserRewardsA;
+    /// @notice Aggregate of all Pool B `userInfo.rewards` at call time.
+    uint256 bookedUserRewardsB;
 }
 ```
 
@@ -253,6 +288,10 @@ struct EmergencyWithdrawAParams {
     bool shutdown;
     /// @notice User receiving principal and partial rewards per liquidity rules.
     address user;
+    /// @notice FOT outbound tax ceiling for TokenA (`0` = standard ERC20).
+    uint256 maxTransferFeeBP;
+    /// @notice Basis-point denominator (`10_000`).
+    uint256 basisPoints;
 }
 ```
 
@@ -268,6 +307,10 @@ struct EmergencyWithdrawBParams {
     bool shutdown;
     /// @notice User receiving principal and partial rewards per liquidity rules.
     address user;
+    /// @notice FOT outbound tax ceiling for TokenB (`0` = standard ERC20).
+    uint256 maxTransferFeeBP;
+    /// @notice Basis-point denominator (`10_000`).
+    uint256 basisPoints;
 }
 ```
 

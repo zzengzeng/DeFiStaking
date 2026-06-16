@@ -1,5 +1,5 @@
 # NotifyRewardLib
-[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/c3cdaa9f3e5e324db578e81e0109756c6d9d8922/src/libraries/NotifyRewardLib.sol)
+[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/699d0d97f5ced33dab5ac0c4d8ce25e0620ec92b/src/libraries/NotifyRewardLib.sol)
 
 **Title:**
 NotifyRewardLib
@@ -12,7 +12,7 @@ Token pulls must occur in the **core** contract before `delegatecall` into the a
 ## Functions
 ### applyNotifyAccounting
 
-Applies a new reward schedule: merges leftover emissions, sets `rewardRate`, extends `periodFinish`, and credits `availableRewards`.
+Applies a new reward schedule: merges temporal leftover (`remaining * rewardRate`), any **stranded** `availableRewards` from a finished period with no stakers, sets `rewardRate`, extends `periodFinish`, and credits `availableRewards`.
 
 
 ```solidity

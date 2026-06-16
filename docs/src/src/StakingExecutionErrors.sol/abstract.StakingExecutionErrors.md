@@ -1,5 +1,5 @@
 # StakingExecutionErrors
-[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/c3cdaa9f3e5e324db578e81e0109756c6d9d8922/src/StakingExecutionErrors.sol)
+[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/699d0d97f5ced33dab5ac0c4d8ce25e0620ec92b/src/StakingExecutionErrors.sol)
 
 **Title:**
 StakingExecutionErrors
@@ -188,6 +188,21 @@ error RewardRateExceedsMax(uint256 rate, uint256 maxRate);
 |`rate`|`uint256`|Newly computed `rewardRate` that exceeded the cap.|
 |`maxRate`|`uint256`|Maximum rate allowed by `NotifyRewardLib` cap math.|
 
+### ZeroRewardRate
+`notifyReward*` merged budget (`actual + temporal leftover + stranded carry`) yields zero wei/sec rate under integer division — budget would sit in `availableRewards` without emission.
+
+
+```solidity
+error ZeroRewardRate(uint256 mergedBudgetWei, uint256 durationSeconds);
+```
+
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`mergedBudgetWei`|`uint256`|Sum merged into the rate numerator before dividing by `duration`.|
+|`durationSeconds`|`uint256`|Scheduled emission duration (denominator).|
+
 ### NotInEmergency
 Operation requires emergency mode but it is not active.
 
@@ -228,6 +243,21 @@ Rebalance source and destination pool are the same enum value.
 error SamePool();
 ```
 
+### RebalanceExceedsMovableBudget
+Rebalance would move budget reserved for the source pool’s active `rewardRate` schedule.
+
+
+```solidity
+error RebalanceExceedsMovableBudget(uint256 requested, uint256 movable);
+```
+
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`requested`|`uint256`|Amount requested to move from the source pool.|
+|`movable`|`uint256`|Maximum movable from `availableRewards` after reserving `remaining * rewardRate`.|
+
 ### NoFeesToClaim
 No accumulated Pool B fees available to sweep to `feeRecipient`.
 
@@ -260,6 +290,34 @@ Zero address passed where a non-zero address is required.
 error ZeroAddress();
 ```
 
+### InvalidRecipient
+Recipient address is operationally unsafe for the requested payout / sweep path.
+
+
+```solidity
+error InvalidRecipient(address recipient);
+```
+
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`recipient`|`address`|Address rejected by the operation.|
+
+### NotAContract
+Module pointer must reference an address with deployed bytecode (EOA / empty / destroyed).
+
+
+```solidity
+error NotAContract(address module);
+```
+
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`module`|`address`|Address that failed `extcodesize` check.|
+
 ### NotShutdown
 Operation requires shutdown but protocol is not in shutdown.
 
@@ -283,4 +341,35 @@ Shutdown finalization blocked because principal remains staked before deadlock b
 ```solidity
 error StillStaked();
 ```
+
+### BookedRewardsExceedPending
+`bookedUserRewards*` aggregate exceeded `totalPending` for a pool (accounting invariant broken).
+
+
+```solidity
+error BookedRewardsExceedPending();
+```
+
+### ForceClaimAllNotAvailable
+`forceClaimAll` is only available during shutdown or when either pool carries `badDebt`.
+
+
+```solidity
+error ForceClaimAllNotAvailable();
+```
+
+### PauseCatchUpIncomplete
+`pause` / `unpause` could not advance `lastUpdateTime` to the pre-pause accrual ceiling within iteration budget.
+
+
+```solidity
+error PauseCatchUpIncomplete(uint256 requiredLastUpdate, uint256 actualLastUpdate);
+```
+
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`requiredLastUpdate`|`uint256`|Earliest `lastUpdateTime` that must be reached (`min(pausedAt, periodFinish)`).|
+|`actualLastUpdate`|`uint256`|`lastUpdateTime` after bounded catch-up attempts.|
 

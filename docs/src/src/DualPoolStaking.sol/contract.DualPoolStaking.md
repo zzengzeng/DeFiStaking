@@ -1,5 +1,5 @@
 # DualPoolStaking
-[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/c3cdaa9f3e5e324db578e81e0109756c6d9d8922/src/DualPoolStaking.sol)
+[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/699d0d97f5ced33dab5ac0c4d8ce25e0620ec92b/src/DualPoolStaking.sol)
 
 **Inherits:**
 Ownable, AccessControl, ReentrancyGuard, Pausable
@@ -9,7 +9,7 @@ DualPoolStaking
 
 Dual-pool staking and rewards **core**: user and admin **execution** is delegated to external modules via `delegatecall`.
 
-Wire `userModule` / `adminModule` immediately after deploy. Storage layout must match `DualPoolStorageLayout` and module bytecode expectations. Constants, `OP_*` ids, and role semantics follow the project PRD. Inline `//` comments on immutables document tuning knobs; prefer reading NatSpec on entrypoints for behavior.
+Wire `userModule` / `adminModule` immediately after deploy. Storage layout must match `DualPoolStorageLayout` and module bytecode expectations.
 
 
 ## State Variables
@@ -124,146 +124,6 @@ bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE")
 
 ```solidity
 bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE")
-```
-
-
-### OP_SET_FEES
-
-```solidity
-bytes32 public constant OP_SET_FEES = keccak256("SET_FEES")
-```
-
-
-### OP_SET_LOCK_DURATION
-
-```solidity
-bytes32 public constant OP_SET_LOCK_DURATION = keccak256("SET_LOCK_DURATION")
-```
-
-
-### OP_REBALANCE_BUDGETS
-
-```solidity
-bytes32 public constant OP_REBALANCE_BUDGETS = keccak256("REBALANCE_BUDGETS")
-```
-
-
-### OP_SET_TVL_CAP_A
-
-```solidity
-bytes32 public constant OP_SET_TVL_CAP_A = keccak256("SET_TVL_CAP_A")
-```
-
-
-### OP_SET_TVL_CAP_B
-
-```solidity
-bytes32 public constant OP_SET_TVL_CAP_B = keccak256("SET_TVL_CAP_B")
-```
-
-
-### OP_SET_MIN_STAKE_A
-
-```solidity
-bytes32 public constant OP_SET_MIN_STAKE_A = keccak256("SET_MIN_STAKE_A")
-```
-
-
-### OP_SET_MIN_STAKE_B
-
-```solidity
-bytes32 public constant OP_SET_MIN_STAKE_B = keccak256("SET_MIN_STAKE_B")
-```
-
-
-### OP_SET_REWARD_DURATION_A
-
-```solidity
-bytes32 public constant OP_SET_REWARD_DURATION_A = keccak256("SET_REWARD_DURATION_A")
-```
-
-
-### OP_SET_REWARD_DURATION_B
-
-```solidity
-bytes32 public constant OP_SET_REWARD_DURATION_B = keccak256("SET_REWARD_DURATION_B")
-```
-
-
-### OP_SET_MIN_CLAIM_AMOUNT
-
-```solidity
-bytes32 public constant OP_SET_MIN_CLAIM_AMOUNT = keccak256("SET_MIN_CLAIM_AMOUNT")
-```
-
-
-### OP_RECOVER_TOKEN
-
-```solidity
-bytes32 public constant OP_RECOVER_TOKEN = keccak256("RECOVER_TOKEN")
-```
-
-
-### OP_CLAIM_FEES
-
-```solidity
-bytes32 public constant OP_CLAIM_FEES = keccak256("CLAIM_FEES")
-```
-
-
-### OP_SHUTDOWN
-
-```solidity
-bytes32 public constant OP_SHUTDOWN = keccak256("SHUTDOWN")
-```
-
-
-### OP_RESOLVE_BAD_DEBT
-
-```solidity
-bytes32 public constant OP_RESOLVE_BAD_DEBT = keccak256("RESOLVE_BAD_DEBT")
-```
-
-
-### OP_NOTIFY_REWARD_A
-
-```solidity
-bytes32 public constant OP_NOTIFY_REWARD_A = keccak256("NOTIFY_REWARD_A")
-```
-
-
-### OP_NOTIFY_REWARD_B
-
-```solidity
-bytes32 public constant OP_NOTIFY_REWARD_B = keccak256("NOTIFY_REWARD_B")
-```
-
-
-### OP_SET_FEE_RECIPIENT
-
-```solidity
-bytes32 public constant OP_SET_FEE_RECIPIENT = keccak256("SET_FEE_RECIPIENT")
-```
-
-
-### OP_SET_FORFEITED_RECIPIENT
-
-```solidity
-bytes32 public constant OP_SET_FORFEITED_RECIPIENT = keccak256("SET_FORFEITED_RECIPIENT")
-```
-
-
-### OP_SET_MIN_EARLY_EXIT_B
-
-```solidity
-bytes32 public constant OP_SET_MIN_EARLY_EXIT_B = keccak256("SET_MIN_EARLY_EXIT_B")
-```
-
-
-### OP_SET_MAX_TRANSFER_FEE_BP
-
-```solidity
-bytes32 public constant OP_SET_MAX_TRANSFER_FEE_BP = keccak256("SET_MAX_TRANSFER_FEE_BP")
 ```
 
 
@@ -470,13 +330,6 @@ mapping(address => uint256) public lastClaimTime
 ```
 
 
-### pendingOps
-
-```solidity
-mapping(bytes32 => PendingOp) public pendingOps
-```
-
-
 ### userModule
 
 ```solidity
@@ -497,6 +350,24 @@ Deploy-time TokenB supply ceiling for reward-rate cap (see PRD `MAX_REWARD_RATE_
 
 ```solidity
 uint256 public maxTotalSupplyBForRewardRateCap
+```
+
+
+### bookedUserRewardsA
+Running sum of all `userInfoA[*].rewards` (must match `DualPoolStorageLayout` slot order).
+
+
+```solidity
+uint256 public bookedUserRewardsA
+```
+
+
+### bookedUserRewardsB
+Running sum of all `userInfoB[*].rewards`.
+
+
+```solidity
+uint256 public bookedUserRewardsB
 ```
 
 
@@ -578,7 +449,7 @@ function notifyRewardAmountA(uint256 amount, uint256 duration)
 |Name|Type|Description|
 |----|----|-----------|
 |`amount`|`uint256`|Reward amount pulled from `msg.sender` (actual uses balance delta for FOT safety downstream).|
-|`duration`|`uint256`|Emission duration; validated inside admin module / `NotifyRewardLib`.|
+|`duration`|`uint256`|Emission duration in seconds, or `0` to use `poolA().rewardDuration` (set via `setRewardDurationA` within allowed bounds).|
 
 
 ### stakeB
@@ -628,9 +499,10 @@ function claimB() external nonReentrant whenNotPaused;
 
 ### forceClaimAll
 
-Emergency-style claim path that allows discounted settlement under bad debt or shutdown.
+Cross-pool emergency claim: only during `shutdown` or when either pool has `badDebt`.
 
-This path protects locked principal and fees, and may partially pay rewards based on physical liquidity.
+Shares cooldown with `claimA`/`claimB`. May partially pay if TokenB liquidity is short. When `shutdown` or any
+`badDebt`, per-pool `minClaimAmount` is relaxed (see `ForceClaimAllLib`). Healthy normal ops must use `claimA`/`claimB`.
 
 
 ```solidity
@@ -654,7 +526,7 @@ function notifyRewardAmountB(uint256 amount, uint256 duration)
 |Name|Type|Description|
 |----|----|-----------|
 |`amount`|`uint256`|Reward amount pulled from `msg.sender`.|
-|`duration`|`uint256`|Emission duration; validated downstream.|
+|`duration`|`uint256`|Emission duration in seconds, or `0` to use `poolB().rewardDuration` (`setRewardDurationB`).|
 
 
 ### compoundB
@@ -685,21 +557,6 @@ Emergency Pool B principal exit for `msg.sender` (delegates to user module).
 ```solidity
 function emergencyWithdrawB() external nonReentrant;
 ```
-
-### cancelTimelock
-
-Clears `pendingOps[opId]` on-chain metadata (`ADMIN_ROLE`).
-
-
-```solidity
-function cancelTimelock(bytes32 opId) external onlyRole(ADMIN_ROLE);
-```
-**Parameters**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`opId`|`bytes32`|Operation id to cancel.|
-
 
 ### rebalanceBudgets
 
@@ -736,24 +593,27 @@ Ensures this contract address has no ERC777 recipient/sender hooks registered on
 function _assertNoERC777HooksRegistered() internal view;
 ```
 
-### _assertStakingTokenAHasNoERC777Hooks
+### _assertTokenHasNoERC777Hooks
 
-Rejects ERC777-style hooks registered on the Pool A staking token to reduce callback / reentrancy surface.
+Rejects ERC777-style hooks on a deploy-time token (ERC-1820 `TokensRecipient` / `TokensSender`).
+Constructor calls this for `tokenA` (Pool A stake) and `tokenB` (Pool B stake + rewards) to block transfer callbacks that could bypass CEI.
 
 
 ```solidity
-function _assertStakingTokenAHasNoERC777Hooks(address tokenA) internal view;
+function _assertTokenHasNoERC777Hooks(address token) internal view;
 ```
 **Parameters**
 
 |Name|Type|Description|
 |----|----|-----------|
-|`tokenA`|`address`|Pool A staking token address checked on ERC-1820.|
+|`token`|`address`|Token address probed on ERC-1820 when the registry is deployed on-chain.|
 
 
 ### setUserModule
 
 Points `userModule` to a new implementation (`DEFAULT_ADMIN_ROLE`).
+
+Production: this role must not remain on an EOA; hold it on a Timelock-owned `DualPoolStakingAdmin` (or the timelock itself) so upgrades go through `schedule` / `execute`.
 
 
 ```solidity
@@ -769,6 +629,8 @@ function setUserModule(address newModule) external onlyRole(DEFAULT_ADMIN_ROLE);
 ### setAdminModule
 
 Points `adminModule` to a new implementation (`DEFAULT_ADMIN_ROLE`).
+
+See `setUserModule` NatSpec: delegatecall targets are fully trusted; gate `DEFAULT_ADMIN_ROLE` behind timelocked governance.
 
 
 ```solidity
@@ -871,7 +733,7 @@ function setMinStakeAmountB(uint256 _amount) external onlyRole(ADMIN_ROLE);
 
 ### setRewardDurationA
 
-Sets Pool A `rewardDuration` config (`ADMIN_ROLE`).
+Sets Pool A default emission length for `notifyRewardAmountA(amount, 0)` (`ADMIN_ROLE`).
 
 
 ```solidity
@@ -880,7 +742,7 @@ function setRewardDurationA(uint256 _duration) external onlyRole(ADMIN_ROLE) non
 
 ### setRewardDurationB
 
-Sets Pool B `rewardDuration` config (`ADMIN_ROLE`).
+Sets Pool B default emission length for `notifyRewardAmountB(amount, 0)` (`ADMIN_ROLE`).
 
 
 ```solidity
@@ -919,11 +781,13 @@ function setLockDuration(uint256 newLockDuration) external onlyRole(ADMIN_ROLE) 
 
 ### resolveBadDebt
 
-Caller repays bad debt with reward tokens (`ADMIN_ROLE`).
+Repays bad debt with reward tokens pulled from `payer` (`ADMIN_ROLE`).
+
+Production: `DualPoolStakingAdmin` passes `msg.sender` (Timelock) as `payer`; do not use Core `msg.sender` (the facade).
 
 
 ```solidity
-function resolveBadDebt(uint256 amount) external onlyRole(ADMIN_ROLE) nonReentrant;
+function resolveBadDebt(address payer, uint256 amount) external onlyRole(ADMIN_ROLE) nonReentrant;
 ```
 
 ### recoverToken
@@ -950,7 +814,7 @@ Finalizes shutdown (`ADMIN_ROLE`).
 
 
 ```solidity
-function forceShutdownFinalize() external onlyRole(ADMIN_ROLE);
+function forceShutdownFinalize() external onlyRole(ADMIN_ROLE) nonReentrant;
 ```
 
 ### enableEmergencyMode
@@ -1078,12 +942,20 @@ event DustAccumulated(Pool pool, uint256 dustAmount, uint256 timestamp);
 ### EmergencyWithdrawn
 
 ```solidity
-/// @param principal Token principal returned to the user (Pool A: TokenA wei; Pool B: TokenB wei).
-/// @param rewardsForfeited User accrued rewards cleared on that pool before rebalance to Pool B budget (`userInfo*.rewards` snapshot).
 event EmergencyWithdrawn(
-    address indexed user, uint256 principal, uint256 rewardsForfeited, Pool indexed pool, uint256 at
+    address indexed user, uint256 principal, uint256 rewardsForfeited, Pool indexed pool, uint256 withdrawnAt
 );
 ```
+
+**Parameters**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`user`|`address`||
+|`principal`|`uint256`|Token principal returned to the user (Pool A: TokenA wei; Pool B: TokenB wei).|
+|`rewardsForfeited`|`uint256`|User accrued rewards cleared on that pool before rebalance to Pool B budget (`userInfo*.rewards` snapshot).|
+|`pool`|`Pool`||
+|`withdrawnAt`|`uint256`||
 
 ### BudgetRebalanced
 
@@ -1130,7 +1002,7 @@ event LockDurationUpdated(uint256 oldDuration, uint256 newDuration, uint256 time
 ### FeesUpdated
 
 ```solidity
-event FeesUpdated(uint256 penaltyBP, uint256 withdrawBP, uint256 midTermBP, uint256 at);
+event FeesUpdated(uint256 penaltyBP, uint256 withdrawBP, uint256 midTermBP, uint256 timestamp);
 ```
 
 ### FeeRecipientUpdated
@@ -1148,19 +1020,19 @@ event ForfeitedRecipientUpdated(address indexed oldRecipient, address indexed ne
 ### ShutdownActivated
 
 ```solidity
-event ShutdownActivated(address indexed by, uint256 at);
+event ShutdownActivated(address indexed by, uint256 timestamp);
 ```
 
 ### ProtocolShutdownComplete
 
 ```solidity
-event ProtocolShutdownComplete(uint256 at);
+event ProtocolShutdownComplete(uint256 timestamp);
 ```
 
 ### EmergencyModeActivated
 
 ```solidity
-event EmergencyModeActivated(address indexed by, uint256 at);
+event EmergencyModeActivated(address indexed by, uint256 timestamp);
 ```
 
 ### BadDebtResolved
@@ -1190,13 +1062,13 @@ event InvariantViolated(uint256 actual, uint256 required, uint256 timestamp);
 ### Paused
 
 ```solidity
-event Paused(address indexed by, uint256 at);
+event Paused(address indexed by, uint256 timestamp);
 ```
 
 ### Unpaused
 
 ```solidity
-event Unpaused(address indexed by, uint256 at);
+event Unpaused(address indexed by, uint256 timestamp);
 ```
 
 ### RewardNotified
@@ -1208,13 +1080,13 @@ event RewardNotified(Pool indexed pool, uint256 amount, uint256 duration, uint25
 ### UserModuleUpdated
 
 ```solidity
-event UserModuleUpdated(address indexed oldModule, address indexed newModule, uint256 at);
+event UserModuleUpdated(address indexed oldModule, address indexed newModule, uint256 timestamp);
 ```
 
 ### AdminModuleUpdated
 
 ```solidity
-event AdminModuleUpdated(address indexed oldModule, address indexed newModule, uint256 at);
+event AdminModuleUpdated(address indexed oldModule, address indexed newModule, uint256 timestamp);
 ```
 
 ## Errors
@@ -1255,14 +1127,6 @@ Operation blocked while emergency mode is active (unless explicitly allowed else
 
 ```solidity
 error EmergencyModeActive();
-```
-
-### TimelockCreated
-Timelock scheduling hook (reserved / unused in current bytecode paths).
-
-
-```solidity
-error TimelockCreated(bytes32 opId, uint256 executeAfter);
 ```
 
 ### ZeroDuration

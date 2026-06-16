@@ -1,5 +1,5 @@
 # PoolAccrualLib
-[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/c3cdaa9f3e5e324db578e81e0109756c6d9d8922/src/libraries/PoolAccrualLib.sol)
+[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/699d0d97f5ced33dab5ac0c4d8ce25e0620ec92b/src/libraries/PoolAccrualLib.sol)
 
 **Title:**
 PoolAccrualLib
@@ -27,7 +27,7 @@ function settleUser(
     mapping(address => UserInfo) storage users,
     address user,
     uint256 precision
-) external;
+) external returns (uint256 earnedAdded);
 ```
 **Parameters**
 
@@ -38,12 +38,21 @@ function settleUser(
 |`user`|`address`|Address to settle.|
 |`precision`|`uint256`|Fixed-point scale (core uses `1e18`).|
 
+**Returns**
+
+|Name|Type|Description|
+|----|----|-----------|
+|`earnedAdded`|`uint256`|Reward wei credited to `users[user].rewards` by this call (`0` if none).|
+
 
 ### updateGlobal
 
 Advances global reward index up to `min(block.timestamp, periodFinish)` and updates pending, bad debt, and dust buckets.
 
-Uses `mulmod` remainder to increment `dust`; recycles dust into `availableRewards` once `dust >= dustTolerance`.
+`accRewardPerToken` uses `mulDiv(actualReward, precision, totalStaked)`; the index can only support
+`mulDiv(totalStaked, deltaAcc, precision) <= actualReward` as user-claimable pending. The gap is **not** owed
+to any staker—route it to `dust` (recycle to `availableRewards` at `dustTolerance`) and **do not** add it to
+`totalPending`, or the TokenB invariant’s `totalPending` leg overstates recoverable claims.
 
 
 ```solidity

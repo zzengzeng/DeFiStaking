@@ -61,7 +61,8 @@ contract DeployDualPoolStakingRolesTest is Test {
     }
 
     function testGovernanceTimelockCannotCallSuperPath() public {
-        DualPoolStaking core = new DualPoolStaking(address(new MockERC20("A", "A")), address(new MockERC20("B", "B")), 1e24);
+        DualPoolStaking core =
+            new DualPoolStaking(address(new MockERC20("A", "A")), address(new MockERC20("B", "B")), 1e24);
         address[] memory one = new address[](1);
         one[0] = address(this);
         TimelockController tlGov = new TimelockController(48 hours, one, one, address(0));
@@ -75,7 +76,8 @@ contract DeployDualPoolStakingRolesTest is Test {
     }
 
     function testSuperTimelockCannotCallGovernancePath() public {
-        DualPoolStaking core = new DualPoolStaking(address(new MockERC20("A2", "A2")), address(new MockERC20("B2", "B2")), 1e24);
+        DualPoolStaking core =
+            new DualPoolStaking(address(new MockERC20("A2", "A2")), address(new MockERC20("B2", "B2")), 1e24);
         address[] memory one = new address[](1);
         one[0] = address(this);
         TimelockController tlGov = new TimelockController(48 hours, one, one, address(0));
@@ -84,7 +86,9 @@ contract DeployDualPoolStakingRolesTest is Test {
         core.grantRole(core.ADMIN_ROLE(), address(admin));
 
         vm.prank(address(tlSuper));
-        vm.expectRevert(abi.encodeWithSelector(DualPoolStakingAdmin.UnauthorizedGovernanceTimelock.selector, address(tlSuper)));
+        vm.expectRevert(
+            abi.encodeWithSelector(DualPoolStakingAdmin.UnauthorizedGovernanceTimelock.selector, address(tlSuper))
+        );
         admin.setMinClaimAmount(1);
     }
 }

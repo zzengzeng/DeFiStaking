@@ -1,5 +1,5 @@
 # DualPoolAdminModule
-[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/c3cdaa9f3e5e324db578e81e0109756c6d9d8922/src/modules/DualPoolAdminModule.sol)
+[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/699d0d97f5ced33dab5ac0c4d8ce25e0620ec92b/src/modules/DualPoolAdminModule.sol)
 
 **Inherits:**
 [DualPoolStorageLayout](/src/modules/DualPoolStorageLayout.sol/abstract.DualPoolStorageLayout.md)
@@ -20,6 +20,8 @@ delegatecall: Mutations apply to the core’s storage at `address(this)` during 
 
 Funds Pool A rewards from `sender` and schedules emissions (`notifyRewardAmountA` delegate path).
 
+Reverts `ExcessiveTransferFee` if balance delta vs `amount` exceeds `maxTransferFeeBP` (same rule as `stakeB` on TokenB).
+
 
 ```solidity
 function executeNotifyRewardAmountA(address sender, uint256 amount, uint256 duration) external;
@@ -30,12 +32,14 @@ function executeNotifyRewardAmountA(address sender, uint256 amount, uint256 dura
 |----|----|-----------|
 |`sender`|`address`|Payer pulled via `rewardToken.transferFrom` (the core’s `msg.sender` in the parent call).|
 |`amount`|`uint256`|Requested pull amount; actual uses balance delta after transfer.|
-|`duration`|`uint256`|New emission schedule length; bounded by `MIN_REWARD_RATE_DURATION` and `MAX_DURATION`.|
+|`duration`|`uint256`|Emission length in seconds, or `0` to use `poolAState.rewardDuration` (must be pre-set in bounds).|
 
 
 ### executeNotifyRewardAmountB
 
 Funds Pool B rewards from `sender` and schedules emissions (`notifyRewardAmountB` delegate path).
+
+Same FOT / `maxTransferFeeBP` slippage check as `executeNotifyRewardAmountA` and `stakeB`.
 
 
 ```solidity
@@ -47,12 +51,14 @@ function executeNotifyRewardAmountB(address sender, uint256 amount, uint256 dura
 |----|----|-----------|
 |`sender`|`address`|Payer pulled via `rewardToken.transferFrom`.|
 |`amount`|`uint256`|Requested pull amount; actual uses balance delta after transfer.|
-|`duration`|`uint256`|New emission schedule length; bounded by min/max duration constants.|
+|`duration`|`uint256`|Emission length in seconds, or `0` to use `poolBState.rewardDuration` (must be pre-set in bounds).|
 
 
 ### executeRebalanceBudgets
 
 Rebalances reward budgets between pools (`rebalanceBudgets` delegate path).
+
+Runs `_updateGlobal*` first so movable budget excludes `remaining * rewardRate` still owed by the source schedule.
 
 
 ```solidity
@@ -70,6 +76,8 @@ function executeRebalanceBudgets(Pool from, Pool to, uint256 amount) external;
 ### executeClaimFees
 
 Sweeps Pool B fees to `feeRecipient` (`claimFees` delegate path).
+
+CEI: clears `unclaimedFeesB` and emits before `rewardToken` transfer so state does not depend on recipient hooks.
 
 
 ```solidity
@@ -105,7 +113,7 @@ function executeSetFeeRecipient(address newRecipient) external;
 
 |Name|Type|Description|
 |----|----|-----------|
-|`newRecipient`|`address`|New fee sweep recipient; must not be zero.|
+|`newRecipient`|`address`|New fee sweep recipient; must not be zero or the core itself.|
 
 
 ### executeSetForfeitedRecipient
@@ -120,7 +128,7 @@ function executeSetForfeitedRecipient(address newRecipient) external;
 
 |Name|Type|Description|
 |----|----|-----------|
-|`newRecipient`|`address`|New forfeited-flow recipient; must not be zero.|
+|`newRecipient`|`address`|New forfeited-flow recipient; must not be zero or the core itself.|
 
 
 ### executeSetMinEarlyExitAmountB
@@ -225,7 +233,7 @@ function executeSetRewardDurationA(uint256 duration) external;
 
 |Name|Type|Description|
 |----|----|-----------|
-|`duration`|`uint256`|Default notify duration parameter for Pool A (seconds).|
+|`duration`|`uint256`|Default notify duration when `notifyRewardAmountA(..., 0)` is used; `0` clears the default; otherwise must be within `[MIN_REWARD_RATE_DURATION, MAX_DURATION]`.|
 
 
 ### executeSetRewardDurationB
@@ -240,7 +248,7 @@ function executeSetRewardDurationB(uint256 duration) external;
 
 |Name|Type|Description|
 |----|----|-----------|
-|`duration`|`uint256`|Default notify duration parameter for Pool B (seconds).|
+|`duration`|`uint256`|Default notify duration when `notifyRewardAmountB(..., 0)` is used; `0` clears; otherwise in `[MIN_REWARD_RATE_DURATION, MAX_DURATION]`.|
 
 
 ### executeSetMinClaimAmount
@@ -407,21 +415,6 @@ function executeUnpause(address sender) external;
 |`sender`|`address`|Address recorded on `Unpaused` after schedule extension.|
 
 
-### executeCancelTimelock
-
-Clears `pendingOps[opId]` (`cancelTimelock` delegate path).
-
-
-```solidity
-function executeCancelTimelock(bytes32 opId) external;
-```
-**Parameters**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`opId`|`bytes32`|Timelock key to delete.|
-
-
 ### _applyTVLCap
 
 Writes `tvlCap` and emits `TVLCapUpdated`.
@@ -472,6 +465,65 @@ function _applyRewardDuration(PoolInfo storage pool, Pool p, uint256 duration) i
 |`p`|`Pool`|Pool enum for the event payload.|
 |`duration`|`uint256`|New default notify duration (seconds).|
 
+
+### _effectiveNotifyDuration
+
+`duration == 0` selects `pool.rewardDuration` for operator convenience; must fall within notify bounds.
+
+
+```solidity
+function _effectiveNotifyDuration(PoolInfo storage pool, uint256 duration) private view returns (uint256 t);
+```
+
+### _accrualCatchUpCap
+
+Accrual ceiling for pause catch-up: rewards only through `min(now, periodFinish)`.
+
+
+```solidity
+function _accrualCatchUpCap(PoolInfo storage pool) private view returns (uint256 cap);
+```
+
+### _catchUpGlobal
+
+Loops `updateGlobal` until `lastUpdateTime` reaches `_accrualCatchUpCap` (bounded by `MAX_CATCHUP_ITERATIONS`).
+
+
+```solidity
+function _catchUpGlobal(PoolInfo storage pool, Pool p) private;
+```
+
+### _catchUpGlobalA
+
+
+```solidity
+function _catchUpGlobalA() internal;
+```
+
+### _catchUpGlobalB
+
+
+```solidity
+function _catchUpGlobalB() internal;
+```
+
+### _requirePauseCatchUpComplete
+
+Belt-and-suspenders guard for legacy paused state before `unpause` schedule shift.
+
+
+```solidity
+function _requirePauseCatchUpComplete(PoolInfo storage pool, uint256 pausedAt_) private view;
+```
+
+### _reanchorCaps
+
+APR / duration caps for `RewardReanchorLib.reanchorOnBudgetInjection`.
+
+
+```solidity
+function _reanchorCaps() private view returns (RewardReanchorLib.ReanchorCaps memory);
+```
 
 ### _updateGlobalA
 
@@ -568,7 +620,7 @@ event FeesClaimed(address indexed recipient, uint256 amount, uint256 timestamp);
 ### FeesUpdated
 
 ```solidity
-event FeesUpdated(uint256 penaltyBP, uint256 withdrawBP, uint256 midTermBP, uint256 at);
+event FeesUpdated(uint256 penaltyBP, uint256 withdrawBP, uint256 midTermBP, uint256 timestamp);
 ```
 
 ### InvariantViolated
@@ -652,37 +704,31 @@ event TokenRecovered(address indexed token, uint256 amount, address indexed to);
 ### ShutdownActivated
 
 ```solidity
-event ShutdownActivated(address indexed by, uint256 at);
+event ShutdownActivated(address indexed by, uint256 timestamp);
 ```
 
 ### ProtocolShutdownComplete
 
 ```solidity
-event ProtocolShutdownComplete(uint256 at);
+event ProtocolShutdownComplete(uint256 timestamp);
 ```
 
 ### EmergencyModeActivated
 
 ```solidity
-event EmergencyModeActivated(address indexed by, uint256 at);
+event EmergencyModeActivated(address indexed by, uint256 timestamp);
 ```
 
 ### Paused
 
 ```solidity
-event Paused(address indexed by, uint256 at);
+event Paused(address indexed by, uint256 timestamp);
 ```
 
 ### Unpaused
 
 ```solidity
-event Unpaused(address indexed by, uint256 at);
-```
-
-### TimelockCancelled
-
-```solidity
-event TimelockCancelled(bytes32 indexed opId, bytes32 indexed paramsHash, uint256 cancelledAt);
+event Unpaused(address indexed by, uint256 timestamp);
 ```
 
 ## Errors
@@ -723,6 +769,14 @@ error MinEarlyExitAmountTooLow(uint256 minRequired, uint256 currentValue);
 |----|----|-----------|
 |`minRequired`|`uint256`|Derived minimum allowed value.|
 |`currentValue`|`uint256`|Value that failed the check.|
+
+### InvalidRecipient
+Same selector as `StakingExecutionErrors.InvalidRecipient`; local copy for module-scoped revert.
+
+
+```solidity
+error InvalidRecipient(address recipient);
+```
 
 ### EmergencyModeActive
 Reward notify and several other admin paths are blocked while emergency mode is active.
@@ -770,18 +824,4 @@ error UnpauseCooldownPending(uint256 unpauseAt, uint256 currentTime);
 |----|----|-----------|
 |`unpauseAt`|`uint256`|Required earliest unpause time.|
 |`currentTime`|`uint256`|Current timestamp.|
-
-### TimelockNotFound
-`executeCancelTimelock` referenced a missing `opId`.
-
-
-```solidity
-error TimelockNotFound(bytes32 opId);
-```
-
-**Parameters**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`opId`|`bytes32`|Unknown timelock key.|
 

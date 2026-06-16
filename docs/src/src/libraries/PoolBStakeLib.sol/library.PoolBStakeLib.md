@@ -1,5 +1,5 @@
 # PoolBStakeLib
-[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/c3cdaa9f3e5e324db578e81e0109756c6d9d8922/src/libraries/PoolBStakeLib.sol)
+[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/699d0d97f5ced33dab5ac0c4d8ce25e0620ec92b/src/libraries/PoolBStakeLib.sol)
 
 **Title:**
 PoolBStakeLib
@@ -18,29 +18,6 @@ Updates rolling `unlockTimeB` and weighted-average `stakeTimestampB` used by wit
 ```solidity
 function _updateRollingLock(uint256 oldUnlockTime, uint256 _lockDuration) private view returns (uint256);
 ```
-
-### _updateWADP
-
-Weighted-average “deposit time” used as Pool B holding-duration reference on non-early withdrawals.
-
-
-```solidity
-function _updateWADP(uint256 oldStaked, uint256 oldTimestamp, uint256 addedAmount) private view returns (uint256);
-```
-**Parameters**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`oldStaked`|`uint256`|User stake before this deposit.|
-|`oldTimestamp`|`uint256`|Prior weighted timestamp (`0`/`unset` treated as fresh stake path).|
-|`addedAmount`|`uint256`|New principal credited this call.|
-
-**Returns**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`<none>`|`uint256`|New weighted timestamp in seconds (unix time scale).|
-
 
 ### _pullAndValidateStake
 
@@ -99,6 +76,11 @@ struct StakeBParams {
     uint256 maxTransferFeeBP;
     /// @notice Basis-point denominator (typically `10_000`).
     uint256 basisPoints;
+    uint256 minRewardRateDuration;
+    uint256 maxRewardDuration;
+    uint256 maxAprBp;
+    uint256 secondsPerYear;
+    uint256 maxTotalSupplyBForRewardRateCap;
 }
 ```
 

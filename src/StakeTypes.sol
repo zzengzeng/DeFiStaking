@@ -55,12 +55,3 @@ struct UserInfo {
     /// @notice Last `accRewardPerToken` applied to this user (reward debt / paid index).
     uint256 rewardPaid;
 }
-
-/// @notice Optional on-chain record for a timelocked governance operation (`pendingOps[opId]` on the cores).
-/// @dev `executeAfter` and `paramsHash` are written by higher-level governance scripts; cancellation clears the slot.
-struct PendingOp {
-    /// @notice Earliest timestamp at which the op may execute (0 if unset / cleared).
-    uint256 executeAfter;
-    /// @notice Commitment hash of encoded parameters (for cancellation / audit).
-    bytes32 paramsHash;
-}

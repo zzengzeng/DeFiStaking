@@ -1,5 +1,5 @@
 # DualPoolUserModule
-[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/c3cdaa9f3e5e324db578e81e0109756c6d9d8922/src/modules/DualPoolUserModule.sol)
+[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/699d0d97f5ced33dab5ac0c4d8ce25e0620ec92b/src/modules/DualPoolUserModule.sol)
 
 **Inherits:**
 [DualPoolStorageLayout](/src/modules/DualPoolStorageLayout.sol/abstract.DualPoolStorageLayout.md)
@@ -112,7 +112,7 @@ function executeClaimB(address user) external;
 
 ### executeForceClaimAll
 
-Force-claim-all entrypoint for delegatecall from the core.
+Force-claim-all entrypoint for delegatecall from the core (partial pay when liquidity is insufficient).
 
 
 ```solidity
@@ -122,7 +122,7 @@ function executeForceClaimAll(address user) external;
 
 |Name|Type|Description|
 |----|----|-----------|
-|`user`|`address`|Claimant whose Pool A + B rewards are settled under shutdown / liquidity rules.|
+|`user`|`address`|Claimant whose Pool A + B rewards are settled; only during `shutdown` or when either pool has `badDebt`. Per-pool `minClaimAmount` applies when not shutdown and no bad debt (see `ForceClaimAllLib`).|
 
 
 ### executeCompoundB
@@ -170,6 +170,15 @@ function executeEmergencyWithdrawB(address user) external;
 |`user`|`address`|Account whose Pool B position is force-closed to zero.|
 
 
+### _reanchorCaps
+
+APR / duration caps for `RewardReanchorLib.reanchorOnBudgetInjection`.
+
+
+```solidity
+function _reanchorCaps() private view returns (RewardReanchorLib.ReanchorCaps memory);
+```
+
 ### _updateGlobalA
 
 Advances Pool A global reward index; emits `InsufficientBudget` / `DustAccumulated` when the library reports signals.
@@ -186,6 +195,32 @@ Advances Pool B global reward index.
 
 ```solidity
 function _updateGlobalB() internal;
+```
+
+### _catchUpExpiredGlobalA
+
+A stale schedule can be re-anchored only after its old emission window is fully accounted.
+Otherwise a new stake could join before `lastUpdateTime` reaches `periodFinish` and share old rewards.
+
+
+```solidity
+function _catchUpExpiredGlobalA() internal;
+```
+
+### _catchUpExpiredGlobalB
+
+Same stale-schedule catch-up for Pool B.
+
+
+```solidity
+function _catchUpExpiredGlobalB() internal;
+```
+
+### _catchUpExpiredGlobal
+
+
+```solidity
+function _catchUpExpiredGlobal(PoolInfo storage pool, Pool p) private;
 ```
 
 ### _settleUserA
@@ -303,7 +338,7 @@ event ForceClaimed(
 
 ```solidity
 event EmergencyWithdrawn(
-    address indexed user, uint256 principal, uint256 rewardsForfeited, Pool indexed pool, uint256 at
+    address indexed user, uint256 principal, uint256 rewardsForfeited, Pool indexed pool, uint256 withdrawnAt
 );
 ```
 

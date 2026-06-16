@@ -19,7 +19,6 @@ export function mapContractError(error: unknown): string {
   if (text.includes("BelowMinClaim")) return "领取金额低于最小 claim 限制。";
   if (text.includes("TimelockNotReady")) return "Timelock 未到可执行时间，请稍后再执行。";
   if (text.includes("TimelockParamChanged")) return "当前参数和已排队提案不一致，请先取消再重新排队。";
-  if (text.includes("TimelockNotFound")) return "未找到可取消的 timelock 操作。";
   if (text.includes("ForceClaimAllNotAvailable")) return "forceClaimAll 仅在关停或存在坏账时可用，请使用 claimA/claimB。";
   if (text.includes("EmergencyModeActive") || text.includes("EmergencyActive")) return "协议处于 Emergency 模式，当前操作不可用。";
   if (text.includes("InvalidRecipient")) return "收款地址不可用：不能设置为质押合约自身，请更换治理金库或多签地址。";

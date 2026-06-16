@@ -1,5 +1,5 @@
 # PoolBWithdrawLib
-[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/c3cdaa9f3e5e324db578e81e0109756c6d9d8922/src/libraries/PoolBWithdrawLib.sol)
+[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/699d0d97f5ced33dab5ac0c4d8ce25e0620ec92b/src/libraries/PoolBWithdrawLib.sol)
 
 **Title:**
 PoolBWithdrawLib
@@ -7,22 +7,10 @@ PoolBWithdrawLib
 Linked library: Pool B withdraw, fees, penalties, and optional early-exit forfeiture logic.
 
 Early exit before `unlockTimeB` forfeits accrued `userB.rewards` back to `availableRewards` and charges `penaltyfeeBP` on principal.
+Outbound TokenB FOT tax is borne by the user (PRD §4.6); protocol fees stay on-contract.
 
 
 ## Functions
-### _recomputeRewardRateB
-
-Recomputes `rewardRate` as `availableRewards / remainingSeconds` for the **current** reward period.
-
-Intent (M-1 / PRD-adjacent): early-exit penalty (and forfeiture paths above) increase `availableRewards` **without**
-extending `periodFinish`. Re-anchoring the rate keeps the *remaining* seconds from being diluted vs a stale
-`rewardRate` that was set when `availableRewards` was lower—i.e. post-penalty emissions stay consistent with liquidity.
-
-
-```solidity
-function _recomputeRewardRateB(PoolInfo storage poolB) private;
-```
-
 ### _handleEarlyExit
 
 Validates `minEarlyExitAmountB`, forfeits user rewards into `availableRewards`, and returns principal penalty.
@@ -31,7 +19,7 @@ Validates `minEarlyExitAmountB`, forfeits user rewards into `availableRewards`, 
 ```solidity
 function _handleEarlyExit(PoolInfo storage poolB, UserInfo storage userB, WithdrawBParams memory p)
     private
-    returns (uint256 penalty);
+    returns (uint256 penalty, uint256 forfeitedReward);
 ```
 
 ### _computeNormalFee
@@ -110,6 +98,10 @@ struct WithdrawBParams {
     uint256 midTermFeeBP;
     /// @notice Basis-point denominator (`10_000`).
     uint256 basisPoints;
+    /// @notice Schedule caps for post-forfeiture `rewardRate` re-anchor.
+    RewardReanchorLib.ReanchorCaps reanchorCaps;
+    /// @notice FOT outbound tax ceiling (`0` = standard ERC20).
+    uint256 maxTransferFeeBP;
 }
 ```
 
@@ -125,6 +117,8 @@ struct WithdrawBResult {
     uint256 feeOrPenaltyForEvent;
     /// @notice Whether the withdraw used early-exit semantics.
     bool isEarlyForEvent;
+    /// @notice Pool B rewards moved from pending into `availableRewards` on early exit (`0` if not early / no rewards).
+    uint256 forfeitedRewardsB;
 }
 ```
 

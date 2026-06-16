@@ -1,5 +1,5 @@
 # DualPoolStorageLayout
-[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/c3cdaa9f3e5e324db578e81e0109756c6d9d8922/src/modules/DualPoolStorageLayout.sol)
+[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/699d0d97f5ced33dab5ac0c4d8ce25e0620ec92b/src/modules/DualPoolStorageLayout.sol)
 
 **Inherits:**
 Ownable, AccessControl, ReentrancyGuard, Pausable
@@ -40,6 +40,15 @@ Upper bound on a single `updateGlobal` time step to bound reward accrual in one 
 
 ```solidity
 uint256 public constant MAX_DELTA_TIME = 30 days
+```
+
+
+### MAX_CATCHUP_ITERATIONS
+Max `updateGlobal` steps in one `pause` catch-up loop (`× MAX_DELTA_TIME` wall-clock span).
+
+
+```solidity
+uint256 public constant MAX_CATCHUP_ITERATIONS = 50
 ```
 
 
@@ -135,146 +144,6 @@ bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE")
 
 ```solidity
 bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE")
-```
-
-
-### OP_SET_FEES
-
-```solidity
-bytes32 public constant OP_SET_FEES = keccak256("SET_FEES")
-```
-
-
-### OP_SET_LOCK_DURATION
-
-```solidity
-bytes32 public constant OP_SET_LOCK_DURATION = keccak256("SET_LOCK_DURATION")
-```
-
-
-### OP_REBALANCE_BUDGETS
-
-```solidity
-bytes32 public constant OP_REBALANCE_BUDGETS = keccak256("REBALANCE_BUDGETS")
-```
-
-
-### OP_SET_TVL_CAP_A
-
-```solidity
-bytes32 public constant OP_SET_TVL_CAP_A = keccak256("SET_TVL_CAP_A")
-```
-
-
-### OP_SET_TVL_CAP_B
-
-```solidity
-bytes32 public constant OP_SET_TVL_CAP_B = keccak256("SET_TVL_CAP_B")
-```
-
-
-### OP_SET_MIN_STAKE_A
-
-```solidity
-bytes32 public constant OP_SET_MIN_STAKE_A = keccak256("SET_MIN_STAKE_A")
-```
-
-
-### OP_SET_MIN_STAKE_B
-
-```solidity
-bytes32 public constant OP_SET_MIN_STAKE_B = keccak256("SET_MIN_STAKE_B")
-```
-
-
-### OP_SET_REWARD_DURATION_A
-
-```solidity
-bytes32 public constant OP_SET_REWARD_DURATION_A = keccak256("SET_REWARD_DURATION_A")
-```
-
-
-### OP_SET_REWARD_DURATION_B
-
-```solidity
-bytes32 public constant OP_SET_REWARD_DURATION_B = keccak256("SET_REWARD_DURATION_B")
-```
-
-
-### OP_SET_MIN_CLAIM_AMOUNT
-
-```solidity
-bytes32 public constant OP_SET_MIN_CLAIM_AMOUNT = keccak256("SET_MIN_CLAIM_AMOUNT")
-```
-
-
-### OP_RECOVER_TOKEN
-
-```solidity
-bytes32 public constant OP_RECOVER_TOKEN = keccak256("RECOVER_TOKEN")
-```
-
-
-### OP_CLAIM_FEES
-
-```solidity
-bytes32 public constant OP_CLAIM_FEES = keccak256("CLAIM_FEES")
-```
-
-
-### OP_SHUTDOWN
-
-```solidity
-bytes32 public constant OP_SHUTDOWN = keccak256("SHUTDOWN")
-```
-
-
-### OP_RESOLVE_BAD_DEBT
-
-```solidity
-bytes32 public constant OP_RESOLVE_BAD_DEBT = keccak256("RESOLVE_BAD_DEBT")
-```
-
-
-### OP_NOTIFY_REWARD_A
-
-```solidity
-bytes32 public constant OP_NOTIFY_REWARD_A = keccak256("NOTIFY_REWARD_A")
-```
-
-
-### OP_NOTIFY_REWARD_B
-
-```solidity
-bytes32 public constant OP_NOTIFY_REWARD_B = keccak256("NOTIFY_REWARD_B")
-```
-
-
-### OP_SET_FEE_RECIPIENT
-
-```solidity
-bytes32 public constant OP_SET_FEE_RECIPIENT = keccak256("SET_FEE_RECIPIENT")
-```
-
-
-### OP_SET_FORFEITED_RECIPIENT
-
-```solidity
-bytes32 public constant OP_SET_FORFEITED_RECIPIENT = keccak256("SET_FORFEITED_RECIPIENT")
-```
-
-
-### OP_SET_MIN_EARLY_EXIT_B
-
-```solidity
-bytes32 public constant OP_SET_MIN_EARLY_EXIT_B = keccak256("SET_MIN_EARLY_EXIT_B")
-```
-
-
-### OP_SET_MAX_TRANSFER_FEE_BP
-
-```solidity
-bytes32 public constant OP_SET_MAX_TRANSFER_FEE_BP = keccak256("SET_MAX_TRANSFER_FEE_BP")
 ```
 
 
@@ -519,19 +388,8 @@ mapping(address => uint256) public lastClaimTime
 ```
 
 
-### pendingOps
-Optional timelock metadata keyed by governance operation id.
-
-
-```solidity
-mapping(bytes32 => PendingOp) public pendingOps
-```
-
-
 ### userModule
 `delegatecall` target for all user stake/withdraw/claim bodies (`DualPoolUserModule`).
-
-Must mirror `DualPoolStaking` slot order after `pendingOps` (delegatecall layout).
 
 
 ```solidity
@@ -554,6 +412,24 @@ Immutable cap for `MAX_REWARD_RATE_*` derivation (PRD: deploy-time supply ceilin
 
 ```solidity
 uint256 public maxTotalSupplyBForRewardRateCap
+```
+
+
+### bookedUserRewardsA
+Running sum of all `userInfoA[*].rewards` (mirrored on every settle / claim / compound / forfeit / emergency path).
+
+
+```solidity
+uint256 public bookedUserRewardsA
+```
+
+
+### bookedUserRewardsB
+Running sum of all `userInfoB[*].rewards`.
+
+
+```solidity
+uint256 public bookedUserRewardsB
 ```
 
 

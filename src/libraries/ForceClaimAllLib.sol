@@ -14,7 +14,6 @@ import {StakingExecutionErrors} from "../StakingExecutionErrors.sol";
 ///      sequentially to Pool A then Pool B rewards. It intentionally does not reserve `availableRewards` because this
 ///      path is available only during shutdown or bad debt, where unpaid user rewards take priority over future budgets.
 library ForceClaimAllLib {
-
     /// @notice Inputs for `executeForceClaimAll`.
     struct ForceClaimParams {
         /// @notice Reward / TokenB asset used for payout.
