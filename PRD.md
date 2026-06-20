@@ -223,7 +223,6 @@ uint256 public shutdownAt;         // 停机时间戳
 uint256 public badDebtA;           // Pool A 坏账缺口
 uint256 public badDebtB;           // Pool B 坏账缺口
 uint256 public minClaimAmount;        // 合约初始值为 0（无门槛）；Admin 须在部署后尽早通过 setMinClaimAmount 设置（建议 ≥1e15 wei），上限 MAX_MIN_CLAIM_AMOUNT（1e17 wei）
-address public forfeitedRecipient; // 治理可配置的接收地址（Timelock）；与 Pool B 罚金/费用等路由设计对齐，**不用于 Pool A 正常提款罚金**（`withdrawA` 无罚金）
 
 ```
 
@@ -282,9 +281,13 @@ address public forfeitedRecipient; // 治理可配置的接收地址（Timelock�
 | `minStakeAmountA / B` | uint256 | 最小质押量 | 防粉尘攻击 |
 | `maxTVLCapA / B` | uint256 | TVL 上限 | 0=无限 |
 | `claimCooldown` | uint256 | Claim/Compound 冷却 | 24h |
-| `feeRecipient` | address | 提现手续费接收地址 | Admin 设定，≥48h Timelock |
+| `feeRecipient` | address | Pool B 提现手续费接收地址（`unclaimedFeesB` → `claimFees`） | Admin 设定，≥48h Timelock |
 | `minEarlyExitAmountB` | uint256 | **仅 Pool B**：最小提前退出量 | 须满足计算罚金 $\ge 1 \text{ wei}$ |
-| `forfeitedRecipient` | address | 治理配置的接收地址（预留/与 B 池路由设计对齐） | Admin 设定，≥48h Timelock |
+
+> **Pool B 罚金与没收奖励路由（链上实现）**
+> * 提前退出没收的 `userB.rewards` 与 early-exit 本金罚金 → `poolB.availableRewards`（回流全体 B 池 staker）。
+> * 锁定期后的 tiered 提现手续费 → `unclaimedFeesB`，由治理 `claimFees` 扫至 `feeRecipient`。
+> * Emergency 放弃的 A/B 池奖励 → `poolB.availableRewards`（见 §7.3）。
 
 > **minEarlyExitAmountB 最小值除零约束（安全基线，仅 Pool B）**
 > 为防止提现 1 wei 时导致罚金因整除被截断为 0，系统设置函数必须强制校验：
@@ -1129,7 +1132,6 @@ event FeeRecipientUpdated(address indexed oldAddr, address indexed newAddr, uint
 event FeesUpdated(uint256 penaltyBP, uint256 withdrawBP, uint256 midTermBP, uint256 at);
 event LockDurationUpdated(uint256 oldDuration, uint256 newDuration, uint256 at);
 event MinClaimAmountUpdated(uint256 oldVal, uint256 newVal, uint256 at); 
-event ForfeitedRecipientUpdated(address indexed oldAddr, address indexed newAddr, uint256 at);
 event TVLCapUpdated(Pool indexed pool, uint256 oldCap, uint256 newCap, uint256 at);
 event MinStakeAmountUpdated(Pool indexed pool, uint256 oldAmount, uint256 newAmount, uint256 at);
 event RewardDurationUpdated(Pool indexed pool, uint256 oldDuration, uint256 newDuration, uint256 at);
@@ -1164,7 +1166,7 @@ error StillStaked();
 
 ```
 
-> **部署角色交接（`script/DualPoolStaking.s.sol`）**：部署后将 `ADMIN_ROLE` 与 `DEFAULT_ADMIN_ROLE` 授予 `DualPoolStakingAdmin` 并从 deployer 撤销；Admin 门面 `owner` 转至 `TimelockController`；`OPERATOR_ROLE` 保留在运维热钱包（`pause` / `notify` / `enableEmergencyMode` 不经 Timelock）。
+> **部署角色交接（`script/DualPoolStaking.s.sol`）**：部署后将 `ADMIN_ROLE`、`DEFAULT_ADMIN_ROLE` 与 Core `owner` 授予 `DualPoolStakingAdmin` 并从 deployer 撤销；Timelock proposer/executor 与 `OPERATOR_ROLE` 从环境变量配置。生产部署必须设置 `PRODUCTION=true`，强制这些治理/运维地址非零且不等于 deployer。
 
 ---
 

@@ -343,6 +343,7 @@ contract DualPoolUserModule is DualPoolStorageLayout {
 
     /// @dev A stale schedule can be re-anchored only after its old emission window is fully accounted.
     ///      Otherwise a new stake could join before `lastUpdateTime` reaches `periodFinish` and share old rewards.
+    ///      Uses the same `MAX_CATCHUP_ITERATIONS` budget as `DualPoolAdminModule._catchUpGlobal`.
     function _catchUpExpiredGlobalA() internal {
         _catchUpExpiredGlobal(poolAState, Pool.A);
     }
@@ -355,7 +356,7 @@ contract DualPoolUserModule is DualPoolStorageLayout {
     function _catchUpExpiredGlobal(PoolInfo storage pool, Pool p) private {
         uint256 cap = block.timestamp < pool.periodFinish ? block.timestamp : pool.periodFinish;
         uint256 iterations;
-        while (pool.lastUpdateTime < cap) {
+        while (pool.lastUpdateTime < cap && iterations < MAX_CATCHUP_ITERATIONS) {
             uint256 prev = pool.lastUpdateTime;
             if (p == Pool.A) {
                 _updateGlobalA();
@@ -363,12 +364,7 @@ contract DualPoolUserModule is DualPoolStorageLayout {
                 _updateGlobalB();
             }
             if (pool.lastUpdateTime == prev) break;
-            unchecked {
-                ++iterations;
-            }
-            if (iterations > MAX_DURATION / MAX_DELTA_TIME + 2) {
-                revert StakingExecutionErrors.PauseCatchUpIncomplete(cap, pool.lastUpdateTime);
-            }
+            iterations++;
         }
         if (pool.lastUpdateTime < cap) {
             revert StakingExecutionErrors.PauseCatchUpIncomplete(cap, pool.lastUpdateTime);

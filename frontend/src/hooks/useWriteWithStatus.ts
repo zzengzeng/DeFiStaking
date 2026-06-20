@@ -18,6 +18,7 @@ export function useWriteWithStatus(options?: UseTransactionFlowOptions) {
     hash: flow.txHash,
     txHash: flow.txHash,
     error: flow.error,
+    isBusy: flow.isBusy,
     reset: flow.reset,
     execute,
     executeWrite: flow.executeWrite,

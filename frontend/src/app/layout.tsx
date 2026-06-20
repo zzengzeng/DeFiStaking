@@ -1,15 +1,12 @@
 import type { Metadata, Viewport } from "next";
-import dynamic from "next/dynamic";
+
+import { Providers } from "./providers";
+
 import "./globals.css";
 
-const ClientApp = dynamic(
-  () => import("@/components/ClientApp").then((mod) => mod.ClientApp),
-  { ssr: false }
-);
-
 export const metadata: Metadata = {
-  title: "Dual Pool Staking Frontend",
-  description: "Production-ready frontend for DualPoolStaking protocol",
+  title: "DualPool Staking",
+  description: "DualPool 质押产品界面与合约控制台",
 };
 
 export const viewport: Viewport = {
@@ -25,11 +22,12 @@ export default function RootLayout({
 }>) {
   return (
     <html
-      lang="en"
+      lang="zh-CN"
       className="h-full antialiased"
+      suppressHydrationWarning
     >
       <body className="flex min-h-full min-w-0 flex-col overflow-x-hidden">
-        <ClientApp>{children}</ClientApp>
+        <Providers>{children}</Providers>
       </body>
     </html>
   );

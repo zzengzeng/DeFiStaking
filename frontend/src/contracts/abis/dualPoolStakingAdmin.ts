@@ -36,7 +36,6 @@ export const dualPoolStakingAdminAbi = [
   { type: "function", name: "setTVLCapA", stateMutability: "nonpayable", inputs: [{ name: "cap", type: "uint256" }], outputs: [] },
   { type: "function", name: "setTVLCapB", stateMutability: "nonpayable", inputs: [{ name: "cap", type: "uint256" }], outputs: [] },
   { type: "function", name: "setFeeRecipient", stateMutability: "nonpayable", inputs: [{ name: "newRecipient", type: "address" }], outputs: [] },
-  { type: "function", name: "setForfeitedRecipient", stateMutability: "nonpayable", inputs: [{ name: "newRecipient", type: "address" }], outputs: [] },
   {
     type: "function",
     name: "rebalanceBudgets",

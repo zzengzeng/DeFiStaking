@@ -112,7 +112,6 @@ export function GovernanceTimelockCards({ minDelayGovernance, minDelaySuper, tlG
   const [tvlCapA, setTvlCapA] = useState("0");
   const [tvlCapB, setTvlCapB] = useState("0");
   const [feeRecipient, setFeeRecipient] = useState("");
-  const [forfeitedRecipient, setForfeitedRecipient] = useState("");
   const [rebalanceAmount, setRebalanceAmount] = useState("10");
   const [rebalanceFrom, setRebalanceFrom] = useState<"A" | "B">("A");
   const [badDebtRepay, setBadDebtRepay] = useState("100");
@@ -128,12 +127,10 @@ export function GovernanceTimelockCards({ minDelayGovernance, minDelaySuper, tlG
 
   const readOpts = { staleTime: 30_000, refetchOnWindowFocus: false } as const;
   const feeRecipientRead = useReadContract({ address: STAKING, abi: STAKING_ABI, functionName: "feeRecipient", query: readOpts });
-  const forfeitedRecipientRead = useReadContract({ address: STAKING, abi: STAKING_ABI, functionName: "forfeitedRecipient", query: readOpts });
   const minEarlyExitRead = useReadContract({ address: STAKING, abi: STAKING_ABI, functionName: "minEarlyExitAmountB", query: readOpts });
   const maxTransferFeeRead = useReadContract({ address: STAKING, abi: STAKING_ABI, functionName: "maxTransferFeeBP", query: readOpts });
 
   const onChainFeeRecipient = feeRecipientRead.data;
-  const onChainForfeitedRecipient = forfeitedRecipientRead.data;
   const onChainMinEarlyExit = minEarlyExitRead.data;
   const onChainMaxTransferFee = maxTransferFeeRead.data;
 
@@ -163,9 +160,8 @@ export function GovernanceTimelockCards({ minDelayGovernance, minDelaySuper, tlG
     if (onChainMinEarlyExit !== undefined) setMinEarlyExitAmountB(onChainMinEarlyExit.toString());
     if (onChainMaxTransferFee !== undefined) setMaxTransferFeeBp(onChainMaxTransferFee.toString());
     if (onChainFeeRecipient) setFeeRecipient(onChainFeeRecipient);
-    if (onChainForfeitedRecipient) setForfeitedRecipient(onChainForfeitedRecipient);
     setHydrated(true);
-  }, [hydrated, staking, onChainFeeRecipient, onChainForfeitedRecipient, onChainMinEarlyExit, onChainMaxTransferFee]);
+  }, [hydrated, staking, onChainFeeRecipient, onChainMinEarlyExit, onChainMaxTransferFee]);
 
   const withdrawBpValue = parseUintInput(withdrawBp);
   const midtermBpValue = parseUintInput(midtermBp);
@@ -181,7 +177,6 @@ export function GovernanceTimelockCards({ minDelayGovernance, minDelaySuper, tlG
   const tvlCapAValue = parseTokenAmountInput(tvlCapA);
   const tvlCapBValue = parseTokenAmountInput(tvlCapB);
   const feeRecipientValue = parseAddressInput(feeRecipient);
-  const forfeitedRecipientValue = parseAddressInput(forfeitedRecipient);
   const rebalanceAmountValue = parseTokenAmountInput(rebalanceAmount);
   const badDebtRepayValue = parseTokenAmountInput(badDebtRepay);
   const recoverToValue = parseAddressInput(recoverTo);
@@ -361,10 +356,6 @@ export function GovernanceTimelockCards({ minDelayGovernance, minDelaySuper, tlG
         <>
       <GovernanceCard title="setFeeRecipient" hint="B 池提现手续费收款地址" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "setFeeRecipient", args: [feeRecipientValue ?? "0x0000000000000000000000000000000000000000"] })} {...govCardProps} disabledReason={addressError(feeRecipientValue, "feeRecipient")} executeRows={() => [{ label: "address", value: feeRecipient }]}>
         <FieldLabel hint={onChainFeeRecipient ? `链上: ${onChainFeeRecipient}` : undefined}>地址<input value={feeRecipient} onChange={(e) => setFeeRecipient(e.target.value)} className={inputClass} /></FieldLabel>
-      </GovernanceCard>
-
-      <GovernanceCard title="setForfeitedRecipient" hint="罚没 / 紧急退出 forfeited 收款地址" payload={encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "setForfeitedRecipient", args: [forfeitedRecipientValue ?? "0x0000000000000000000000000000000000000000"] })} {...govCardProps} disabledReason={addressError(forfeitedRecipientValue, "forfeitedRecipient")} executeRows={() => [{ label: "address", value: forfeitedRecipient }]}>
-        <FieldLabel hint={onChainForfeitedRecipient ? `链上: ${onChainForfeitedRecipient}` : undefined}>地址<input value={forfeitedRecipient} onChange={(e) => setForfeitedRecipient(e.target.value)} className={inputClass} /></FieldLabel>
       </GovernanceCard>
         </>
       ) : null}

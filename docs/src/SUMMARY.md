@@ -1,12 +1,6 @@
 # Summary
 - [Home](README.md)
-- [Security Policy](../../SECURITY.md)
-- [Security Operations](security/README.md)
-  - [Dependencies](security/dependencies.md)
-  - [Incident Response](security/incident-response.md)
-  - [Key Management](security/key-management.md)
-  - [Threat Model](security/threat-model.md)
-  - [Security Owners](security/security-owners.md)
+- [Engineering Docs](engineering-docs.md)
 # src
   - [❱ libraries](src/libraries/README.md)
     - [FOTTransferLib](src/libraries/FOTTransferLib.sol/library.FOTTransferLib.md)

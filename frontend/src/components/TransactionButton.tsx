@@ -5,13 +5,15 @@ import clsx from "clsx";
 import type { TxState } from "@/lib/txFlowTypes";
 import { transactionButtonLabel } from "@/lib/txFlowTypes";
 
-type IdlePrimary = "Stake" | "Approve" | "Submit" | "Confirm";
+type IdlePrimary = "Stake" | "Approve" | "Submit" | "Confirm" | "质押" | "授权" | "提交" | "确认";
 
 type Props = {
   /** 当前状态机状态（可与 `needsApproval` 组合显示 Approve） */
   flowState: TxState;
   needsApproval?: boolean;
   idlePrimary?: IdlePrimary;
+  /** product：翠绿；console：琥珀（与控制台主色一致） */
+  accent?: "product" | "console";
   disabled?: boolean;
   onClick: () => void;
   className?: string;
@@ -22,7 +24,8 @@ type Props = {
 export function TransactionButton({
   flowState,
   needsApproval = false,
-  idlePrimary = "Submit",
+  idlePrimary = "提交",
+  accent = "product",
   disabled,
   onClick,
   className,
@@ -37,6 +40,11 @@ export function TransactionButton({
     flowState === "submitting" ||
     flowState === "pending";
 
+  const idleClass =
+    accent === "console"
+      ? "bg-amber-400 text-black hover:bg-amber-300"
+      : "bg-emerald-500 text-black";
+
   return (
     <button
       type={type}
@@ -44,9 +52,9 @@ export function TransactionButton({
       disabled={disabled || showSpinner}
       className={clsx(
         "inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-40",
-        flowState === "failed" && "bg-red-500/90 text-white",
-        flowState === "confirmed" && "bg-emerald-400 text-black",
-        flowState !== "failed" && flowState !== "confirmed" && "bg-emerald-500 text-black",
+        !className?.includes("dp-button") && flowState === "failed" && "bg-red-500/90 text-white",
+        !className?.includes("dp-button") && flowState === "confirmed" && "bg-emerald-400 text-black",
+        !className?.includes("dp-button") && flowState !== "failed" && flowState !== "confirmed" && idleClass,
         className,
       )}
     >

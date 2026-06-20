@@ -51,7 +51,6 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
     event InsufficientBudget(Pool pool, uint256 shortfall, uint256 timestamp);
     event DustAccumulated(Pool pool, uint256 dustAmount, uint256 timestamp);
     event FeeRecipientUpdated(address indexed oldRecipient, address indexed newRecipient, uint256 timestamp);
-    event ForfeitedRecipientUpdated(address indexed oldRecipient, address indexed newRecipient, uint256 timestamp);
     event TVLCapUpdated(Pool indexed pool, uint256 oldCap, uint256 newCap, uint256 timestamp);
     event MinStakeAmountUpdated(Pool indexed pool, uint256 oldValue, uint256 newValue, uint256 timestamp);
     event RewardDurationUpdated(Pool indexed pool, uint256 oldValue, uint256 newValue, uint256 timestamp);
@@ -190,16 +189,6 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
         address oldRecipient = feeRecipient;
         feeRecipient = newRecipient;
         emit FeeRecipientUpdated(oldRecipient, newRecipient, block.timestamp);
-    }
-
-    /// @notice Sets `forfeitedRecipient` (`setForfeitedRecipient` delegate path).
-    /// @param newRecipient New forfeited-flow recipient; must not be zero or the core itself.
-    function executeSetForfeitedRecipient(address newRecipient) external {
-        if (newRecipient == address(0)) revert StakingExecutionErrors.ZeroAddress();
-        if (newRecipient == address(this)) revert InvalidRecipient(newRecipient);
-        address oldRecipient = forfeitedRecipient;
-        forfeitedRecipient = newRecipient;
-        emit ForfeitedRecipientUpdated(oldRecipient, newRecipient, block.timestamp);
     }
 
     /// @notice Sets `minEarlyExitAmountB` (`setMinEarlyExitAmountB` delegate path).

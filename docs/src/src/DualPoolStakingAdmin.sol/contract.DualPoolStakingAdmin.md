@@ -1,5 +1,5 @@
 # DualPoolStakingAdmin
-[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/699d0d97f5ced33dab5ac0c4d8ce25e0620ec92b/src/DualPoolStakingAdmin.sol)
+[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/49679f252829d0b3ac33cfb42d46070f8f7fbdc0/src/DualPoolStakingAdmin.sol)
 
 **Title:**
 DualPoolStakingAdmin
@@ -91,13 +91,6 @@ function claimFees() external onlyGovernanceTimelock;
 
 ```solidity
 function setFeeRecipient(address newRecipient) external onlyGovernanceTimelock;
-```
-
-### setForfeitedRecipient
-
-
-```solidity
-function setForfeitedRecipient(address newRecipient) external onlyGovernanceTimelock;
 ```
 
 ### setMinEarlyExitAmountB

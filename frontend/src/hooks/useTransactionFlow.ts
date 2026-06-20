@@ -7,6 +7,7 @@ import { useTxCenter } from "@/hooks/useTxCenter";
 import { mapContractError } from "@/lib/errors";
 import type { TxState } from "@/lib/txFlowTypes";
 import { isTxBusy } from "@/lib/txFlowTypes";
+import { UI_COPY } from "@/lib/uiCopy";
 import type { TxItem } from "@/store/useTxStore";
 
 export type ExecuteTxOpts = {
@@ -141,7 +142,7 @@ export function useStakeWithApprovalFlow(flowOptions?: UseTransactionFlowOptions
         if (cfg.needsApproval) {
           await flow.executeApprove(
             {
-              actionLabel: "Approve staking token",
+              actionLabel: UI_COPY.tx.approveStakeToken,
               txType: "approve",
               metadata: md,
               onConfirmed: () => cfg.refetchAllowance(),
@@ -153,7 +154,7 @@ export function useStakeWithApprovalFlow(flowOptions?: UseTransactionFlowOptions
 
         await flow.executeWrite(
           {
-            actionLabel: "Stake",
+            actionLabel: UI_COPY.tx.stake,
             txType: "stake",
             metadata: md,
             onConfirmed: () => cfg.invalidate(),

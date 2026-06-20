@@ -3,7 +3,7 @@
 import "@rainbow-me/rainbowkit/styles.css";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { RainbowKitProvider } from "@rainbow-me/rainbowkit";
+import { darkTheme, RainbowKitProvider } from "@rainbow-me/rainbowkit";
 import { useState } from "react";
 import { Toaster } from "sonner";
 import { WagmiProvider } from "wagmi";
@@ -19,9 +19,17 @@ export function Web3Provider({ children }: Props) {
   const [queryClient] = useState(() => new QueryClient());
 
   return (
-    <WagmiProvider config={wagmiConfig}>
+    <WagmiProvider config={wagmiConfig} reconnectOnMount>
       <QueryClientProvider client={queryClient}>
-        <RainbowKitProvider>
+        <RainbowKitProvider
+          locale="zh-CN"
+          theme={darkTheme({
+            accentColor: "#7c9cff",
+            accentColorForeground: "#0d0d0d",
+            borderRadius: "medium",
+          })}
+          appInfo={{ appName: "DualPool Staking" }}
+        >
           {children}
           <TxFlowRoot />
         </RainbowKitProvider>

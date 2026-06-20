@@ -63,10 +63,6 @@ contract DualPoolStakingAdmin {
         core.setFeeRecipient(newRecipient);
     }
 
-    function setForfeitedRecipient(address newRecipient) external onlyGovernanceTimelock {
-        core.setForfeitedRecipient(newRecipient);
-    }
-
     function setMinEarlyExitAmountB(uint256 newMin) external onlyGovernanceTimelock {
         core.setMinEarlyExitAmountB(newMin);
     }

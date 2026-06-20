@@ -8,10 +8,10 @@ type Props = {
 };
 
 function formatDuration(seconds: number) {
-  if (seconds <= 0) return "Unlocked";
+  if (seconds <= 0) return "已解锁";
   const d = Math.floor(seconds / 86400);
   const h = Math.floor((seconds % 86400) / 3600);
-  return `${d} days ${h} hours`;
+  return `${d} 天 ${h} 小时`;
 }
 
 export function LockProgress({ stakeTimestamp, unlockTime }: Props) {
@@ -24,7 +24,7 @@ export function LockProgress({ stakeTimestamp, unlockTime }: Props) {
   const { progress, remaining } = useMemo(() => {
     const start = Number(stakeTimestamp);
     const end = Number(unlockTime);
-    if (!start || !end || end <= start) return { progress: 0, remaining: "N/A" };
+    if (!start || !end || end <= start) return { progress: 0, remaining: "—" };
     const total = end - start;
     const elapsed = Math.min(Math.max(now - start, 0), total);
     const percent = Math.round((elapsed * 100) / total);
@@ -34,7 +34,7 @@ export function LockProgress({ stakeTimestamp, unlockTime }: Props) {
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3 text-sm">
       <div className="mb-2 flex min-w-0 flex-col gap-1 text-sm sm:flex-row sm:items-center sm:justify-between">
-        <span className="text-zinc-400">Unlock Countdown</span>
+        <span className="text-zinc-400">解锁倒计时</span>
         <span className="min-w-0 shrink-0 font-medium sm:text-right">{remaining}</span>
       </div>
       <div className="h-2 w-full rounded bg-zinc-800">

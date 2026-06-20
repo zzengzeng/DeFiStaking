@@ -36,10 +36,10 @@ export function mapContractError(error: unknown): string {
     return "代币授权不足：请先对 ZZTKA（Pool A）或 ZZTKB（Pool B）执行 Approve，再质押。";
   }
   if (text.includes("insufficient balance") || text.includes("ERC20: transfer amount exceeds balance")) {
-    return "钱包 ZZTKA/ZZTKB 余额不足。新部署后请先在首页领取空投（mint），或向你的地址转入测试币。";
+    return "钱包代币余额不足。TokenA 可在首页领取新用户空投；TokenB 需通过质押奖励或转入获取。";
   }
   if (text.includes("gas limit too high")) {
-    return "交易模拟失败（合约会 revert）。新部署常见原因：① 未领 ZZTKA 空投 ② 未 Approve ③ 运营注资未做。协议当前未暂停；若刚改 .env.local 请重启 yarn dev。";
+    return "交易模拟失败（合约会 revert）。新部署常见原因：① 未领 TokenA 空投 ② 未 Approve ③ 运营注资未做。协议当前未暂停；若刚改 .env.local 请重启 yarn dev。";
   }
   if (text.includes("NoRewardsToClaim") || text.includes("no rewards to claim")) return "当前没有可领取的奖励。";
   if (text.includes("NoRewardsToCompound") || text.includes("nothing to compound")) return "当前没有可复投的奖励。";

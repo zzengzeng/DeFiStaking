@@ -1,5 +1,5 @@
 # DualPoolStaking
-[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/699d0d97f5ced33dab5ac0c4d8ce25e0620ec92b/src/DualPoolStaking.sol)
+[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/49679f252829d0b3ac33cfb42d46070f8f7fbdc0/src/DualPoolStaking.sol)
 
 **Inherits:**
 Ownable, AccessControl, ReentrancyGuard, Pausable
@@ -236,13 +236,6 @@ uint256 public unpauseAt
 
 ```solidity
 address public feeRecipient
-```
-
-
-### forfeitedRecipient
-
-```solidity
-address public forfeitedRecipient
 ```
 
 
@@ -668,15 +661,6 @@ Updates Pool B fee recipient (`ADMIN_ROLE`).
 function setFeeRecipient(address newRecipient) external onlyRole(ADMIN_ROLE) nonReentrant;
 ```
 
-### setForfeitedRecipient
-
-Updates forfeited-flow recipient (`ADMIN_ROLE`).
-
-
-```solidity
-function setForfeitedRecipient(address newRecipient) external onlyRole(ADMIN_ROLE) nonReentrant;
-```
-
 ### setMinEarlyExitAmountB
 
 Updates `minEarlyExitAmountB` (`ADMIN_ROLE`).
@@ -1009,12 +993,6 @@ event FeesUpdated(uint256 penaltyBP, uint256 withdrawBP, uint256 midTermBP, uint
 
 ```solidity
 event FeeRecipientUpdated(address indexed oldRecipient, address indexed newRecipient, uint256 timestamp);
-```
-
-### ForfeitedRecipientUpdated
-
-```solidity
-event ForfeitedRecipientUpdated(address indexed oldRecipient, address indexed newRecipient, uint256 timestamp);
 ```
 
 ### ShutdownActivated

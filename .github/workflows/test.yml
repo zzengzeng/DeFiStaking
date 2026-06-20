@@ -5,6 +5,8 @@ permissions: {}
 on:
   push:
   pull_request:
+  schedule:
+    - cron: "17 3 * * 1"
   workflow_dispatch:
 
 env:
@@ -37,6 +39,37 @@ jobs:
       - name: Run Forge tests
         run: forge test -vvv
 
+  frontend-build:
+    name: Frontend production build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.19.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend
+        run: pnpm run build
+
   static-analysis:
     name: Slither static analysis
     runs-on: ubuntu-latest
@@ -58,4 +91,26 @@ jobs:
         run: pipx install slither-analyzer
 
       - name: Run Slither
-        run: slither . --filter-paths "lib|out|cache|docs|frontend"
+        run: make static-analysis
+
+  production-readiness:
+    name: Production readiness gate
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Run production readiness check
+        env:
+          PRODUCTION: ${{ vars.PRODUCTION }}
+          DEPLOYER_ADDRESS: ${{ vars.DEPLOYER_ADDRESS }}
+          GOVERNANCE_PROPOSER: ${{ vars.GOVERNANCE_PROPOSER }}
+          GOVERNANCE_EXECUTOR: ${{ vars.GOVERNANCE_EXECUTOR }}
+          SUPER_PROPOSER: ${{ vars.SUPER_PROPOSER }}
+          SUPER_EXECUTOR: ${{ vars.SUPER_EXECUTOR }}
+          OPERATOR: ${{ vars.OPERATOR }}
+        run: bash script/check-production-readiness.sh

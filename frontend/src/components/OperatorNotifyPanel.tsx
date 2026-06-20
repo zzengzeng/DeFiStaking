@@ -14,7 +14,10 @@ import { useProtocolRoles } from "@/hooks/useProtocolRoles";
 import { useStaking } from "@/hooks/useStaking";
 import { useWriteWithStatus } from "@/hooks/useWriteWithStatus";
 
+import { ConsoleButton } from "@/components/console/ConsoleButton";
 import { OperatorNotifyRewardHistory } from "@/components/OperatorNotifyRewardHistory";
+import { CONSOLE_COPY } from "@/lib/consoleCopy";
+import { UI_COPY } from "@/lib/uiCopy";
 
 const MIN_DURATION = 86_400n;
 const MAX_DURATION = 31_536_000n;
@@ -120,7 +123,7 @@ export function OperatorNotifyPanel({ pool, invalidate, hideEmergency = false, c
       if (needsApproval) {
         await flow.executeApprove(
           {
-            actionLabel: `Approve TokenB (notify Pool ${pool})`,
+            actionLabel: UI_COPY.operator.approveNotify(pool),
             txType: "approve",
             metadata: { pool, token: "TokenB", amount: amount.trim(), durationSec: durationSec.trim() },
             onConfirmed: () => void allowance.refetchAllowance(),
@@ -132,7 +135,7 @@ export function OperatorNotifyPanel({ pool, invalidate, hideEmergency = false, c
 
       await flow.executeWrite(
         {
-          actionLabel: `Notify rewards (Pool ${pool})`,
+          actionLabel: UI_COPY.operator.notify(pool),
           txType: "notify",
           metadata: { pool, token: "TokenB", amount: amount.trim(), durationSec: durationSec.trim() },
           onConfirmed: () => {
@@ -155,7 +158,7 @@ export function OperatorNotifyPanel({ pool, invalidate, hideEmergency = false, c
     try {
       await flow.executeWrite(
         {
-          actionLabel: "Enable Emergency Mode",
+          actionLabel: UI_COPY.operator.enableEmergency,
           txType: "emergency",
           metadata: { pool, token: "TokenB" },
           onConfirmed: () => void invalidate(),
@@ -187,7 +190,7 @@ export function OperatorNotifyPanel({ pool, invalidate, hideEmergency = false, c
     >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h3 className="text-sm font-semibold text-amber-200 sm:text-base">
-          {compact ? `Pool ${pool} · 注入奖励` : "Operator · Notify rewards"}
+          {compact ? CONSOLE_COPY.operator.titleCompact(pool) : CONSOLE_COPY.operator.title}
         </h3>
         <p className="text-xs text-amber-200/80">notifyRewardAmount{pool} · TokenB</p>
       </div>
@@ -198,7 +201,7 @@ export function OperatorNotifyPanel({ pool, invalidate, hideEmergency = false, c
 
       <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="block text-xs text-zinc-400">
-          Amount (TokenB)
+          {CONSOLE_COPY.operator.amountLabel}
           <input
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
@@ -208,7 +211,7 @@ export function OperatorNotifyPanel({ pool, invalidate, hideEmergency = false, c
           />
         </label>
         <label className="block text-xs text-zinc-400">
-          Duration (seconds)
+          {CONSOLE_COPY.operator.durationLabel}
           <input
             value={durationSec}
             onChange={(e) => setDurationSec(e.target.value)}
@@ -221,10 +224,10 @@ export function OperatorNotifyPanel({ pool, invalidate, hideEmergency = false, c
 
       <div className="mt-2 flex flex-wrap gap-2">
         {[
-          { label: "7d", v: "604800" },
-          { label: "30d", v: "2592000" },
-          { label: "90d", v: "7776000" },
-          { label: "365d", v: "31536000" },
+          { label: CONSOLE_COPY.operator.duration7d, v: "604800" },
+          { label: CONSOLE_COPY.operator.duration30d, v: "2592000" },
+          { label: CONSOLE_COPY.operator.duration90d, v: "7776000" },
+          { label: CONSOLE_COPY.operator.duration365d, v: "31536000" },
         ].map((p) => (
           <button
             key={p.v}
@@ -240,29 +243,28 @@ export function OperatorNotifyPanel({ pool, invalidate, hideEmergency = false, c
 
       {inputError ? <p className="mt-2 text-xs text-red-300/90">{inputError}</p> : null}
       {needsApproval ? (
-        <p className="mt-2 text-xs text-amber-200/90">当前 allowance 不足：提交时会先自动 approve 再 notify。</p>
+        <p className="mt-2 text-xs text-amber-200/90">当前授权额度不足：提交时会先自动授权再注入。</p>
       ) : (
-        <p className="mt-2 text-xs text-zinc-500">Allowance 已覆盖本次数量（仍会发起 notify）。</p>
+        <p className="mt-2 text-xs text-zinc-500">授权额度已覆盖本次数量（仍会发起注入）。</p>
       )}
 
       <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-        <button
-          type="button"
+        <ConsoleButton
+          fullWidth
           disabled={busy || !canSubmit}
           onClick={() => void runApproveThenNotify().catch(() => flow.reset({ closeGlobal: true }))}
-          className="min-h-[44px] w-full rounded-lg bg-amber-400 px-3 py-2 text-sm font-medium text-black disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
         >
-          {busy ? "Pending…" : needsApproval ? "Approve + Notify" : "Notify"}
-        </button>
+          {busy ? CONSOLE_COPY.common.pending : needsApproval ? CONSOLE_COPY.common.approveNotify : CONSOLE_COPY.common.notify}
+        </ConsoleButton>
         {!hideEmergency ? (
-          <button
-            type="button"
+          <ConsoleButton
+            fullWidth
+            variant="danger"
             disabled={busy}
             onClick={() => void runEnableEmergencyMode().catch(() => flow.reset({ closeGlobal: true }))}
-            className="min-h-[44px] w-full rounded-lg bg-red-400 px-3 py-2 text-sm font-medium text-black disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
           >
-            {busy ? "Pending…" : "Enable Emergency Mode"}
-          </button>
+            {busy ? CONSOLE_COPY.common.pending : CONSOLE_COPY.common.enableEmergency}
+          </ConsoleButton>
         ) : null}
       </div>
 

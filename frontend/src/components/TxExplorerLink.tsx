@@ -3,6 +3,7 @@
 import type { Hash } from "viem";
 
 import { useExplorerLink } from "@/hooks/useExplorerLink";
+import { UI_COPY } from "@/lib/uiCopy";
 
 type Props = {
   hash?: Hash | null;
@@ -10,7 +11,7 @@ type Props = {
   label?: string;
 };
 
-export function TxExplorerLink({ hash, className, label = "View on explorer" }: Props) {
+export function TxExplorerLink({ hash, className, label = UI_COPY.tx.explorer }: Props) {
   const href = useExplorerLink(hash ?? undefined);
   if (!hash || !href) return null;
   return (

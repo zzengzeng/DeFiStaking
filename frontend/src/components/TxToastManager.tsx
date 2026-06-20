@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 
+import { UI_COPY } from "@/lib/uiCopy";
 import { useTxStore } from "@/store/useTxStore";
 
 /**
@@ -25,25 +26,28 @@ export function TxToastManager() {
 
       switch (tx.status) {
         case "awaiting_signature":
-          toast.loading(tx.title, { id: tid, description: "Confirm in wallet" });
+          toast.loading(tx.title, { id: tid, description: UI_COPY.tx.confirmInWallet });
           break;
         case "pending":
-          toast.loading("Transaction submitted", {
+          toast.loading(UI_COPY.tx.submitted, {
             id: tid,
             description: tx.explorerUrl ?? (tx.txHash ? `${tx.txHash.slice(0, 12)}…` : undefined),
             action: tx.explorerUrl
               ? {
-                  label: "Explorer",
+                  label: UI_COPY.tx.explorer,
                   onClick: () => window.open(tx.explorerUrl!, "_blank", "noopener,noreferrer"),
                 }
               : undefined,
           });
           break;
         case "confirmed":
-          toast.success("Transaction confirmed", { id: tid, description: tx.txHash ? `${tx.txHash.slice(0, 10)}…${tx.txHash.slice(-8)}` : undefined });
+          toast.success(UI_COPY.tx.confirmedToast, {
+            id: tid,
+            description: tx.txHash ? `${tx.txHash.slice(0, 10)}…${tx.txHash.slice(-8)}` : undefined,
+          });
           break;
         case "failed":
-          toast.error(tx.description ?? "Transaction failed", { id: tid });
+          toast.error(tx.description ?? UI_COPY.tx.failedToast, { id: tid });
           break;
         default:
           break;

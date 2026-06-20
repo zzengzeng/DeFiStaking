@@ -1,5 +1,5 @@
 # DualPoolStorageLayout
-[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/699d0d97f5ced33dab5ac0c4d8ce25e0620ec92b/src/modules/DualPoolStorageLayout.sol)
+[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/49679f252829d0b3ac33cfb42d46070f8f7fbdc0/src/modules/DualPoolStorageLayout.sol)
 
 **Inherits:**
 Ownable, AccessControl, ReentrancyGuard, Pausable
@@ -274,15 +274,6 @@ Recipient of swept Pool B withdrawal fees.
 
 ```solidity
 address public feeRecipient
-```
-
-
-### forfeitedRecipient
-Recipient configured for forfeited-reward / penalty routing (see PRD).
-
-
-```solidity
-address public forfeitedRecipient
 ```
 
 

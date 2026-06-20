@@ -1276,9 +1276,9 @@ contract DualPoolStakingTest is Test {
         // Verify user has rewards before the badDebt check
         // A global update + settle will happen during claimA
 
-        // Use vm.store to directly set badDebt on poolA (slot 18 + offset 7 = slot 25).
+        // Use vm.store to directly set badDebt on poolA (slot 17 + offset 7 = slot 24).
         // This simulates bad debt created when distribution exceeds available rewards.
-        bytes32 badDebtSlot = bytes32(uint256(25));
+        bytes32 badDebtSlot = bytes32(uint256(24));
         vm.store(address(dualPoolStaking), badDebtSlot, bytes32(uint256(1)));
 
         assertGt(dualPoolStaking.poolA().badDebt, 0, "Should have badDebt");
@@ -1885,19 +1885,6 @@ contract DualPoolStakingTest is Test {
         stakingAdmin.setFeeRecipient(address(dualPoolStaking));
     }
 
-    function testSetForfeitedRecipient() public {
-        address newRecipient = address(0x5678);
-        stakingAdmin.setForfeitedRecipient(newRecipient);
-        assertEq(dualPoolStaking.forfeitedRecipient(), newRecipient);
-    }
-
-    function testSetForfeitedRecipientCoreReverts() public {
-        vm.expectRevert(
-            abi.encodeWithSelector(StakingExecutionErrors.InvalidRecipient.selector, address(dualPoolStaking))
-        );
-        stakingAdmin.setForfeitedRecipient(address(dualPoolStaking));
-    }
-
     function testSetRewardDurationA() public {
         stakingAdmin.setRewardDurationA(30 days);
         assertEq(dualPoolStaking.poolA().rewardDuration, 30 days);
@@ -2282,7 +2269,7 @@ contract DualPoolStakingTest is Test {
         rewardToken.approve(address(dualPoolStaking), type(uint256).max);
         dualPoolStaking.notifyRewardAmountA(rewardAmount, duration);
 
-        bytes32 badDebtSlot = bytes32(uint256(25));
+        bytes32 badDebtSlot = bytes32(uint256(24));
         vm.store(address(dualPoolStaking), badDebtSlot, bytes32(uint256(1)));
 
         assertGt(dualPoolStaking.poolA().badDebt, 0, "Should have badDebt");
@@ -2326,8 +2313,8 @@ contract DualPoolStakingTest is Test {
         rewardToken.approve(address(dualPoolStaking), type(uint256).max);
         dualPoolStaking.notifyRewardAmountA(rewardAmount, duration);
 
-        // Set badDebt directly via vm.store (slot 18 + offset 7 = slot 25)
-        bytes32 badDebtSlot = bytes32(uint256(25));
+        // Set badDebt directly via vm.store (slot 17 + offset 7 = slot 24)
+        bytes32 badDebtSlot = bytes32(uint256(24));
         uint256 badDebtAmount = 1 ether;
         vm.store(address(dualPoolStaking), badDebtSlot, bytes32(uint256(badDebtAmount)));
 
@@ -2463,7 +2450,7 @@ contract DualPoolStakingTest is Test {
 
         vm.warp(block.timestamp + 1 days);
 
-        bytes32 badDebtSlot = bytes32(uint256(25));
+        bytes32 badDebtSlot = bytes32(uint256(24));
         uint256 badDebtAmount = 1 ether;
         vm.store(address(dualPoolStaking), badDebtSlot, bytes32(uint256(badDebtAmount)));
 
@@ -2486,8 +2473,8 @@ contract DualPoolStakingTest is Test {
         rewardToken.approve(address(dualPoolStaking), type(uint256).max);
         dualPoolStaking.notifyRewardAmountA(rewardAmount, duration);
 
-        // Set badDebt directly via vm.store (slot 18 + offset 7 = slot 25)
-        bytes32 badDebtSlot = bytes32(uint256(25));
+        // Set badDebt directly via vm.store (slot 17 + offset 7 = slot 24)
+        bytes32 badDebtSlot = bytes32(uint256(24));
         uint256 badDebtAmount = 1 ether;
         vm.store(address(dualPoolStaking), badDebtSlot, bytes32(uint256(badDebtAmount)));
 
@@ -2523,8 +2510,8 @@ contract DualPoolStakingTest is Test {
         rewardToken.approve(address(dualPoolStaking), type(uint256).max);
         dualPoolStaking.notifyRewardAmountA(rewardAmount, duration);
 
-        // Set badDebt directly via vm.store (slot 18 + offset 7 = slot 25)
-        bytes32 badDebtSlot = bytes32(uint256(25));
+        // Set badDebt directly via vm.store (slot 17 + offset 7 = slot 24)
+        bytes32 badDebtSlot = bytes32(uint256(24));
         vm.store(address(dualPoolStaking), badDebtSlot, bytes32(uint256(1)));
 
         assertGt(dualPoolStaking.poolA().badDebt, 0, "Should have badDebt");
@@ -2909,6 +2896,49 @@ contract DualPoolStakingTest is Test {
         vm.prank(user);
         dualPoolStaking.claimA();
         assertEq(dualPoolStaking.poolA().badDebt, 0, "full emission must not leave badDebt");
+        _assertTokenBBalanceInvariant(dualPoolStaking);
+    }
+
+    /// @notice User catch-up must share admin's `MAX_CATCHUP_ITERATIONS` budget (not the legacy 14-step ~420d cap).
+    function testUserCatchUpBeyondLegacy420DayCapA() public {
+        vm.warp(1000 days);
+
+        uint256 rewardAmount = 1000 ether;
+        uint256 duration = 365 days;
+        uint256 catchUpGap = 450 days;
+        uint256 legacyCatchUpCap = (365 days / 30 days + 2) * 30 days;
+        assertGt(catchUpGap, legacyCatchUpCap, "sanity: gap exceeds pre-fix user catch-up ceiling");
+
+        rewardToken.approve(address(dualPoolStaking), type(uint256).max);
+        dualPoolStaking.notifyRewardAmountA(rewardAmount, duration);
+
+        vm.startPrank(user);
+        stakingToken.approve(address(dualPoolStaking), DEFAULT_STAKE);
+        dualPoolStaking.stakeA(DEFAULT_STAKE);
+        vm.stopPrank();
+
+        PoolInfo memory pa = dualPoolStaking.poolA();
+        uint256 periodFinish = pa.periodFinish;
+        vm.warp(periodFinish + 30 days);
+
+        // `poolAState.lastUpdateTime` is struct field index 3 at base slot 17 → slot 20.
+        bytes32 lastUpdateSlot = bytes32(uint256(20));
+        vm.store(address(dualPoolStaking), lastUpdateSlot, bytes32(uint256(periodFinish - catchUpGap)));
+        // Field index 5 (`availableRewards`) → slot 22; back the forced catch-up with real TokenB.
+        uint256 extraBudget = rewardAmount;
+        rewardToken.mint(address(dualPoolStaking), extraBudget);
+        vm.store(address(dualPoolStaking), bytes32(uint256(22)), bytes32(pa.availableRewards + extraBudget));
+
+        address user2 = address(2);
+        stakingToken.mint(user2, DEFAULT_STAKE);
+        vm.startPrank(user2);
+        stakingToken.approve(address(dualPoolStaking), DEFAULT_STAKE);
+        dualPoolStaking.stakeA(DEFAULT_STAKE);
+        vm.stopPrank();
+
+        pa = dualPoolStaking.poolA();
+        assertGe(pa.lastUpdateTime, periodFinish, "catch-up must consume the expired window");
+        assertEq(pa.badDebt, 0);
         _assertTokenBBalanceInvariant(dualPoolStaking);
     }
 

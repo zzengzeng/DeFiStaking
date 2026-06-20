@@ -1,5 +1,6 @@
 import { formatUnits } from "viem";
 
+import { getTokenUsdPrice } from "@/lib/tokenPrices";
 import { formatUsd, usdFromTokenAmount } from "@/lib/usd";
 
 /** 将 bigint 金额格式化为可读小数。 */
@@ -9,11 +10,23 @@ export function formatToken(amount: bigint, decimals = 18, fractionDigits = 4): 
   return raw.toLocaleString(undefined, { maximumFractionDigits: fractionDigits });
 }
 
-/** Token 数量 + 演示 USD，如 `10.5 TokenB ($2,134)`。 */
-export function formatTokenWithUsd(amount: bigint, symbol: string, usdPerToken: number, decimals = 18, fractionDigits = 4): string {
+/** Token 数量 + 可选 USD 估值（未配置价格时仅展示数量）。 */
+export function formatTokenWithUsd(
+  amount: bigint,
+  symbol: string,
+  usdPerToken: number | null,
+  decimals = 18,
+  fractionDigits = 4,
+): string {
   const tok = formatToken(amount, decimals, fractionDigits);
+  if (usdPerToken === null || usdPerToken <= 0) return `${tok} ${symbol}`;
   const usd = formatUsd(usdFromTokenAmount(amount, decimals, usdPerToken), 0);
-  return `${tok} ${symbol} (${usd})`;
+  return `${tok} ${symbol} (≈${usd})`;
+}
+
+/** 按 env 配置自动附带 USD 估值。 */
+export function formatTokenDisplay(amount: bigint, symbol: string, decimals = 18, fractionDigits = 4): string {
+  return formatTokenWithUsd(amount, symbol, getTokenUsdPrice(symbol), decimals, fractionDigits);
 }
 
 /** 计算协议是否存在资不抵债风险。 */

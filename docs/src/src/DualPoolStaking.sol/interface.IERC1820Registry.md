@@ -1,5 +1,5 @@
 # IERC1820Registry
-[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/699d0d97f5ced33dab5ac0c4d8ce25e0620ec92b/src/DualPoolStaking.sol)
+[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/49679f252829d0b3ac33cfb42d46070f8f7fbdc0/src/DualPoolStaking.sol)
 
 Minimal view into the canonical ERC-1820 registry for ERC777 deployment checks.
 

@@ -16,6 +16,8 @@ learn/
 .env
 .env.*
 !.env.example
+.env.governance-keys
+.env.governance-keys.*
 # pnpm store when store-dir lives inside the repo (root + nested workspaces)
 /.pnpm-store/
 **/.pnpm-store/

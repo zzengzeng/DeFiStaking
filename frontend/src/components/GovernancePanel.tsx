@@ -5,6 +5,7 @@ import { useAccount, useChainId, useReadContract, useWriteContract } from "wagmi
 import { sepolia } from "wagmi/chains";
 
 import { ConfirmActionModal } from "@/components/ConfirmActionModal";
+import { ConsoleButton } from "@/components/console/ConsoleButton";
 import { GovernanceTimelockCards } from "@/components/GovernanceTimelockCards";
 import { InfoTip } from "@/components/InfoTip";
 import { OperatorNotifyRewardsSection } from "@/components/OperatorNotifyRewardsSection";
@@ -16,15 +17,17 @@ import { useStaking } from "@/hooks/useStaking";
 import { useTimelockGovernanceRoles } from "@/hooks/useTimelockGovernanceRoles";
 import { useWriteWithStatus } from "@/hooks/useWriteWithStatus";
 import { getAddressExplorerUrl } from "@/lib/explorerLink";
+import { isTxBusy } from "@/lib/txFlowTypes";
+import { UI_COPY } from "@/lib/uiCopy";
 
 const GOV_TIMELOCK_HELPER =
   "参数类变更走 48h TimelockController；模块/角色超级路径走 72h Timelock。流程均为 PROPOSER schedule → 等待 minDelay → EXECUTOR execute → DualPoolStakingAdmin → 核心。";
 
 const TOOLTIP_PAUSE =
-  "Pause stops state-changing user flows (e.g. stake, claim, compound, normal withdrawals). Principal and accrued rewards stay in the contract — nothing is auto-liquidated — but users cannot move funds until governance unpauses.";
+  "暂停会阻止用户侧状态变更（质押、领取、复利、普通赎回等）。本金与已累积奖励仍留在合约中，不会自动清算，但用户在恢复前无法操作资金。";
 
 const TOOLTIP_EMERGENCY =
-  "Emergency mode narrows exit options: Pool B moves to emergency-withdraw only (rewards are forfeited; principal exits via the emergency path). Pool A follows contract rules under the same global flag. User funds remain on-chain but economic exposure changes — review before enabling.";
+  "紧急模式会收窄退出路径：锁仓池仅可紧急退出（放弃奖励，本金走紧急路径）；灵活池在同一全局标志下按合约规则处理。资金仍在链上，但经济敞口会变化——启用前请仔细评估。";
 
 function AddrRow({ chainId, label, addr }: { chainId: number; label: string; addr: string }) {
   const href = getAddressExplorerUrl(chainId, addr as `0x${string}`);
@@ -69,7 +72,7 @@ export function GovernancePanel() {
 
   const minDelayGovernance = minDelayGovOnChain ?? BigInt(sepoliaDeploymentMeta.timelockMinDelaySeconds);
   const minDelaySuper = minDelaySuperOnChain ?? BigInt(sepoliaDeploymentMeta.timelockSuperMinDelaySeconds);
-  const govBusy = flow.state !== "idle";
+  const govBusy = isTxBusy(flow.state);
   const canTimelockPanel =
     tlGov.canPropose ||
     tlGov.canExecute ||
@@ -83,28 +86,31 @@ export function GovernancePanel() {
   };
 
   const callCore = async (label: string, functionName: string, args: readonly unknown[] = []) => {
-    await flow.executeWrite(
-      {
-        actionLabel: label,
-        txType: "governance",
-        description: functionName,
-        onConfirmed: afterTx,
-      },
-      () =>
-        writeContractAsync({
-          abi: dualPoolStakingAbi,
-          address: contractAddresses.staking,
-          functionName: functionName as never,
-          args: args as never,
-          account: address,
-        }),
-    );
-    flow.reset({ closeGlobal: true });
+    try {
+      await flow.executeWrite(
+        {
+          actionLabel: label,
+          txType: "governance",
+          description: functionName,
+          onConfirmed: afterTx,
+        },
+        () =>
+          writeContractAsync({
+            abi: dualPoolStakingAbi,
+            address: contractAddresses.staking,
+            functionName: functionName as never,
+            args: args as never,
+            account: address,
+          }),
+      );
+    } finally {
+      flow.reset();
+    }
   };
 
   return (
     <div className="min-w-0 space-y-4 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-3 sm:p-5">
-      <h3 className="text-lg font-semibold text-zinc-100">Governance</h3>
+      <h3 className="text-lg font-semibold text-zinc-100">治理</h3>
       <p className="text-xs leading-relaxed text-zinc-500">
         {isOperator && canTimelockPanel
           ? "当前钱包同时具备 Timelock 治理角色与核心 OPERATOR_ROLE：下方分别展示运营热操作与 Timelock 调度。"
@@ -116,34 +122,34 @@ export function GovernancePanel() {
       </p>
 
       {isOperator ? (
-        <section className="space-y-3 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 sm:p-4">
+        <section className="space-y-3 overflow-visible rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 sm:p-4">
           <h4 className="text-sm font-semibold text-amber-100/95">运营（OPERATOR_ROLE · 直连核心）</h4>
           <p className="text-[11px] leading-relaxed text-zinc-500">
             热路径（0h）：<span className="font-mono text-zinc-400">pause</span>、<span className="font-mono text-zinc-400">enableEmergencyMode</span>、
             <span className="font-mono text-zinc-400">notifyRewardAmountA/B</span>。奖励注入见下方；参数变更走 Timelock（≥48h）。
           </p>
-          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-stretch">
+          <div className="flex flex-col gap-3 overflow-visible sm:flex-row sm:flex-wrap sm:items-stretch">
             <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:max-w-[min(100%,280px)]">
-              <button
-                type="button"
-                title={TOOLTIP_PAUSE}
+              <ConsoleButton
+                fullWidth
+                variant="danger"
                 onClick={() => setConfirm({ kind: "pause" })}
-                className="min-h-[44px] flex-1 rounded-lg bg-gradient-to-r from-red-400 to-rose-400 px-3 py-2 text-sm font-semibold text-black transition hover:opacity-90 sm:flex-none"
+                className="sm:flex-none"
               >
-                Pause
-              </button>
-              <InfoTip text={TOOLTIP_PAUSE} aria-label="Pause impact" />
+                暂停
+              </ConsoleButton>
+              <InfoTip text={TOOLTIP_PAUSE} aria-label="暂停影响说明" side="bottom" />
             </div>
             <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:max-w-[min(100%,320px)]">
-              <button
-                type="button"
-                title={TOOLTIP_EMERGENCY}
+              <ConsoleButton
+                fullWidth
+                variant="danger"
                 onClick={() => setConfirm({ kind: "emergency" })}
-                className="min-h-[44px] flex-1 rounded-lg bg-gradient-to-r from-orange-300 to-amber-300 px-3 py-2 text-sm font-semibold text-black transition hover:opacity-90 sm:flex-none"
+                className="bg-gradient-to-r from-orange-300 to-amber-300 hover:from-orange-200 hover:to-amber-200 sm:flex-none"
               >
-                Enable Emergency
-              </button>
-              <InfoTip text={TOOLTIP_EMERGENCY} aria-label="Emergency mode impact" />
+                开启紧急模式
+              </ConsoleButton>
+              <InfoTip text={TOOLTIP_EMERGENCY} aria-label="紧急模式影响说明" side="bottom" />
             </div>
           </div>
           <OperatorNotifyRewardsSection onRefresh={afterTx} />
@@ -153,9 +159,9 @@ export function GovernancePanel() {
       {canTimelockPanel ? (
         <>
           <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-xs text-zinc-400">
-            <div>Schedule：需要 Timelock `PROPOSER_ROLE`。</div>
-            <div>Execute：需要 Timelock `EXECUTOR_ROLE`（到达 minDelay 后）。</div>
-            <div>Cancel：需要 Timelock `CANCELLER_ROLE`（操作仍在 pending 时）。</div>
+            <div>{UI_COPY.timelock.roleSchedule}</div>
+            <div>{UI_COPY.timelock.roleExecute}</div>
+            <div>{UI_COPY.timelock.roleCancel}</div>
           </div>
 
           <div className="rounded-xl border border-sky-500/25 bg-sky-500/5 px-3 py-2.5 text-xs leading-relaxed text-sky-100/95">{GOV_TIMELOCK_HELPER}</div>
@@ -200,19 +206,19 @@ export function GovernancePanel() {
 
       <ConfirmActionModal
         open={confirm.kind === "pause"}
-        title="Confirm Pause?"
+        title="确认暂停？"
         rows={[
-          { label: "Action", value: "pause()" },
-          { label: "Impact", value: "This will stop protocol interactions until resumed." },
+          { label: "操作", value: "pause()" },
+          { label: "影响", value: "将暂停协议交互，直至治理恢复。" },
         ]}
         warning={TOOLTIP_PAUSE}
-        confirmText="Confirm Pause"
+        confirmText="确认暂停"
         variant="danger"
         busy={govBusy}
         onClose={() => !govBusy && setConfirm({ kind: null })}
         onConfirm={async () => {
           try {
-            await callCore("pause", "pause", []);
+            await callCore("暂停协议", "pause", []);
             setConfirm({ kind: null });
           } catch {
             /* handled */
@@ -221,16 +227,16 @@ export function GovernancePanel() {
       />
       <ConfirmActionModal
         open={confirm.kind === "emergency"}
-        title="Confirm Emergency Mode?"
-        rows={[{ label: "Action", value: "enableEmergencyMode()" }]}
+        title="确认开启紧急模式？"
+        rows={[{ label: "操作", value: "enableEmergencyMode()" }]}
         warning={TOOLTIP_EMERGENCY}
-        confirmText="Confirm enable"
+        confirmText="确认开启"
         variant="danger"
         busy={govBusy}
         onClose={() => !govBusy && setConfirm({ kind: null })}
         onConfirm={async () => {
           try {
-            await callCore("enableEmergencyMode", "enableEmergencyMode", []);
+            await callCore("开启紧急模式", "enableEmergencyMode", []);
             setConfirm({ kind: null });
           } catch {
             /* handled */

@@ -5,11 +5,13 @@ import { formatUnits } from "viem";
 import { toast } from "sonner";
 
 import { ConfirmActionModal } from "@/components/ConfirmActionModal";
+import { ConsoleButton } from "@/components/console/ConsoleButton";
 import { WithdrawPreview } from "@/components/WithdrawPreview";
 import { bpToPercent, formatToken, safeNumber } from "@/lib/format";
 import { formatCountdownHms } from "@/lib/timelockCountdown";
+import { CONSOLE_COPY as C } from "@/lib/consoleCopy";
 
-export type SmartActionTag = "Withdraw Now" | "Wait" | "Use Emergency Withdraw";
+export type SmartActionTag = typeof C.withdraw.tagNow | typeof C.withdraw.tagWait | typeof C.withdraw.tagEmergency;
 
 type Props = {
   title: string;
@@ -146,10 +148,10 @@ export function WithdrawPanel({
       return { waitDays: 0, waitKind: "none" as const };
     })();
 
-    let actionTag: SmartActionTag = "Withdraw Now";
-    if (protocolStatus === "EMERGENCY") actionTag = "Use Emergency Withdraw";
-    else if (locked || (!locked && currentFeeBp > 0n)) actionTag = "Wait";
-    else actionTag = "Withdraw Now";
+    let actionTag: SmartActionTag = C.withdraw.tagNow;
+    if (protocolStatus === "EMERGENCY") actionTag = C.withdraw.tagEmergency;
+    else if (locked || (!locked && currentFeeBp > 0n)) actionTag = C.withdraw.tagWait;
+    else actionTag = C.withdraw.tagNow;
 
     /** 下一更优窗口时间戳与费用对比（basisAmount 为预览基准） */
     let nextBestTs = nowSec;
@@ -172,7 +174,7 @@ export function WithdrawPanel({
     const savePctOfAmount =
       basisAmount > 0n && saveWei > 0n ? safeNumber(Number((saveWei * 10_000n) / basisAmount) / 100) : 0;
     const countdownSec = nextBestTs > nowSec ? nextBestTs - nowSec : 0n;
-    const optimalLabel = nextBestTs > nowSec ? new Date(Number(nextBestTs) * 1000).toLocaleString() : "Now (optimal)";
+    const optimalLabel = nextBestTs > nowSec ? new Date(Number(nextBestTs) * 1000).toLocaleString() : C.withdraw.optimalNow;
 
     const waitDaysMessaging =
       saveWei > 0n && nextBestTs > nowSec
@@ -183,7 +185,7 @@ export function WithdrawPanel({
 
     const earnLine =
       saveWei > 0n && waitDaysMessaging > 0
-        ? `Wait ${waitDaysMessaging} day${waitDaysMessaging === 1 ? "" : "s"} to earn +${formatToken(saveWei)} TokenB`
+        ? `等待 ${waitDaysMessaging} 天后可多获得 +${formatToken(saveWei)} TokenB`
         : null;
 
     const feeSaveBp = !locked && currentFeeBp > 0n ? saveBp : 0n;
@@ -268,31 +270,27 @@ export function WithdrawPanel({
   };
 
   const tagStyles =
-    smart?.actionTag === "Use Emergency Withdraw"
+    smart?.actionTag === C.withdraw.tagEmergency
       ? "border-orange-500/40 bg-orange-500/15 text-orange-200"
-      : smart?.actionTag === "Wait"
+      : smart?.actionTag === C.withdraw.tagWait
         ? "border-amber-500/40 bg-amber-500/10 text-amber-200"
         : "border-emerald-500/40 bg-emerald-500/10 text-emerald-200";
 
   const confirmRows = [
-    { label: "Principal", value: `${formatToken(parsedLive)} ${tokenSymbol}` },
-    { label: "You receive (est.)", value: `${formatToken(previewLive.netAmount)} ${tokenSymbol}` },
-    { label: "Fee (est.)", value: `${formatToken(previewLive.feeAmount)} ${tokenSymbol}` },
-    { label: "Penalty (est.)", value: `${formatToken(previewLive.penaltyAmount)} ${tokenSymbol}` },
+    { label: C.withdraw.principal, value: `${formatToken(parsedLive)} ${tokenSymbol}` },
+    { label: C.withdraw.receiveEst, value: `${formatToken(previewLive.netAmount)} ${tokenSymbol}` },
+    { label: C.withdraw.feeEst, value: `${formatToken(previewLive.feeAmount)} ${tokenSymbol}` },
+    { label: C.withdraw.penaltyEst, value: `${formatToken(previewLive.penaltyAmount)} ${tokenSymbol}` },
   ];
 
   return (
     <div className="min-w-0 rounded-2xl border border-zinc-800 bg-gradient-to-b from-zinc-950 to-zinc-900/60 p-3 transition hover:border-zinc-700 sm:p-4">
       <ConfirmActionModal
         open={confirmOpen}
-        title="Confirm withdrawal"
+        title={C.withdraw.confirmTitle}
         rows={confirmRows}
-        warning={
-          previewLive.isLocked
-            ? "Locked position: an early-exit penalty applies to principal. Verify receive amount before confirming."
-            : "Network fees are separate. Values are estimates based on current on-chain parameters."
-        }
-        confirmText="Submit withdrawal"
+        warning={previewLive.isLocked ? C.withdraw.confirmLocked : C.withdraw.confirmNormal}
+        confirmText={C.withdraw.confirmSubmit}
         busy={pending}
         onClose={() => !pending && setConfirmOpen(false)}
         onConfirm={() => void submitConfirmed()}
@@ -310,29 +308,29 @@ export function WithdrawPanel({
         />
         {feeTiersVisible ? (
           <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-2 text-xs text-zinc-400">
-            <div>Fee tiers:</div>
-            <div>&lt;90 days -&gt; withdrawFee ({bpToPercent(suggestion?.withdrawFeeBP ?? 0n)})</div>
-            <div>90-180 days -&gt; midTerm ({bpToPercent(suggestion?.midTermFeeBP ?? 0n)})</div>
-            <div>&gt;180 days -&gt; 0%</div>
-            {preview.isLocked && <div className="mt-1 text-red-300">Locked: penalty {bpToPercent(suggestion?.penaltyFeeBP ?? 0n)} applies to early exit.</div>}
+            <div>费率档位：</div>
+            <div>&lt;90 天 → withdrawFee ({bpToPercent(suggestion?.withdrawFeeBP ?? 0n)})</div>
+            <div>90–180 天 → midTerm ({bpToPercent(suggestion?.midTermFeeBP ?? 0n)})</div>
+            <div>&gt;180 天 → 0%</div>
+            {preview.isLocked && <div className="mt-1 text-red-300">{C.withdraw.lockedPenalty} {bpToPercent(suggestion?.penaltyFeeBP ?? 0n)}。</div>}
           </div>
         ) : (
-          <p className="rounded-lg border border-zinc-800 bg-zinc-950/80 px-3 py-2 text-xs text-zinc-500">No lock, penalty, or withdrawal fee on this pool.</p>
+          <p className="rounded-lg border border-zinc-800 bg-zinc-950/80 px-3 py-2 text-xs text-zinc-500">{C.withdraw.noLockFee}</p>
         )}
         {smart && (
           <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3 text-sm">
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-              <span className="text-xs font-semibold tracking-wide text-zinc-300">Smart Suggestions</span>
+              <span className="text-xs font-semibold tracking-wide text-zinc-300">{C.withdraw.smartSuggestions}</span>
               <span className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${tagStyles}`}>{smart.actionTag}</span>
             </div>
 
             <div className="mb-3 rounded-lg border border-zinc-800 bg-zinc-900/60 p-3 text-xs text-zinc-300">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Withdraw comparison</div>
-              <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">Same principal basis; later row uses projected fee/penalty at the better window.</p>
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">{C.withdraw.comparison}</div>
+              <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">{C.withdraw.comparisonHint}</p>
 
               {smart.countdownSec > 0n && (
                 <div className="mt-2 flex flex-col gap-0.5 rounded-md border border-zinc-700/60 bg-zinc-950/50 px-2 py-1.5 font-mono text-[11px] text-zinc-400 sm:flex-row sm:items-center sm:justify-between">
-                  <span>Better window</span>
+                  <span>更优窗口</span>
                   <span className="text-zinc-300">{smart.optimalLabel}</span>
                   <span className="tabular-nums text-amber-200/90">{formatCountdownHms(Number(smart.countdownSec))}</span>
                 </div>
@@ -345,20 +343,20 @@ export function WithdrawPanel({
                   )}
                   <div className="mt-3 grid gap-2 rounded-md border border-zinc-700/80 bg-zinc-950/80 p-2.5">
                     <div className="flex flex-col justify-between gap-0.5 border-b border-zinc-800 pb-2 sm:flex-row sm:items-baseline sm:gap-4">
-                      <span className="text-zinc-500">Withdraw now (receive)</span>
+                      <span className="text-zinc-500">{C.withdraw.withdrawNow}</span>
                       <span className="font-mono text-sm font-semibold text-zinc-100">{formatToken(smart.receiveNowWei)} TokenB</span>
                     </div>
                     <div className="flex flex-col justify-between gap-0.5 border-b border-zinc-800 pb-2 sm:flex-row sm:items-baseline sm:gap-4">
-                      <span className="text-zinc-500">Withdraw later (receive)</span>
+                      <span className="text-zinc-500">{C.withdraw.withdrawLater}</span>
                       <span className="font-mono text-sm font-semibold text-emerald-200/95">{formatToken(smart.receiveOptWei)} TokenB</span>
                     </div>
                     <div className="flex flex-col justify-between gap-0.5 sm:flex-row sm:items-baseline sm:gap-4">
-                      <span className="text-zinc-500">Exact difference (later − now)</span>
+                      <span className="text-zinc-500">{C.withdraw.difference}</span>
                       <span className={`font-mono text-sm font-semibold ${smart.saveWei > 0n ? "text-emerald-300" : "text-zinc-400"}`}>
                         {smart.saveWei > 0n ? "+" : ""}
                         {formatToken(smart.saveWei)} TokenB
                         {smart.savePctOfAmount > 0 ? (
-                          <span className="ml-1 text-xs font-normal text-zinc-500">({safeNumber(smart.savePctOfAmount).toFixed(2)}% of basis)</span>
+                          <span className="ml-1 text-xs font-normal text-zinc-500">({safeNumber(smart.savePctOfAmount).toFixed(2)}% {C.withdraw.basisPct})</span>
                         ) : null}
                       </span>
                     </div>
@@ -369,27 +367,25 @@ export function WithdrawPanel({
                       onClick={onWaitDaysClick}
                       className="mt-2 w-full rounded-lg border border-sky-500/40 bg-sky-500/10 px-2 py-1.5 text-[11px] font-semibold text-sky-200 transition hover:bg-sky-500/20 sm:w-auto"
                     >
-                      Log reminder ({smart.waitDaysMessaging || smart.best.waitDays}d)
+                      记录提醒（{smart.waitDaysMessaging || smart.best.waitDays} 天）
                     </button>
                   )}
                 </>
               ) : (
-                <p className="mt-2 text-zinc-500">Enter an amount (or rely on max position) to compare receive amounts.</p>
+                <p className="mt-2 text-zinc-500">{C.withdraw.enterAmountHint}</p>
               )}
             </div>
 
             <div className="rounded-lg border border-zinc-800 bg-zinc-950/80 p-3 text-xs">
               {smart.locked && (
-                <div className="text-red-300/95">Locked: early exit penalty {bpToPercent(suggestion?.penaltyFeeBP ?? 0n)} on principal.</div>
+                <div className="text-red-300/95">{C.withdraw.lockedPenalty} {bpToPercent(suggestion?.penaltyFeeBP ?? 0n)}。</div>
               )}
               {!smart.locked && smart.currentFeeBp > 0n && smart.best.waitKind === "fee" && smart.feeSaveBp > 0n && (
-                <div className="text-zinc-400">Fee tier: up to {bpToPercent(smart.feeSaveBp)} lower after waiting.</div>
+                <div className="text-zinc-400">{C.withdraw.feeTier} {bpToPercent(smart.feeSaveBp)}。</div>
               )}
-              {smart.best.waitKind === "none" && !smart.locked && <div className="text-zinc-500">No fee or penalty advantage from delaying on this basis.</div>}
+              {smart.best.waitKind === "none" && !smart.locked && <div className="text-zinc-500">{C.withdraw.noDelayAdvantage}</div>}
               {protocolStatus === "EMERGENCY" && (
-                <div className="mt-2 text-orange-200/95">
-                  Emergency mode: use &quot;Emergency Withdraw&quot; below for principal (this form is normal withdraw).
-                </div>
+                <div className="mt-2 text-orange-200/95">{C.withdraw.emergencyHint}</div>
               )}
             </div>
             {waitReminder && <div className="mt-2 rounded-lg border border-sky-500/30 bg-sky-500/10 px-2 py-1.5 text-xs text-sky-100">{waitReminder}</div>}
@@ -404,7 +400,7 @@ export function WithdrawPanel({
             const value = e.target.value.replace(/[^\d.]/g, "");
             setAmount(value);
           }}
-          placeholder="Amount to withdraw"
+          placeholder={C.withdraw.amountPlaceholder}
           className="min-h-[44px] min-w-0 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-zinc-500 sm:flex-1"
         />
         <div className="flex w-full min-w-0 flex-col gap-2 sm:w-auto sm:flex-none sm:flex-row sm:items-stretch sm:gap-2">
@@ -415,27 +411,27 @@ export function WithdrawPanel({
               disabled={disabled || pending}
               className="min-h-[44px] w-full shrink-0 rounded-lg border border-zinc-600 px-3 py-2 text-xs font-semibold text-zinc-200 transition hover:border-zinc-500 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto sm:min-w-[4.5rem]"
             >
-              Max
+              {C.withdraw.max}
             </button>
           ) : null}
-          <button
-            type="button"
-            onClick={openConfirm}
+          <ConsoleButton
+            fullWidth
             disabled={disabled || pending || parsedLive <= 0n}
-            className="min-h-[44px] w-full rounded-lg bg-amber-400 px-4 py-2 text-sm font-medium text-black disabled:cursor-not-allowed disabled:opacity-40 sm:min-w-[7rem] sm:flex-1"
+            onClick={openConfirm}
+            className="sm:min-w-[7rem] sm:flex-1"
           >
-            {pending ? "Pending..." : "Withdraw"}
-          </button>
+            {pending ? C.common.pending : C.withdraw.submit}
+          </ConsoleButton>
         </div>
       </div>
       {maxWithdrawWei !== undefined && maxWithdrawWei > 0n ? (
         <p className="mt-2 text-xs text-zinc-500">
-          Staked: {formatToken(maxWithdrawWei)} {tokenSymbol}
-          {amount ? ` · Input: ${formatToken(parsed)} ${tokenSymbol}` : null}
-          {exceedsMax ? <span className="text-red-300/90"> · Exceeds staked balance</span> : null}
+          已质押: {formatToken(maxWithdrawWei)} {tokenSymbol}
+          {amount ? ` · ${C.withdraw.inputLabel}: ${formatToken(parsed)} ${tokenSymbol}` : null}
+          {exceedsMax ? <span className="text-red-300/90"> · {C.withdraw.exceedsBalance}</span> : null}
         </p>
       ) : (
-        <p className="mt-2 text-xs text-zinc-500">Input: {amount ? formatToken(parsed) : "0"} {tokenSymbol}</p>
+        <p className="mt-2 text-xs text-zinc-500">{C.withdraw.inputLabel}: {amount ? formatToken(parsed) : "0"} {tokenSymbol}</p>
       )}
     </div>
   );

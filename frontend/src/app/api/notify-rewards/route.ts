@@ -11,9 +11,7 @@ export async function GET(req: Request) {
     const entries = await indexNotifyRewardLogs(contractAddresses.staking, chainId);
     return NextResponse.json({ entries });
   } catch (error) {
-    return NextResponse.json(
-      { entries: [], error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 },
-    );
+    const message = error instanceof Error ? error.message : "Unknown error";
+    return NextResponse.json({ entries: [], error: message });
   }
 }

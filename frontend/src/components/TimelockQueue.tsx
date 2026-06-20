@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import type { TimelockIndexedOp } from "@/hooks/useTimelockOps";
 import { formatCountdownHms } from "@/lib/timelockCountdown";
+import { UI_COPY } from "@/lib/uiCopy";
 
 type RowUi = "PENDING" | "READY_TO_EXECUTE" | "EXECUTED" | "CANCELLED";
 
@@ -34,13 +35,13 @@ function statusBadgeClass(ui: RowUi): string {
 function statusLabel(ui: RowUi): string {
   switch (ui) {
     case "PENDING":
-      return "Queued";
+      return UI_COPY.timelock.queued;
     case "READY_TO_EXECUTE":
-      return "Ready to execute";
+      return UI_COPY.timelock.ready;
     case "EXECUTED":
-      return "Executed";
+      return UI_COPY.timelock.executed;
     case "CANCELLED":
-      return "Cancelled";
+      return UI_COPY.timelock.cancelled;
     default:
       return ui;
   }
@@ -87,22 +88,20 @@ export function TimelockQueue({ ops, isLoading }: Props) {
   return (
     <div className="min-w-0 space-y-4">
       <div className="min-w-0 rounded-2xl border border-zinc-800 bg-gradient-to-b from-zinc-950 to-zinc-900/50 p-3 sm:p-4">
-        <div className="mb-1 font-semibold text-zinc-100">Queued operations</div>
-        <p className="mb-3 text-xs text-zinc-500">
-          Function, params summary, execute timestamp (local), remaining time (hh:mm:ss), and status. All governance writes go through timelock delay.
-        </p>
+        <div className="mb-1 font-semibold text-zinc-100">{UI_COPY.timelock.queueTitle}</div>
+        <p className="mb-3 text-xs text-zinc-500">{UI_COPY.timelock.queueDesc}</p>
         {pendingRows.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-zinc-700/80 bg-zinc-950/60 px-3 py-6 text-center text-sm text-zinc-500">No pending timelock operations.</p>
+          <p className="rounded-lg border border-dashed border-zinc-700/80 bg-zinc-950/60 px-3 py-6 text-center text-sm text-zinc-500">{UI_COPY.timelock.queueEmpty}</p>
         ) : (
           <div className="-mx-1 overflow-x-auto overscroll-x-contain px-1 sm:mx-0 sm:px-0">
             <table className="w-full min-w-[640px] text-left text-xs text-zinc-300 sm:min-w-[720px]">
               <thead>
                 <tr className="border-b border-zinc-800 text-[10px] uppercase tracking-wide text-zinc-500">
-                  <th className="py-2 pr-2">Function</th>
-                  <th className="py-2 pr-2">Params</th>
-                  <th className="py-2 pr-2">Execute timestamp</th>
-                  <th className="py-2 pr-2">Remaining (hh:mm:ss)</th>
-                  <th className="py-2">Status</th>
+                  <th className="py-2 pr-2">{UI_COPY.timelock.colFunction}</th>
+                  <th className="py-2 pr-2">{UI_COPY.timelock.colParams}</th>
+                  <th className="py-2 pr-2">{UI_COPY.timelock.colExecuteAt}</th>
+                  <th className="py-2 pr-2">{UI_COPY.timelock.colRemaining}</th>
+                  <th className="py-2">{UI_COPY.timelock.colStatus}</th>
                 </tr>
               </thead>
               <tbody>
@@ -114,7 +113,7 @@ export function TimelockQueue({ ops, isLoading }: Props) {
                   const remaining = ui === "PENDING" ? formatCountdownHms(left) : "00:00:00";
                   return (
                     <tr key={`${op.opId}-${op.paramsHash}`} className="border-b border-zinc-800/80 last:border-0">
-                      <td className="py-2.5 pr-2 font-mono text-[11px] text-zinc-100">{op.functionLabel ?? "unknown"}</td>
+                      <td className="py-2.5 pr-2 font-mono text-[11px] text-zinc-100">{op.functionLabel ?? UI_COPY.timelock.unknown}</td>
                       <td className="max-w-[220px] truncate py-2.5 pr-2 font-mono text-[11px] text-zinc-400" title={op.paramsDisplay ?? op.paramsHash}>
                         {op.paramsDisplay ?? op.paramsHash}
                       </td>
@@ -134,16 +133,16 @@ export function TimelockQueue({ ops, isLoading }: Props) {
 
       {settledRows.length > 0 && (
         <div className="min-w-0 rounded-2xl border border-zinc-800/90 bg-zinc-950/60 p-3 sm:p-4">
-          <div className="mb-1 font-semibold text-zinc-200">Recent settlements</div>
-          <p className="mb-3 text-xs text-zinc-500">Latest executed or cancelled timelock payloads (read-only).</p>
+          <div className="mb-1 font-semibold text-zinc-200">{UI_COPY.timelock.recentTitle}</div>
+          <p className="mb-3 text-xs text-zinc-500">{UI_COPY.timelock.recentDesc}</p>
           <div className="-mx-1 overflow-x-auto overscroll-x-contain px-1 sm:mx-0 sm:px-0">
             <table className="w-full min-w-[560px] text-left text-xs text-zinc-300 sm:min-w-[640px]">
               <thead>
                 <tr className="border-b border-zinc-800 text-[10px] uppercase tracking-wide text-zinc-500">
-                  <th className="py-2 pr-2">Function</th>
-                  <th className="py-2 pr-2">Params</th>
-                  <th className="py-2 pr-2">Status</th>
-                  <th className="py-2">Settled at (local)</th>
+                  <th className="py-2 pr-2">{UI_COPY.timelock.colFunction}</th>
+                  <th className="py-2 pr-2">{UI_COPY.timelock.colParams}</th>
+                  <th className="py-2 pr-2">{UI_COPY.timelock.colStatus}</th>
+                  <th className="py-2">{UI_COPY.timelock.colSettledAt}</th>
                 </tr>
               </thead>
               <tbody>
@@ -153,7 +152,7 @@ export function TimelockQueue({ ops, isLoading }: Props) {
                   const settledLabel = ts ? new Date(Number(ts) * 1000).toLocaleString() : "—";
                   return (
                     <tr key={`${op.opId}-${op.paramsHash}-settled`} className="border-b border-zinc-800/80 last:border-0">
-                      <td className="py-2 pr-2 font-mono text-[11px] text-zinc-200">{op.functionLabel ?? "unknown"}</td>
+                      <td className="py-2 pr-2 font-mono text-[11px] text-zinc-200">{op.functionLabel ?? UI_COPY.timelock.unknown}</td>
                       <td className="max-w-[220px] truncate py-2 pr-2 font-mono text-[11px] text-zinc-500" title={op.paramsDisplay ?? op.paramsHash}>
                         {op.paramsDisplay ?? op.paramsHash}
                       </td>

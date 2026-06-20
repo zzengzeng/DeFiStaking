@@ -1,5 +1,5 @@
 # DualPoolAdminModule
-[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/699d0d97f5ced33dab5ac0c4d8ce25e0620ec92b/src/modules/DualPoolAdminModule.sol)
+[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/49679f252829d0b3ac33cfb42d46070f8f7fbdc0/src/modules/DualPoolAdminModule.sol)
 
 **Inherits:**
 [DualPoolStorageLayout](/src/modules/DualPoolStorageLayout.sol/abstract.DualPoolStorageLayout.md)
@@ -114,21 +114,6 @@ function executeSetFeeRecipient(address newRecipient) external;
 |Name|Type|Description|
 |----|----|-----------|
 |`newRecipient`|`address`|New fee sweep recipient; must not be zero or the core itself.|
-
-
-### executeSetForfeitedRecipient
-
-Sets `forfeitedRecipient` (`setForfeitedRecipient` delegate path).
-
-
-```solidity
-function executeSetForfeitedRecipient(address newRecipient) external;
-```
-**Parameters**
-
-|Name|Type|Description|
-|----|----|-----------|
-|`newRecipient`|`address`|New forfeited-flow recipient; must not be zero or the core itself.|
 
 
 ### executeSetMinEarlyExitAmountB
@@ -645,12 +630,6 @@ event DustAccumulated(Pool pool, uint256 dustAmount, uint256 timestamp);
 
 ```solidity
 event FeeRecipientUpdated(address indexed oldRecipient, address indexed newRecipient, uint256 timestamp);
-```
-
-### ForfeitedRecipientUpdated
-
-```solidity
-event ForfeitedRecipientUpdated(address indexed oldRecipient, address indexed newRecipient, uint256 timestamp);
 ```
 
 ### TVLCapUpdated

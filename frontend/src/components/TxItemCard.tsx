@@ -2,30 +2,34 @@
 
 import clsx from "clsx";
 
+import { isStalePendingTx } from "@/lib/txActivityScope";
+import { UI_COPY } from "@/lib/uiCopy";
 import type { TxItem } from "@/store/useTxStore";
 
 function timeAgo(ts: number): string {
   const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
-  if (s < 60) return `${s}s ago`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m} min ago`;
-  const h = Math.floor(m / 60);
-  if (h < 48) return `${h}h ago`;
-  return `${Math.floor(h / 24)}d ago`;
+  return UI_COPY.tx.timeAgo(s);
 }
 
 function statusBadge(status: TxItem["status"]) {
   switch (status) {
     case "awaiting_signature":
     case "pending":
-      return { label: status === "awaiting_signature" ? "Awaiting signature" : "Pending", className: "bg-amber-500/20 text-amber-200 ring-amber-500/40" };
+      return {
+        label: status === "awaiting_signature" ? UI_COPY.tx.awaitingSignature : UI_COPY.tx.pending,
+        className: "bg-amber-500/20 text-amber-200 ring-amber-500/40",
+      };
     case "confirmed":
-      return { label: "Confirmed", className: "bg-emerald-500/20 text-emerald-200 ring-emerald-500/40" };
+      return { label: UI_COPY.tx.confirmed, className: "bg-emerald-500/20 text-emerald-200 ring-emerald-500/40" };
     case "failed":
-      return { label: "Failed", className: "bg-red-500/20 text-red-200 ring-red-500/40" };
+      return { label: UI_COPY.tx.failed, className: "bg-red-500/20 text-red-200 ring-red-500/40" };
     default:
       return { label: status, className: "bg-zinc-500/20 text-zinc-300 ring-zinc-500/30" };
   }
+}
+
+function txTypeLabel(type: string): string {
+  return UI_COPY.tx.typeLabel[type] ?? type;
 }
 
 type Props = {
@@ -38,7 +42,13 @@ export function TxItemCard({ tx, onDismiss }: Props) {
   const meta = tx.metadata;
   const metaLine =
     meta && (meta.amount || meta.token || meta.pool)
-      ? [meta.pool && `Pool ${meta.pool}`, meta.amount, meta.token].filter(Boolean).join(" · ")
+      ? [
+          meta.pool && UI_COPY.tx.poolMeta(meta.pool),
+          meta.amount,
+          meta.token,
+        ]
+          .filter(Boolean)
+          .join(" · ")
       : null;
 
   return (
@@ -46,7 +56,7 @@ export function TxItemCard({ tx, onDismiss }: Props) {
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <div className="font-medium text-zinc-100">{tx.title}</div>
-          <div className="mt-0.5 text-[11px] uppercase tracking-wide text-zinc-500">{tx.type}</div>
+          <div className="mt-0.5 text-[11px] uppercase tracking-wide text-zinc-500">{txTypeLabel(tx.type)}</div>
           {metaLine ? <div className="mt-1 text-xs text-zinc-400">{metaLine}</div> : null}
           {tx.description ? <div className="mt-1 text-xs text-red-300/90">{tx.description}</div> : null}
         </div>
@@ -56,14 +66,14 @@ export function TxItemCard({ tx, onDismiss }: Props) {
         <span>{timeAgo(tx.updatedAt)}</span>
         {tx.explorerUrl ? (
           <a href={tx.explorerUrl} target="_blank" rel="noreferrer noopener" className="text-sky-400 hover:underline">
-            Explorer
+            {UI_COPY.tx.explorer}
           </a>
         ) : tx.txHash ? (
           <span className="font-mono text-[10px] text-zinc-600">{tx.txHash.slice(0, 10)}…</span>
         ) : null}
-        {onDismiss && (tx.status === "confirmed" || tx.status === "failed") ? (
+        {onDismiss ? (
           <button type="button" onClick={() => onDismiss(tx.id)} className="text-zinc-500 hover:text-zinc-300">
-            Remove
+            {isStalePendingTx(tx) ? "移除过期" : "移除"}
           </button>
         ) : null}
       </div>

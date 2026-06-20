@@ -1,0 +1,16 @@
+# Replace placeholder teams/users with real GitHub handles before production.
+# Security-sensitive changes must be reviewed by protocol security and governance owners.
+
+* @replace-with-maintainers
+
+/src/ @replace-with-protocol-security @replace-with-solidity-reviewers
+/test/ @replace-with-protocol-security @replace-with-solidity-reviewers
+/script/ @replace-with-governance-ops @replace-with-protocol-security
+/frontend/src/contracts/ @replace-with-frontend-security @replace-with-protocol-security
+/frontend/src/components/Governance* @replace-with-frontend-security @replace-with-governance-ops
+/frontend/src/server/timelockIndexer.ts @replace-with-frontend-security @replace-with-governance-ops
+/.github/workflows/ @replace-with-security-ops
+/SECURITY.md @replace-with-security-ops
+/docs/security/ @replace-with-security-ops @replace-with-governance-ops
+/PRD.md @replace-with-protocol-security
+

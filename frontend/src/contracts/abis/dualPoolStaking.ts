@@ -117,7 +117,6 @@ export const dualPoolStakingAbi = [
   { type: "function", name: "penaltyfeeBP", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
   { type: "function", name: "minClaimAmount", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
   { type: "function", name: "feeRecipient", stateMutability: "view", inputs: [], outputs: [{ type: "address" }] },
-  { type: "function", name: "forfeitedRecipient", stateMutability: "view", inputs: [], outputs: [{ type: "address" }] },
   { type: "function", name: "minEarlyExitAmountB", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
   { type: "function", name: "maxTransferFeeBP", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
   { type: "function", name: "unclaimedFeesB", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },

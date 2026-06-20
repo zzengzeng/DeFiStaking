@@ -7,7 +7,7 @@ type Props = {
   children: React.ReactNode;
 };
 
-export function ClientApp({ children }: Props) {
+export function Providers({ children }: Props) {
   return (
     <Web3Provider>
       <AppShell>{children}</AppShell>

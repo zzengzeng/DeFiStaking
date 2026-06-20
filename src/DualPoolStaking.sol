@@ -64,8 +64,7 @@ contract DualPoolStaking is Ownable, AccessControl, ReentrancyGuard, Pausable {
     uint256 public shutdownAt; // Timestamp when shutdown mode is activated
     uint256 public pausedAt; // Timestamp of when the contract was paused, used to enforce cooldown periods for unpausing and to track the duration of the pause state
     uint256 public unpauseAt; // Timestamp of when the contract can be unpaused, calculated based on the pausedAt timestamp and the UNPAUSE_COOLDOWN duration, used to enforce a cooldown period for unpausing the contract to prevent abuse of the pause/unpause functionality and allow users time to react to changes in the contract's state
-    address public feeRecipient; // Address that receives the fees collected from withdrawals and early exit penalties in Pool B
-    address public forfeitedRecipient; // Address that receives the forfeited rewards from users who withdraw from Pool B before the lock duration has passed, as well as any mid-term fees collected from withdrawals that occur after the lock duration but before a specified mid-term period has passed
+    address public feeRecipient; // Address that receives Pool B withdrawal fees swept via claimFees (unclaimedFeesB)
     address private constant ERC1820_REGISTRY_ADDR = 0x1820a4B7618BdE71Dce8cdc73aAB6C95905faD24;
     bytes32 private constant ERC777_RECIPIENT_HASH = keccak256("ERC777TokensRecipient");
     bytes32 private constant ERC777_SENDER_HASH = keccak256("ERC777TokensSender");
@@ -122,7 +121,6 @@ contract DualPoolStaking is Ownable, AccessControl, ReentrancyGuard, Pausable {
     event FeesUpdated(uint256 penaltyBP, uint256 withdrawBP, uint256 midTermBP, uint256 timestamp);
 
     event FeeRecipientUpdated(address indexed oldRecipient, address indexed newRecipient, uint256 timestamp);
-    event ForfeitedRecipientUpdated(address indexed oldRecipient, address indexed newRecipient, uint256 timestamp);
     event ShutdownActivated(address indexed by, uint256 timestamp);
     event ProtocolShutdownComplete(uint256 timestamp);
     event EmergencyModeActivated(address indexed by, uint256 timestamp);
@@ -184,7 +182,6 @@ contract DualPoolStaking is Ownable, AccessControl, ReentrancyGuard, Pausable {
         _setRoleAdmin(OPERATOR_ROLE, ADMIN_ROLE);
 
         feeRecipient = msg.sender;
-        forfeitedRecipient = msg.sender;
         _assertNoERC777HooksRegistered();
         _assertTokenHasNoERC777Hooks(tokenA);
         _assertTokenHasNoERC777Hooks(tokenB);
@@ -375,11 +372,6 @@ contract DualPoolStaking is Ownable, AccessControl, ReentrancyGuard, Pausable {
     /// @notice Updates Pool B fee recipient (`ADMIN_ROLE`).
     function setFeeRecipient(address newRecipient) external onlyRole(ADMIN_ROLE) nonReentrant {
         _delegateTo(adminModule, abi.encodeWithSignature("executeSetFeeRecipient(address)", newRecipient));
-    }
-
-    /// @notice Updates forfeited-flow recipient (`ADMIN_ROLE`).
-    function setForfeitedRecipient(address newRecipient) external onlyRole(ADMIN_ROLE) nonReentrant {
-        _delegateTo(adminModule, abi.encodeWithSignature("executeSetForfeitedRecipient(address)", newRecipient));
     }
 
     /// @notice Updates `minEarlyExitAmountB` (`ADMIN_ROLE`).

@@ -1,5 +1,5 @@
 # StakingAdminLib
-[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/699d0d97f5ced33dab5ac0c4d8ce25e0620ec92b/src/libraries/StakingAdminLib.sol)
+[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/49679f252829d0b3ac33cfb42d46070f8f7fbdc0/src/libraries/StakingAdminLib.sol)
 
 **Title:**
 StakingAdminLib
@@ -112,7 +112,10 @@ function executeRecoverToken(PoolInfo storage poolA, PoolInfo storage poolB, Rec
 
 Terminal shutdown step: sweeps **non-user** reward token residue to `feeRecipient` and retains per-pool `totalPending` equal to booked user rewards.
 
-`residual` is `availableRewards` + fee/dust buckets + **orphan** pending (`totalPending - bookedUserRewards`) per pool so users who exited principal during shutdown can still claim accrued `userInfo.rewards` after finalize.
+`residual` is `availableRewards` + fee/dust buckets. If no principal remains staked, it also includes
+orphan pending (`totalPending - bookedUserRewards`) because all withdraw paths settle users first. If the
+deadlock bypass is used while stake remains, unsettled pending must stay in `totalPending` so remaining
+stakers can later settle and claim pre-finalize rewards.
 
 
 ```solidity

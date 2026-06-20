@@ -66,8 +66,6 @@ abstract contract DualPoolStorageLayout is Ownable, AccessControl, ReentrancyGua
     uint256 public unpauseAt;
     /// @notice Recipient of swept Pool B withdrawal fees.
     address public feeRecipient;
-    /// @notice Recipient configured for forfeited-reward / penalty routing (see PRD).
-    address public forfeitedRecipient;
     address internal constant ERC1820_REGISTRY_ADDR = 0x1820a4B7618BdE71Dce8cdc73aAB6C95905faD24;
     bytes32 internal constant ERC777_RECIPIENT_HASH = keccak256("ERC777TokensRecipient");
     bytes32 internal constant ERC777_SENDER_HASH = keccak256("ERC777TokensSender");

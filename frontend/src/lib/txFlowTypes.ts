@@ -36,31 +36,42 @@ export function isTxBusy(s: TxState): boolean {
 export function txStateMessage(state: TxState): string {
   switch (state) {
     case "idle":
-      return "Ready";
+      return "就绪";
     case "needs_approval":
-      return "Token approval required before this action.";
+      return "执行此操作前需先授权代币。";
     case "approving":
-      return "Preparing approval transaction…";
+      return "正在准备授权交易…";
     case "approval_pending":
-      return "Approval transaction submitted. Waiting for on-chain confirmation…";
+      return "授权交易已提交，等待链上确认…";
     case "approval_confirmed":
-      return "Approval confirmed.";
+      return "授权已确认。";
     case "awaiting_signature":
-      return "Confirm the transaction in your wallet.";
+      return "请在钱包中确认交易。";
     case "submitting":
-      return "Submitting to the network…";
+      return "正在提交到网络…";
     case "pending":
-      return "Waiting for on-chain confirmation…";
+      return "等待链上确认…";
     case "confirmed":
-      return "Transaction confirmed.";
+      return "交易已确认。";
     case "failed":
-      return "Transaction failed.";
+      return "交易失败。";
     default:
       return state;
   }
 }
 
-type IdlePrimary = "Stake" | "Approve" | "Submit" | "Confirm";
+type IdlePrimary = "Stake" | "Approve" | "Submit" | "Confirm" | "质押" | "授权" | "提交" | "确认";
+
+const IDLE_PRIMARY_ZH: Record<string, string> = {
+  Stake: "质押",
+  Approve: "授权",
+  Submit: "提交",
+  Confirm: "确认",
+  质押: "质押",
+  授权: "授权",
+  提交: "提交",
+  确认: "确认",
+};
 
 /**
  * 主按钮文案（与产品规范一致）
@@ -72,26 +83,26 @@ export function transactionButtonLabel(
 ): string {
   switch (state) {
     case "needs_approval":
-      return "Approve";
+      return "授权";
     case "approving":
-      return "Approving...";
+      return "授权中…";
     case "approval_pending":
-      return "Approval Pending...";
+      return "授权确认中…";
     case "approval_confirmed":
-      return "Approved";
+      return "已授权";
     case "awaiting_signature":
-      return "Confirm in Wallet";
+      return "请在钱包确认";
     case "submitting":
-      return "Submitting...";
+      return "提交中…";
     case "pending":
-      return "Pending...";
+      return "确认中…";
     case "confirmed":
-      return "Confirmed";
+      return "已确认";
     case "failed":
-      return "Retry";
+      return "重试";
     case "idle":
     default:
-      return ctx.needsApproval ? "Approve" : ctx.idlePrimary;
+      return ctx.needsApproval ? "授权" : IDLE_PRIMARY_ZH[ctx.idlePrimary] ?? ctx.idlePrimary;
   }
 }
 

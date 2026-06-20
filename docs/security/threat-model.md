@@ -44,7 +44,7 @@ Every commit must run:
 - `forge fmt --check`
 - `forge build --sizes`
 - `forge test -vvv`
-- Slither static analysis, with any accepted findings documented.
+- Slither static analysis via `make static-analysis`, with any accepted findings documented.
 
 High-risk changes should add or update tests for:
 
@@ -53,4 +53,3 @@ High-risk changes should add or update tests for:
 - `availableRewards`, `totalPending`, `bookedUserRewards`, and `badDebt` transitions.
 - Governance role and timelock restrictions.
 - FOT inbound and outbound behavior.
-

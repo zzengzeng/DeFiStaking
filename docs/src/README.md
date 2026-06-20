@@ -155,7 +155,8 @@ npm install && npm run dev
 ### Sepolia
 
 ```shell
-# 根目录 .env：SEPOLIA_RPC_URL, PRIVATE_KEY, ETHERSCAN_API_KEY
+# 根目录 .env：SEPOLIA_RPC_URL, DEPLOYER_ACCOUNT, ETHERSCAN_API_KEY
+# 非生产测试也可临时使用 PRIVATE_KEY；生产必须使用已审查的 signer/keystore 流程
 make deploy NETWORK=sepolia
 ```
 
@@ -243,7 +244,7 @@ constructor(
 | 文件 | 覆盖重点 |
 |---|---|
 | [`test/DualPoolStaking.t.sol`](test/DualPoolStaking.t.sol) | Stake / Withdraw / Claim / Compound 全流程；费率阶梯与 WADP；Rolling Lock；Emergency / Shutdown；空池重锚；BadDebt / `forceClaimAll` / `resolveBadDebt`；TokenB 不变量；FOT mock |
-| [`test/DeployDualPoolStakingRoles.t.sol`](test/DeployDualPoolStakingRoles.t.sol) | 部署后 `ADMIN_ROLE`、`DEFAULT_ADMIN_ROLE` 在门面、Timelock 为 `owner`、`OPERATOR_ROLE` 留在部署者 |
+| [`test/DeployDualPoolStakingRoles.t.sol`](test/DeployDualPoolStakingRoles.t.sol) | 部署后 `ADMIN_ROLE`、`DEFAULT_ADMIN_ROLE` 与 `owner` 在门面，Timelock proposer/executor 与 `OPERATOR_ROLE` 使用配置地址，deployer 权限被移除 |
 
 ```shell
 make test
@@ -261,7 +262,20 @@ forge test --match-contract DeployDualPoolStakingRolesTest -vv
 3. `DualPoolUserModule`、`DualPoolAdminModule` 并 `setUserModule` / `setAdminModule`
 4. `DualPoolStakingAdmin` 门面（绑定双 Timelock）
 5. `TimelockController` ×2：参数路径 **48h**、超级路径 **72h**
-6. **角色交接**：`ADMIN_ROLE` 与 `DEFAULT_ADMIN_ROLE` 授予门面并从 deployer 撤销；`OPERATOR_ROLE` 保留在 deployer（热路径）
+6. **角色交接**：`ADMIN_ROLE`、`DEFAULT_ADMIN_ROLE` 与 Core `owner` 授予门面并从 deployer 撤销；`OPERATOR_ROLE` 迁移到 `OPERATOR` 配置地址（热路径）
+
+治理配置环境变量：
+
+| 变量 | 用途 | 生产要求 |
+|---|---|---|
+| `DEPLOYER_ACCOUNT` | Foundry keystore signer 名称 | 生产推荐；不得在 `.env` 使用明文 `PRIVATE_KEY` |
+| `DEPLOYER_ADDRESS` | 部署 signer 的链上地址 | 生产闸门用于检查治理角色不得复用 deployer |
+| `GOVERNANCE_PROPOSER` | 48h 参数治理 Timelock proposer | 多签/治理地址，不得为 deployer |
+| `GOVERNANCE_EXECUTOR` | 48h 参数治理 Timelock executor | 多签/执行器地址，不得为 deployer |
+| `SUPER_PROPOSER` | 72h 超级治理 Timelock proposer | 安全多签/治理地址，不得为 deployer |
+| `SUPER_EXECUTOR` | 72h 超级治理 Timelock executor | 安全多签/执行器地址，不得为 deployer |
+| `OPERATOR` | `pause` / `enableEmergencyMode` / `notifyRewardAmount*` 热路径 | 独立运维地址，不得为 deployer 或 Admin/Super 签名主体 |
+| `PRODUCTION` | 设为 `true` 时启用生产保护 | 强制上述地址非零且不等于 deployer |
 
 **Sepolia 复用已有 Mock 代币并广播示例：**
 
@@ -277,7 +291,7 @@ make deploy NETWORK=sepolia
 
 部署完成后，将 `broadcast/DualPoolStaking.s.sol/11155111/run-latest.json` 中的地址同步到 `frontend/.env.local` 与 `frontend/src/contracts/addresses.ts`（`TOKEN_A` / `TOKEN_B` 可与部署 env 保持一致）。
 
-生产环境请将 Timelock 的 `proposer` / `executor` 换为多签，并将 `OPERATOR_ROLE` 交给独立运维地址。
+生产环境必须设置 `DEPLOYER_ACCOUNT` / `DEPLOYER_ADDRESS` 与治理角色地址，并将 Timelock 的 `proposer` / `executor` 配置为多签或治理执行器，将 `OPERATOR_ROLE` 交给独立运维地址；`make deploy-production NETWORK=sepolia` 会自动启用 `PRODUCTION=true`，拒绝使用 deployer 作为生产角色，并拒绝 `.env` 中存在明文 `PRIVATE_KEY`。
 
 ### 角色与延迟
 
@@ -309,6 +323,24 @@ make deploy NETWORK=sepolia
 - 所有奖励、预算、退出、停机、坏账入口必须完成过期周期 catch-up
 - BadDebt 修复路径必须确认真实付款人能向 Core 补款
 - 监控必须覆盖不变量、坏账、FOT 差额、pause/emergency/shutdown 与 stale schedule
+
+### 安全运营文档
+
+上线前还必须补齐并演练以下安全运营材料：
+
+- [`SECURITY.md`](SECURITY.md)：漏洞披露、响应 SLA、协调披露与 bounty 状态
+- [`docs/security/dependencies.md`](docs/security/dependencies.md)：外部合约、服务、RPC、oracle/无 oracle 声明与生产地址登记
+- [`docs/security/incident-response.md`](docs/security/incident-response.md)：P0/P1 响应、pause/emergency/shutdown 决策树、通讯模板
+- [`docs/security/key-management.md`](docs/security/key-management.md)：多签、硬件密钥、多人审批、换钥与上线阻断项
+- [`docs/security/threat-model.md`](docs/security/threat-model.md)：主要攻击路径、用户滥用风险与必须测试的防线
+- [`docs/security/security-owners.md`](docs/security/security-owners.md)：安全负责人、评审要求、员工身份/背景检查记录要求
+- [`docs/security/launch-security-checklist.md`](docs/security/launch-security-checklist.md)：生产上线阻断项、签署表与证据清单
+- [`docs/security/audit-and-bounty.md`](docs/security/audit-and-bounty.md)：外部审计、披露计划、赏金范围与接受风险登记
+- [`docs/security/access-review.md`](docs/security/access-review.md)：月度访问复核、权限系统范围、离职回收流程
+- [`docs/security/change-management.md`](docs/security/change-management.md)：安全敏感 PR、Timelock 操作、发布审批流程
+- [`docs/security/employee-security.md`](docs/security/employee-security.md)：身份/背景检查、培训、职责分离与隐私证据要求
+
+CI 必须至少运行 `forge fmt --check`、`forge build --sizes`、`forge test -vvv` 与 Slither 静态分析，并通过每周定时任务持续检查；高危发现不得带入生产。
 
 ### 规格文档
 

@@ -14,26 +14,31 @@ import {DualPoolAdminModule} from "../src/modules/DualPoolAdminModule.sol";
 contract DeployDualPoolStakingRolesTest is Test {
     uint256 internal constant GOVERNANCE_MIN_DELAY = 48 hours;
     uint256 internal constant SUPER_MIN_DELAY = 72 hours;
+    address internal constant GOVERNANCE_PROPOSER = address(0xA11CE);
+    address internal constant GOVERNANCE_EXECUTOR = address(0xB0B);
+    address internal constant SUPER_PROPOSER = address(0xCAFE);
+    address internal constant SUPER_EXECUTOR = address(0xD00D);
+    address internal constant OPERATOR = address(0x0A11CE);
+
+    function _singleton(address account) private pure returns (address[] memory list) {
+        list = new address[](1);
+        list[0] = account;
+    }
 
     function testDeploymentGraphFinalRolesMatchScript() public {
         address deployer = address(this);
 
-        MockERC20 tokenA = new MockERC20("ZZTokenA", "ZZTKA");
-        MockERC20 tokenB = new MockERC20("ZZTokenB", "ZZTKB");
-        uint256 maxCap = 10_000_000 * 1e18;
-
-        DualPoolStaking core = new DualPoolStaking(address(tokenA), address(tokenB), maxCap);
+        DualPoolStaking core = new DualPoolStaking(
+            address(new MockERC20("ZZTokenA", "ZZTKA")), address(new MockERC20("ZZTokenB", "ZZTKB")), 10_000_000 * 1e18
+        );
         DualPoolUserModule userModule = new DualPoolUserModule();
         DualPoolAdminModule adminModule = new DualPoolAdminModule();
 
-        address[] memory proposers = new address[](1);
-        proposers[0] = deployer;
-        address[] memory executors = new address[](1);
-        executors[0] = deployer;
-
-        TimelockController timelockGovernance =
-            new TimelockController(GOVERNANCE_MIN_DELAY, proposers, executors, address(0));
-        TimelockController timelockSuper = new TimelockController(SUPER_MIN_DELAY, proposers, executors, address(0));
+        TimelockController timelockGovernance = new TimelockController(
+            GOVERNANCE_MIN_DELAY, _singleton(GOVERNANCE_PROPOSER), _singleton(GOVERNANCE_EXECUTOR), address(0)
+        );
+        TimelockController timelockSuper =
+            new TimelockController(SUPER_MIN_DELAY, _singleton(SUPER_PROPOSER), _singleton(SUPER_EXECUTOR), address(0));
 
         DualPoolStakingAdmin admin =
             new DualPoolStakingAdmin(address(core), address(timelockGovernance), address(timelockSuper));
@@ -41,21 +46,30 @@ contract DeployDualPoolStakingRolesTest is Test {
         core.setUserModule(address(userModule));
         core.setAdminModule(address(adminModule));
 
+        core.grantRole(core.OPERATOR_ROLE(), OPERATOR);
+        core.revokeRole(core.OPERATOR_ROLE(), deployer);
         core.grantRole(core.ADMIN_ROLE(), address(admin));
         core.revokeRole(core.ADMIN_ROLE(), deployer);
         core.grantRole(core.DEFAULT_ADMIN_ROLE(), address(admin));
         core.revokeRole(core.DEFAULT_ADMIN_ROLE(), deployer);
+        core.transferOwnership(address(admin));
 
         assertEq(admin.timelockGovernance(), address(timelockGovernance));
         assertEq(admin.timelockSuper(), address(timelockSuper));
         assertEq(timelockGovernance.getMinDelay(), GOVERNANCE_MIN_DELAY);
         assertEq(timelockSuper.getMinDelay(), SUPER_MIN_DELAY);
+        assertTrue(timelockGovernance.hasRole(timelockGovernance.PROPOSER_ROLE(), GOVERNANCE_PROPOSER));
+        assertTrue(timelockGovernance.hasRole(timelockGovernance.EXECUTOR_ROLE(), GOVERNANCE_EXECUTOR));
+        assertTrue(timelockSuper.hasRole(timelockSuper.PROPOSER_ROLE(), SUPER_PROPOSER));
+        assertTrue(timelockSuper.hasRole(timelockSuper.EXECUTOR_ROLE(), SUPER_EXECUTOR));
 
         assertTrue(core.hasRole(core.ADMIN_ROLE(), address(admin)));
         assertTrue(core.hasRole(core.DEFAULT_ADMIN_ROLE(), address(admin)));
         assertFalse(core.hasRole(core.ADMIN_ROLE(), deployer));
         assertFalse(core.hasRole(core.DEFAULT_ADMIN_ROLE(), deployer));
-        assertTrue(core.hasRole(core.OPERATOR_ROLE(), deployer));
+        assertFalse(core.hasRole(core.OPERATOR_ROLE(), deployer));
+        assertTrue(core.hasRole(core.OPERATOR_ROLE(), OPERATOR));
+        assertEq(core.owner(), address(admin));
         assertEq(core.userModule(), address(userModule));
         assertEq(core.adminModule(), address(adminModule));
     }
