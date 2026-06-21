@@ -1,7 +1,7 @@
 import type { Hash, PublicClient } from "viem";
 import { toast } from "sonner";
 
-import { extractRevertReason, mapContractError } from "@/lib/errors";
+import { extractRevertReason, mapContractErrorLocalized } from "@/lib/errors";
 
 export type ExecuteTxOptions = {
   /** 成功提示标题，如 “Stake Successful” */
@@ -29,7 +29,7 @@ export async function executeTx<T extends Hash>(label: string, action: () => Pro
 /** 统一处理交易异常并输出可读错误 toast（用于未走 executeTx 的路径）。 */
 export function handleTxError(error: unknown) {
   const raw = extractRevertReason(error);
-  const friendly = mapContractError(error);
+  const friendly = mapContractErrorLocalized(error);
   toast.error(friendly, { description: raw !== friendly ? raw.slice(0, 160) : undefined });
   throw error;
 }

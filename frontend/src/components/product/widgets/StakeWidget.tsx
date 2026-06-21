@@ -7,11 +7,16 @@ import { useAccount } from "wagmi";
 
 import { ApprovalGate } from "@/components/ApprovalGate";
 import { ConnectWalletButton } from "@/components/ConnectWalletButton";
+import { NetworkFeeHint } from "@/components/NetworkFeeHint";
+import { TokenLabel } from "@/components/TokenLabel";
+import { TransactionPreview } from "@/components/product/TransactionPreview";
 import { TransactionButton } from "@/components/TransactionButton";
+import { UsdSubtext } from "@/components/UsdSubtext";
 import { useApproveIfNeeded } from "@/hooks/useApproveIfNeeded";
 import { useStakeApprovalTransaction } from "@/hooks/useTransactionFlow";
 import type { StakeTxConfig } from "@/components/StakeCard";
 import { formatToken, safeNumber } from "@/lib/format";
+import { useI18n } from "@/lib/i18n";
 import { estAprPercent } from "@/lib/poolMetrics";
 import type { TxState } from "@/lib/txFlowTypes";
 
@@ -53,6 +58,7 @@ export function StakeWidget({
   compact = false,
 }: Props) {
   const { isConnected } = useAccount();
+  const { t } = useI18n();
   const [amount, setAmount] = useState("");
 
   const allowance = useApproveIfNeeded({
@@ -62,10 +68,10 @@ export function StakeWidget({
   const stakeFlow = useStakeApprovalTransaction();
 
   const parsedWei = useMemo(() => {
-    const t = amount.trim();
-    if (!t || !/^\d*\.?\d*$/.test(t)) return null;
+    const trimmed = amount.trim();
+    if (!trimmed || !/^\d*\.?\d*$/.test(trimmed)) return null;
     try {
-      return parseUnits(t, tokenDecimals);
+      return parseUnits(trimmed, tokenDecimals);
     } catch {
       return null;
     }
@@ -73,11 +79,11 @@ export function StakeWidget({
 
   const inputError = useMemo(() => {
     if (!amount.trim()) return null;
-    if (parsedWei === null) return "请输入有效数量";
-    if (parsedWei <= 0n) return "数量须大于 0";
-    if (balanceWei !== undefined && parsedWei > balanceWei) return "超过钱包余额";
+    if (parsedWei === null) return t("stake.invalidAmount");
+    if (parsedWei <= 0n) return t("stake.amountPositive");
+    if (balanceWei !== undefined && parsedWei > balanceWei) return t("stake.exceedsBalance");
     return null;
-  }, [amount, parsedWei, balanceWei]);
+  }, [amount, parsedWei, balanceWei, t]);
 
   const needsApproval = Boolean(tx && parsedWei && parsedWei > 0n && allowance.needsApproval(parsedWei));
 
@@ -125,7 +131,7 @@ export function StakeWidget({
 
   const body = (
     <>
-      <div className="text-sm font-medium text-zinc-400">质押数量</div>
+      <div className="text-sm font-medium text-zinc-400">{t("stake.amount")}</div>
 
       <div className={compact ? "mt-2 rounded-xl border border-[var(--dp-border)] bg-[var(--dp-surface-raised)] p-3" : "mt-3 rounded-xl border border-[var(--dp-border)] bg-[var(--dp-surface-raised)] p-4"}>
         <div className="flex items-center gap-3">
@@ -142,14 +148,19 @@ export function StakeWidget({
                 : "min-w-0 flex-1 bg-transparent text-3xl font-bold tracking-tight text-zinc-50 outline-none placeholder:text-zinc-600 disabled:opacity-50 sm:text-4xl"
             }
           />
-          <span className="shrink-0 rounded-lg border border-[var(--dp-border)] bg-[var(--dp-accent-muted)] px-2.5 py-1.5 text-sm font-semibold text-[var(--dp-accent)]">
-            {stakeToken}
+          <span className="shrink-0 rounded-lg border border-[var(--dp-border)] bg-[var(--dp-surface)] px-2 py-1">
+            <TokenLabel symbol={stakeToken} size="sm" symbolClassName="text-sm text-[var(--dp-accent)]" />
           </span>
         </div>
+        {parsedWei !== null && parsedWei > 0n ? (
+          <div className="mt-1 flex justify-end">
+            <UsdSubtext amountWei={parsedWei} symbol={stakeToken} />
+          </div>
+        ) : null}
         {balanceWei !== undefined && isConnected ? (
           <div className="mt-3 flex items-center justify-between gap-3 border-t border-[var(--dp-border)] pt-3 text-sm">
             <span className="text-zinc-500">
-              余额 {formatToken(balanceWei, tokenDecimals, 4)} {stakeToken}
+              {t("stake.balance", { amount: formatToken(balanceWei, tokenDecimals, 4), token: stakeToken })}
             </span>
             <button
               type="button"
@@ -157,7 +168,7 @@ export function StakeWidget({
               disabled={disabled || balanceWei <= 0n || Boolean(tx && txBusy)}
               className="font-semibold text-[var(--dp-accent)] hover:underline disabled:opacity-40"
             >
-              最大
+              {t("stake.max")}
             </button>
           </div>
         ) : null}
@@ -166,17 +177,47 @@ export function StakeWidget({
       {aprPercent !== null ? (
         <div className={compact ? "mt-3 space-y-1.5 text-sm" : "mt-4 space-y-2 text-sm"}>
           <div className="flex justify-between text-zinc-400">
-            <span>年化收益率 (APR)</span>
+            <span>{t("stake.apr")}</span>
             <span className="font-semibold text-[var(--dp-accent)]">{safeNumber(aprPercent).toFixed(2)}%</span>
           </div>
           {estYearlyRewardsWei !== null && estYearlyRewardsWei > 0n ? (
             <div className="flex justify-between border-t border-[var(--dp-border)] pt-2 text-zinc-400">
-              <span>预估年奖励</span>
-              <span className="font-medium text-zinc-200">
-                ~{formatToken(estYearlyRewardsWei, 18, 4)} {rewardToken}
+              <span>{t("stake.estReward")}</span>
+              <span className="flex flex-col items-end gap-0.5 font-medium text-zinc-200">
+                <span>~{formatToken(estYearlyRewardsWei, 18, 4)} {rewardToken}</span>
+                <UsdSubtext amountWei={estYearlyRewardsWei} symbol={rewardToken} />
               </span>
             </div>
           ) : null}
+        </div>
+      ) : null}
+
+      {parsedWei !== null && parsedWei > 0n ? (
+        <div className="mt-4">
+          <TransactionPreview
+            compact={compact}
+            rows={[
+              {
+                label: t("txPreview.walletSpend"),
+                value: `${formatToken(parsedWei, tokenDecimals, 4)} ${stakeToken}`,
+                subvalue: <UsdSubtext amountWei={parsedWei} symbol={stakeToken} />,
+              },
+              {
+                label: t("txPreview.protocolCredit"),
+                value: `${formatToken(parsedWei, tokenDecimals, 4)} ${stakeToken}`,
+                subvalue: t("txPreview.fotCreditNote"),
+              },
+              {
+                label: t("txPreview.estYearlyReward"),
+                value:
+                  estYearlyRewardsWei !== null && estYearlyRewardsWei > 0n
+                    ? `~${formatToken(estYearlyRewardsWei, 18, 4)} ${rewardToken}`
+                    : "—",
+                tone: "good",
+              },
+            ]}
+            footnote={t("txPreview.stakeFootnote")}
+          />
         </div>
       ) : null}
 
@@ -197,13 +238,13 @@ export function StakeWidget({
           <ConnectWalletButton
             className={compact ? "dp-button min-h-[48px] w-full rounded-xl text-sm" : "dp-button min-h-[52px] w-full rounded-xl text-base"}
           >
-            连接钱包以质押
+            {t("stake.connect")}
           </ConnectWalletButton>
         ) : tx ? (
           <TransactionButton
             flowState={displayState}
             needsApproval={needsApproval}
-            idlePrimary="质押"
+            idlePrimary="stake"
             disabled={disabled || Boolean(inputError) || !amount.trim()}
             onClick={() => void submitTx()}
             className={compact ? "dp-button min-h-[48px] w-full rounded-xl text-sm" : "dp-button min-h-[52px] w-full rounded-xl text-base"}
@@ -212,8 +253,9 @@ export function StakeWidget({
       </div>
 
       {inputError ? <p className="mt-2 text-xs text-red-400">{inputError}</p> : null}
-      <p className={compact ? "mt-3 text-center text-[11px] leading-relaxed text-zinc-600" : "mt-3 text-center text-[11px] leading-relaxed text-zinc-600"}>
-        APR 为链上当前速率估算；FOT 代币出账以 gross 记账，钱包到手可能低于显示值。
+      <NetworkFeeHint className={compact ? "mt-3" : "mt-4"} />
+      <p className={compact ? "mt-2 text-center text-[11px] leading-relaxed text-zinc-600" : "mt-2 text-center text-[11px] leading-relaxed text-zinc-600"}>
+        {t("stake.aprNote")}
       </p>
     </>
   );

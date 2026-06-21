@@ -13,6 +13,7 @@ import {
   ProtocolStats,
 } from "@/components/product/widgets/ProtocolStats";
 import { StakeWidget } from "@/components/product/widgets/StakeWidget";
+import { TokenIcon } from "@/components/TokenIcon";
 import { ProductActionCard } from "@/components/product/ProductActionCard";
 import { ProductEscapeActions } from "@/components/product/ProductEscapeActions";
 import { ProductPageShell } from "@/components/product/ProductPageShell";
@@ -32,6 +33,7 @@ import { formatTokenDisplay, safeNumber } from "@/lib/format";
 import { estAprPercent } from "@/lib/poolMetrics";
 import { showsUsdEstimates } from "@/lib/tokenPrices";
 import { parseUserInfoTuple } from "@/lib/userInfo";
+import { useI18n } from "@/lib/i18n";
 
 type PoolId = "flexible" | "locked";
 
@@ -42,21 +44,22 @@ function DappStatusStrip({
   status: string;
   hasBadDebt: boolean;
 }) {
+  const { t } = useI18n();
   const items = [
-    { label: "网络", value: appChainLabel, tone: "neutral" },
+    { label: t("home.statusNetwork"), value: appChainLabel, tone: "neutral" },
     {
-      label: "协议",
-      value: status === "NORMAL" ? "正常" : status,
+      label: t("home.statusProtocol"),
+      value: status === "NORMAL" ? t("home.statusNormal") : status,
       tone: status === "NORMAL" ? "good" : "warn",
     },
     {
-      label: "价格",
-      value: showsUsdEstimates ? "参考估值" : "未配置",
+      label: t("home.statusPrice"),
+      value: showsUsdEstimates ? t("home.statusPriceOn") : t("home.statusPriceOff"),
       tone: "neutral",
     },
     {
-      label: "坏账",
-      value: hasBadDebt ? "需处理" : "无",
+      label: t("home.statusBadDebt"),
+      value: hasBadDebt ? t("home.statusBadDebtYes") : t("home.statusBadDebtNo"),
       tone: hasBadDebt ? "warn" : "good",
     },
   ] as const;
@@ -103,20 +106,23 @@ function MarketOverview({
   yourRewards: bigint;
   connected: boolean;
 }) {
+  const { t } = useI18n();
   const rows = [
     {
-      name: "灵活池",
-      token: "TokenA → TokenB",
+      name: t("home.flexiblePool"),
+      stakeToken: "TokenA",
+      rewardToken: "TokenB",
       apr: aprA,
       tvl: formatTvlDisplay(tvlA, "TokenA"),
-      detail: "随存随取",
+      detail: t("home.flexibleDetail"),
     },
     {
-      name: "锁仓池",
-      token: "TokenB → TokenB",
+      name: t("home.lockedPool"),
+      stakeToken: "TokenB",
+      rewardToken: "TokenB",
       apr: aprB,
       tvl: formatTvlDisplay(tvlB, "TokenB"),
-      detail: "复利优先",
+      detail: t("home.lockedDetail"),
     },
   ];
 
@@ -124,10 +130,8 @@ function MarketOverview({
     <div className="space-y-4">
       <div className="dp-card overflow-hidden">
         <div className="border-b border-[var(--dp-border)] px-4 py-3">
-          <h2 className="text-sm font-semibold text-zinc-100">市场概览</h2>
-          <p className="mt-0.5 text-xs text-zinc-500">
-            选择池子前，先看 APR、TVL 与风险边界。
-          </p>
+          <h2 className="text-sm font-semibold text-zinc-100">{t("home.marketTitle")}</h2>
+          <p className="mt-0.5 text-xs text-zinc-500">{t("home.marketSubtitle")}</p>
         </div>
         <div className="divide-y divide-[var(--dp-border)]">
           {rows.map((row) => (
@@ -138,8 +142,13 @@ function MarketOverview({
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-semibold text-zinc-50">{row.name}</span>
-                  <span className="rounded-md border border-[var(--dp-border)] px-2 py-0.5 text-[11px] text-zinc-400">
-                    {row.token}
+                  <span className="inline-flex items-center gap-1 rounded-md border border-[var(--dp-border)] px-2 py-0.5">
+                    <TokenIcon symbol={row.stakeToken} size="xs" />
+                    <span className="text-[11px] text-zinc-500">→</span>
+                    <TokenIcon symbol={row.rewardToken} size="xs" />
+                    <span className="text-[11px] text-zinc-400">
+                      {row.stakeToken === row.rewardToken ? row.stakeToken : `${row.stakeToken} → ${row.rewardToken}`}
+                    </span>
                   </span>
                 </div>
                 <div className="mt-1 text-xs text-zinc-500">
@@ -158,26 +167,24 @@ function MarketOverview({
       </div>
 
       <div className="dp-card p-4">
-        <h2 className="text-sm font-semibold text-zinc-100">我的仓位</h2>
+        <h2 className="text-sm font-semibold text-zinc-100">{t("home.myPosition")}</h2>
         {connected ? (
           <div className="mt-3 grid grid-cols-2 gap-3">
             <div className="rounded-lg border border-[var(--dp-border)] bg-[var(--dp-surface-raised)] p-3">
-              <div className="text-xs text-zinc-500">已质押</div>
+              <div className="text-xs text-zinc-500">{t("home.staked")}</div>
               <div className="mt-1 text-base font-bold text-zinc-50">
                 {formatTvlDisplay(yourStaked, "Token")}
               </div>
             </div>
             <div className="rounded-lg border border-[var(--dp-border)] bg-[var(--dp-surface-raised)] p-3">
-              <div className="text-xs text-zinc-500">待领取</div>
+              <div className="text-xs text-zinc-500">{t("home.pendingRewards")}</div>
               <div className="mt-1 text-base font-bold text-[var(--dp-accent)]">
                 {formatTvlDisplay(yourRewards, "TokenB")}
               </div>
             </div>
           </div>
         ) : (
-          <p className="mt-2 text-sm leading-relaxed text-zinc-500">
-            连接钱包后显示仓位、奖励和可执行操作。合约仍以链上状态为准。
-          </p>
+          <p className="mt-2 text-sm leading-relaxed text-zinc-500">{t("home.connectHint")}</p>
         )}
       </div>
     </div>
@@ -187,6 +194,7 @@ function MarketOverview({
 /** 产品端首页 */
 export function ProductHomePage() {
   const { address, isConnecting } = useAccount();
+  const { t } = useI18n();
   const staking = useStaking();
   const poolA = usePoolA();
   const poolB = usePoolB();
@@ -206,7 +214,7 @@ export function ProductHomePage() {
 
   const userA = parseUserInfoTuple(staking.userA);
   const userB = parseUserInfoTuple(staking.userB);
-  const yourRewards = userA.rewards + userB.rewards;
+  const yourRewards = staking.pendingRewardA + staking.pendingRewardB;
   const yourStaked = userA.staked + userB.staked;
 
   const copy = POOL_COPY[activePool];
@@ -221,10 +229,10 @@ export function ProductHomePage() {
 
   const runClaimAll = async () => {
     try {
-      if (userA.rewards > 0n && poolA.canClaim) {
+      if (staking.pendingRewardA > 0n && poolA.canClaim) {
         await flow.executeWrite(
           {
-            actionLabel: "领取灵活池奖励",
+            actionLabel: t("action.claimFlexible"),
             txType: "claim",
             metadata: { pool: "A", token: "TokenB" },
             onConfirmed: () => staking.refetchAll(),
@@ -232,10 +240,10 @@ export function ProductHomePage() {
           () => poolA.writeClaimA(),
         );
       }
-      if (userB.rewards > 0n && poolB.canClaim) {
+      if (staking.pendingRewardB > 0n && poolB.canClaim) {
         await flow.executeWrite(
           {
-            actionLabel: "领取锁仓池奖励",
+            actionLabel: t("action.claimLocked"),
             txType: "claim",
             metadata: { pool: "B", token: "TokenB" },
             onConfirmed: () => staking.refetchAll(),
@@ -251,7 +259,7 @@ export function ProductHomePage() {
   const runCompound = async () => {
     await flow.executeWrite(
       {
-        actionLabel: "复利再投",
+        actionLabel: t("action.compound"),
         txType: "compound",
         metadata: { pool: "B", token: "TokenB" },
         onConfirmed: () => staking.refetchAll(),
@@ -285,69 +293,73 @@ export function ProductHomePage() {
   const stats = useMemo(
     () => [
       {
-        label: "总锁仓价值",
+        label: t("home.tvlTotal"),
         value: formatTvlDisplay(tvlTotal, "Token"),
-        sub: "双池合计 TVL",
+        sub: t("home.tvlTotalSub"),
       },
       {
-        label: "质押人数",
+        label: t("home.stakers"),
         value: stakers.isLoading
           ? "…"
           : stakerError
-            ? "暂不可用"
+            ? t("home.stakersUnavailable")
             : stakerTotal.toLocaleString(),
-        sub: stakerError ? "链上索引稍后重试" : "链上独立地址",
+        sub: stakerError ? t("home.stakersRetry") : t("home.stakersOnChain"),
         highlight: !stakerError && stakerTotal > 0,
       },
       {
-        label: "灵活池 APR",
+        label: t("home.aprFlexible"),
         value: `${safeNumber(aprA).toFixed(2)}%`,
         highlight: aprA >= aprB,
       },
       {
-        label: "锁仓池 APR",
+        label: t("home.aprLocked"),
         value: `${safeNumber(aprB).toFixed(2)}%`,
         highlight: aprB > aprA,
       },
     ],
-    [tvlTotal, aprA, aprB, stakerTotal, stakerError, stakers.isLoading],
+    [tvlTotal, aprA, aprB, stakerTotal, stakerError, stakers.isLoading, t],
   );
 
   const poolPositions = useMemo(
     () => [
       {
-        label: "灵活池 · TokenA",
+        label: t("pool.positionFlexible"),
         amount:
           userA.staked > 0n
             ? formatTokenDisplay(userA.staked, "TokenA")
-            : "未质押",
+            : t("home.notStaked"),
       },
       {
-        label: "锁仓池 · TokenB",
+        label: t("pool.positionLocked"),
         amount:
           userB.staked > 0n
             ? formatTokenDisplay(userB.staked, "TokenB")
-            : "未质押",
+            : t("home.notStaked"),
       },
     ],
-    [userA.staked, userB.staked],
+    [userA.staked, userB.staked, t],
   );
 
   const compoundDisabledReason = useMemo(
     () =>
-      getCompoundDisabledReason({
-        compoundPreview: poolB.compoundPreview,
-        status: staking.status,
-        globalBadDebt: staking.globalBadDebt,
-        claimCooldownRemainingSec: poolB.claimCooldownRemainingSec,
-        canCompound: poolB.canCompound,
-      }),
+      getCompoundDisabledReason(
+        {
+          compoundPreview: poolB.compoundPreview,
+          status: staking.status,
+          globalBadDebt: staking.globalBadDebt,
+          claimCooldownRemainingSec: poolB.claimCooldownRemainingSec,
+          canCompound: poolB.canCompound,
+        },
+        t,
+      ),
     [
       poolB.compoundPreview,
       poolB.canCompound,
       poolB.claimCooldownRemainingSec,
       staking.status,
       staking.globalBadDebt,
+      t,
     ],
   );
 
@@ -356,8 +368,8 @@ export function ProductHomePage() {
   );
 
   const activePositions = useMemo(
-    () => poolPositions.filter((p) => p.amount !== "未质押"),
-    [poolPositions],
+    () => poolPositions.filter((p) => p.amount !== t("home.notStaked")),
+    [poolPositions, t],
   );
 
   const actionCard = (
@@ -366,8 +378,8 @@ export function ProductHomePage() {
       tabs={
         <PoolTabs
           tabs={[
-            { id: "flexible", label: "灵活 · TokenA", token: "TokenA" },
-            { id: "locked", label: "锁仓 · TokenB", token: "TokenB" },
+            { id: "flexible", label: t("home.tabFlexible"), token: "TokenA" },
+            { id: "locked", label: t("home.tabLocked"), token: "TokenB" },
           ]}
           activeId={activePool}
           onChange={(id) => setActivePool(id as PoolId)}
@@ -395,10 +407,10 @@ export function ProductHomePage() {
         centered
         title={
           <>
-            质押代币，赚取 <span className="text-dp-accent">TokenB</span>
+            {t("home.heroTitle")} <span className="text-dp-accent">TokenB</span>
           </>
         }
-        subtitle="在灵活池与锁仓池之间选择策略，查看链上状态后再提交交易。收益、税费与退出规则都会在操作区实时展示。"
+        subtitle={t("home.heroSubtitle")}
       />
 
       <DappStatusStrip
@@ -409,7 +421,6 @@ export function ProductHomePage() {
       <ProtocolStats stats={stats} loading={staking.isLoading} />
 
       <ProductStakePageLayout
-        layout="split"
         sidebar={
           hasPosition ? (
             <PositionSummary

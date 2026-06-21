@@ -21,12 +21,14 @@ import { POOL_COPY } from "@/lib/appMode";
 import { getCompoundDisabledReason } from "@/lib/compoundHints";
 import { formatTokenDisplay } from "@/lib/format";
 import { formatCountdownHms } from "@/lib/timelockCountdown";
+import { useI18n } from "@/lib/i18n";
 import { parseUserInfoTuple } from "@/lib/userInfo";
 
 const copy = POOL_COPY.flexible;
 
 /** 产品端：灵活质押 */
 export function ProductFlexiblePoolPage() {
+  const { t } = useI18n();
   const { address } = useAccount();
   const pool = usePoolA();
   const poolB = usePoolB();
@@ -37,27 +39,30 @@ export function ProductFlexiblePoolPage() {
   const tvlA = pool.poolA?.totalStaked ?? 0n;
   const rrA = pool.poolA?.rewardRate ?? 0n;
   const userStakeA = userA.staked;
-  const pendingA = userA.rewards;
-  const yourRewards = userA.rewards + userB.rewards;
+  const pendingA = pool.pendingRewardA;
+  const yourRewards = pool.pendingRewardA + pool.pendingRewardB;
   const { data: stakeSinceTs } = usePoolAStakeSince(userStakeA);
   const busy = flow.state !== "idle";
 
   const compoundDisabledReason = useMemo(
     () =>
-      getCompoundDisabledReason({
-        compoundPreview: poolB.compoundPreview,
-        status: poolB.status,
-        globalBadDebt: poolB.globalBadDebt,
-        claimCooldownRemainingSec: poolB.claimCooldownRemainingSec,
-        canCompound: poolB.canCompound,
-      }),
-    [poolB.compoundPreview, poolB.canCompound, poolB.claimCooldownRemainingSec, poolB.status, poolB.globalBadDebt],
+      getCompoundDisabledReason(
+        {
+          compoundPreview: poolB.compoundPreview,
+          status: poolB.status,
+          globalBadDebt: poolB.globalBadDebt,
+          claimCooldownRemainingSec: poolB.claimCooldownRemainingSec,
+          canCompound: poolB.canCompound,
+        },
+        t,
+      ),
+    [poolB.compoundPreview, poolB.canCompound, poolB.claimCooldownRemainingSec, poolB.status, poolB.globalBadDebt, t],
   );
 
   const runClaim = async () => {
     await flow.executeWrite(
       {
-        actionLabel: "领取奖励",
+        actionLabel: t("action.claim"),
         txType: "claim",
         metadata: { pool: "A", token: "TokenB" },
         onConfirmed: () => pool.refetchWalletAndPool(),
@@ -70,7 +75,7 @@ export function ProductFlexiblePoolPage() {
   const runCompound = async () => {
     await flow.executeWrite(
       {
-        actionLabel: "复利再投",
+        actionLabel: t("action.compound"),
         txType: "compound",
         metadata: { pool: "B", token: "TokenB" },
         onConfirmed: () => pool.refetchWalletAndPool(),
@@ -87,15 +92,15 @@ export function ProductFlexiblePoolPage() {
     const delta = Math.max(0, Math.floor(Date.now() / 1000) - stakeSinceTs);
     const days = Math.floor(delta / 86400);
     const hours = Math.floor((delta % 86400) / 3600);
-    if (days > 0) return `已质押 ${days} 天 ${hours} 小时`;
-    if (hours > 0) return `已质押 ${hours} 小时`;
-    return "刚质押不久";
+    if (days > 0) return t("productPage.stakedDays", { days, hours });
+    if (hours > 0) return t("productPage.stakedHours", { hours });
+    return t("productPage.stakedRecently");
   })();
 
   const hasPosition = Boolean(address && (userStakeA > 0n || yourRewards > 0n));
 
   const actionBlock = (
-    <ProductActionCard compact heading="质押">
+    <ProductActionCard compact heading={t("productPage.stakeHeading")}>
       <StakeWidget
         embedded
         compact
@@ -120,12 +125,11 @@ export function ProductFlexiblePoolPage() {
   return (
     <ProductPageShell poolAStakingToken={pool.poolA?.stakingToken} poolBStakingToken={pool.poolB?.stakingToken}>
       <ProductStakePageLayout
-        layout="split"
         hero={
           <div className="space-y-4 sm:space-y-5">
             <ProductPoolHero
-              title={copy.productTitle}
-              subtitle={copy.productSubtitle}
+              title={t("pool.flexible.productTitle")}
+              subtitle={t("pool.flexible.productSubtitle")}
               tokenSymbol={copy.stakeToken}
               rewardToken={copy.rewardToken}
               totalStakedWei={tvlA}
@@ -154,9 +158,11 @@ export function ProductFlexiblePoolPage() {
 
             {address && userStakeA > 0n ? (
               <div className="dp-card p-5">
-                <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-500">仓位详情</h2>
+                <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-500">{t("productPage.positionDetail")}</h2>
                 {stakeDurationLabel ? <p className="mt-3 text-sm text-zinc-400">{stakeDurationLabel}</p> : null}
-                {cooldownLabel ? <p className="mt-2 text-xs text-amber-200/90">领取冷却：{cooldownLabel}</p> : null}
+                {cooldownLabel ? (
+                  <p className="mt-2 text-xs text-amber-200/90">{t("productPage.claimCooldown", { countdown: cooldownLabel })}</p>
+                ) : null}
                 <FotClaimHint grossRewards={pendingA} maxTransferFeeBP={pool.maxTransferFeeBP} />
                 {pool.claimDisabledReason ? <p className="mt-2 text-xs text-zinc-600">{pool.claimDisabledReason}</p> : null}
               </div>

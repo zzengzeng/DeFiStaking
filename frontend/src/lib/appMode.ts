@@ -27,6 +27,12 @@ export function counterpartPath(pathname: string): string {
   return "/console";
 }
 
+/**
+ * 双池静态配置：路由、链上 token 符号、Tailwind 样式 token。
+ *
+ * **展示文案**已迁移至 i18n（`pool.flexible.*` / `pool.locked.*`、`console.nav.*`），
+ * 请勿再使用本对象中的 productTitle / consoleTitle 等字段渲染 UI。
+ */
 export const POOL_COPY = {
   flexible: {
     id: "A" as const,

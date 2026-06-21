@@ -18,6 +18,7 @@ import { usePoolA } from "@/hooks/usePoolA";
 import { useWriteWithStatus } from "@/hooks/useWriteWithStatus";
 import { POOL_COPY } from "@/lib/appMode";
 import { formatTokenDisplay } from "@/lib/format";
+import { useI18n } from "@/lib/i18n";
 
 const copy = POOL_COPY.flexible;
 
@@ -32,6 +33,7 @@ const computeWithdrawPreviewA = (amount: bigint) => ({
 
 /** 产品端：赎回专页（灵活池） */
 export function ProductFlexibleWithdrawPage() {
+  const { t } = useI18n();
   const { address } = useAccount();
   const pool = usePoolA();
   const flow = useWriteWithStatus();
@@ -39,14 +41,14 @@ export function ProductFlexibleWithdrawPage() {
   const tvlA = pool.poolA?.totalStaked ?? 0n;
   const rrA = pool.poolA?.rewardRate ?? 0n;
   const userStakeA = pool.userA?.[0] ?? 0n;
-  const pendingA = pool.userA?.[1] ?? 0n;
+  const pendingA = pool.pendingRewardA;
   const busy = flow.state !== "idle";
 
   const runWithdraw = useCallback(
     async (amt: string) => {
       await flow.executeWrite(
         {
-          actionLabel: "赎回（灵活池）",
+          actionLabel: t("action.withdrawFlexible"),
           txType: "withdraw",
           metadata: { pool: "A", token: "TokenA", amount: amt },
           onConfirmed: () => pool.refetchWalletAndPool(),
@@ -55,13 +57,13 @@ export function ProductFlexibleWithdrawPage() {
       );
       flow.reset({ closeGlobal: true });
     },
-    [flow, pool],
+    [flow, pool, t],
   );
 
   const runClaim = async () => {
     await flow.executeWrite(
       {
-        actionLabel: "领取奖励（灵活池）",
+        actionLabel: t("action.claimFlexiblePool"),
         txType: "claim",
         metadata: { pool: "A", token: "TokenB" },
         onConfirmed: () => pool.refetchWalletAndPool(),
@@ -74,7 +76,7 @@ export function ProductFlexibleWithdrawPage() {
   const hasPosition = Boolean(address && (userStakeA > 0n || pendingA > 0n));
 
   const actionBlock = (
-    <ProductActionCard compact heading="赎回操作">
+    <ProductActionCard compact heading={t("productPage.withdrawHeading")}>
       <WithdrawWidget
         embedded
         tokenSymbol={copy.stakeToken}
@@ -90,24 +92,14 @@ export function ProductFlexibleWithdrawPage() {
   );
 
   return (
-    <ProductPageShell
-      poolAStakingToken={pool.poolA?.stakingToken}
-      poolBStakingToken={pool.poolB?.stakingToken}
-    >
+    <ProductPageShell poolAStakingToken={pool.poolA?.stakingToken} poolBStakingToken={pool.poolB?.stakingToken}>
       <ProductStakePageLayout
-        layout="split"
         hero={
           <div className="space-y-4 sm:space-y-5">
             <ProductPageTitle
               centered
-              title="赎回质押"
-              subtitle={
-                <>
-                  灵活池赎回 <span className="text-zinc-300">TokenA</span>
-                  ；锁仓池赎回 <span className="text-zinc-300">TokenB</span>
-                  （收益同为 TokenB）。
-                </>
-              }
+              title={t("productPage.withdrawTitle")}
+              subtitle={t("productPage.withdrawSubtitleFlexible")}
             />
             <WithdrawPoolTabs />
             <ProductPoolMetrics
@@ -133,7 +125,7 @@ export function ProductFlexibleWithdrawPage() {
             ) : null}
 
             <ProductWithdrawInfoPanel
-              poolName="灵活池"
+              poolName={t("pool.flexible.consoleTitle")}
               tokenSymbol={copy.stakeToken}
               rewardToken={copy.rewardToken}
               stakedWei={userStakeA}
@@ -143,20 +135,12 @@ export function ProductFlexibleWithdrawPage() {
 
             {address && pendingA > 0n ? (
               <div className="dp-card p-5 sm:p-6">
-                <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-500">
-                  赎回提示
-                </h2>
-                <FotClaimHint
-                  grossRewards={pendingA}
-                  maxTransferFeeBP={pool.maxTransferFeeBP}
-                />
+                <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-500">{t("productPage.withdrawHint")}</h2>
+                <FotClaimHint grossRewards={pendingA} maxTransferFeeBP={pool.maxTransferFeeBP} />
               </div>
             ) : null}
 
-            <ProductEscapeActions
-              onRefetch={() => pool.refetchWalletAndPool()}
-              emergencyPools={["A"]}
-            />
+            <ProductEscapeActions onRefetch={() => pool.refetchWalletAndPool()} emergencyPools={["A"]} />
           </>
         }
         action={actionBlock}

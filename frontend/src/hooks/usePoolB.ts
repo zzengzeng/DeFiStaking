@@ -7,7 +7,6 @@ import { dualPoolStakingAbi } from "@/contracts/abis/dualPoolStaking";
 import { erc20Abi } from "@/contracts/abis/erc20";
 import { contractAddresses } from "@/contracts/addresses";
 import { useStaking } from "@/hooks/useStaking";
-import { parseUserInfoTuple } from "@/lib/userInfo";
 
 const DAY = 24n * 60n * 60n;
 
@@ -38,8 +37,8 @@ export function usePoolB() {
     query: { enabled: Boolean(address) },
   });
 
-  const userA = parseUserInfoTuple(staking.userA);
-  const userB = parseUserInfoTuple(staking.userB);
+  const pendingRewardsA = staking.pendingRewardA;
+  const pendingRewardsB = staking.pendingRewardB;
 
   const canStake = staking.status === "NORMAL";
   const canWithdraw = staking.status === "NORMAL" || staking.status === "SHUTDOWN";
@@ -51,8 +50,8 @@ export function usePoolB() {
     (staking.status === "NORMAL" || staking.status === "SHUTDOWN") &&
     staking.globalBadDebt === 0n &&
     claimCooldownRemainingSec === 0n &&
-    userB.rewards > 0n &&
-    userB.rewards >= staking.minClaimAmount;
+    pendingRewardsB > 0n &&
+    pendingRewardsB >= staking.minClaimAmount;
   const canEmergencyWithdraw = staking.status === "EMERGENCY";
 
   const activeFeeBp = calcFeeBp(now, staking.stakeTimestampB, staking.unlockTimeB, staking.withdrawFeeBP, staking.midTermFeeBP);
@@ -68,9 +67,9 @@ export function usePoolB() {
   };
 
   const compoundPreview = {
-    rewardAWei: userA.rewards,
-    rewardBWei: userB.rewards,
-    totalWei: userA.rewards + userB.rewards,
+    rewardAWei: pendingRewardsA,
+    rewardBWei: pendingRewardsB,
+    totalWei: pendingRewardsA + pendingRewardsB,
   };
   const canCompound =
     staking.status === "NORMAL" &&

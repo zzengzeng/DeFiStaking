@@ -37,7 +37,7 @@ jobs:
         run: forge build --sizes
 
       - name: Run Forge tests
-        run: forge test -vvv
+        run: env -u ETHERSCAN_API_KEY forge test --offline
 
   frontend-build:
     name: Frontend production build
@@ -69,6 +69,12 @@ jobs:
 
       - name: Build frontend
         run: pnpm run build
+
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run frontend smoke tests
+        run: pnpm run test:e2e
 
   static-analysis:
     name: Slither static analysis
@@ -114,3 +120,29 @@ jobs:
           SUPER_EXECUTOR: ${{ vars.SUPER_EXECUTOR }}
           OPERATOR: ${{ vars.OPERATOR }}
         run: bash script/check-production-readiness.sh
+
+      - name: Run frontend production env check
+        env:
+          NEXT_PUBLIC_DUAL_STAKING_ADDRESS: ${{ vars.NEXT_PUBLIC_DUAL_STAKING_ADDRESS }}
+          NEXT_PUBLIC_TOKEN_A_ADDRESS: ${{ vars.NEXT_PUBLIC_TOKEN_A_ADDRESS }}
+          NEXT_PUBLIC_TOKEN_B_ADDRESS: ${{ vars.NEXT_PUBLIC_TOKEN_B_ADDRESS }}
+          NEXT_PUBLIC_DUAL_POOL_USER_MODULE_ADDRESS: ${{ vars.NEXT_PUBLIC_DUAL_POOL_USER_MODULE_ADDRESS }}
+          NEXT_PUBLIC_DUAL_POOL_ADMIN_MODULE_ADDRESS: ${{ vars.NEXT_PUBLIC_DUAL_POOL_ADMIN_MODULE_ADDRESS }}
+          NEXT_PUBLIC_STAKING_ADMIN_FACADE_ADDRESS: ${{ vars.NEXT_PUBLIC_STAKING_ADMIN_FACADE_ADDRESS }}
+          NEXT_PUBLIC_TIMELOCK_CONTROLLER_ADDRESS: ${{ vars.NEXT_PUBLIC_TIMELOCK_CONTROLLER_ADDRESS }}
+          NEXT_PUBLIC_TIMELOCK_SUPER_CONTROLLER_ADDRESS: ${{ vars.NEXT_PUBLIC_TIMELOCK_SUPER_CONTROLLER_ADDRESS }}
+          NEXT_PUBLIC_OPERATOR_ROLE_HOLDER_ADDRESS: ${{ vars.NEXT_PUBLIC_OPERATOR_ROLE_HOLDER_ADDRESS }}
+          NEXT_PUBLIC_CHAIN_ID: ${{ vars.NEXT_PUBLIC_CHAIN_ID }}
+          NEXT_PUBLIC_RPC_URL_SEPOLIA: ${{ vars.NEXT_PUBLIC_RPC_URL_SEPOLIA }}
+          NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ${{ vars.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID }}
+        run: bash script/check-frontend-production-env.sh
+
+      - name: Run frontend contract sync check
+        run: bash script/check-frontend-contract-sync.sh
+
+      - name: Run post-deployment verification
+        env:
+          RPC_URL: ${{ vars.SEPOLIA_RPC_URL }}
+          DEPLOYER_ADDRESS: ${{ vars.DEPLOYER_ADDRESS }}
+          OPERATOR: ${{ vars.OPERATOR }}
+        run: bash script/post-deploy-verify.sh

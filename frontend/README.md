@@ -58,3 +58,29 @@ pnpm start
 ```bash
 pnpm sync:addresses
 ```
+
+## 源码与架构
+
+目录结构、双模式路由、**i18n 文案规范**、交易流与 hooks 说明见 **[src/README.md](./src/README.md)**。
+
+专题文档：
+
+- **[src/hooks/README.md](./src/hooks/README.md)** — 各 hook 职责、依赖关系、新增约定
+- **[src/views/console/README.md](./src/views/console/README.md)** — 控制台四页结构与权限
+
+### 国际化速查
+
+```tsx
+import { useI18n } from "@/lib/i18n";
+import { useConsoleCopy } from "@/lib/consoleCopy";
+
+const { t, locale, setLocale } = useI18n();
+t("home.heroTitle");
+t("withdraw.exceedsToastDesc", { amount: "1.0", token: "TokenA" });
+
+// 控制台专用（已绑定 console.* 键）
+const copy = useConsoleCopy();
+copy.nav.hub;
+```
+
+语言切换组件：`LocaleSwitcher`（产品顶栏与控制台顶栏均已挂载）。

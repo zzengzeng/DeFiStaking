@@ -3,13 +3,12 @@
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 
-import { UI_COPY } from "@/lib/uiCopy";
+import { useI18n } from "@/lib/i18n";
 import { useTxStore } from "@/store/useTxStore";
 
-/**
- * 根据 Tx Center store 状态更新 sonner：开始 / 已提交 / 确认 / 失败（与 Activity 面板并行）。
- */
+/** 根据 Tx Center store 状态更新 sonner：开始 / 已提交 / 确认 / 失败（与 Activity 面板并行）。 */
 export function TxToastManager() {
+  const { t } = useI18n();
   const txs = useTxStore((s) => s.txs);
   const lastStatus = useRef<Record<string, string>>({});
 
@@ -26,34 +25,34 @@ export function TxToastManager() {
 
       switch (tx.status) {
         case "awaiting_signature":
-          toast.loading(tx.title, { id: tid, description: UI_COPY.tx.confirmInWallet });
+          toast.loading(tx.title, { id: tid, description: t("txCenter.confirmInWallet") });
           break;
         case "pending":
-          toast.loading(UI_COPY.tx.submitted, {
+          toast.loading(t("txCenter.submitted"), {
             id: tid,
             description: tx.explorerUrl ?? (tx.txHash ? `${tx.txHash.slice(0, 12)}…` : undefined),
             action: tx.explorerUrl
               ? {
-                  label: UI_COPY.tx.explorer,
+                  label: t("txCenter.explorer"),
                   onClick: () => window.open(tx.explorerUrl!, "_blank", "noopener,noreferrer"),
                 }
               : undefined,
           });
           break;
         case "confirmed":
-          toast.success(UI_COPY.tx.confirmedToast, {
+          toast.success(t("txCenter.confirmedToast"), {
             id: tid,
             description: tx.txHash ? `${tx.txHash.slice(0, 10)}…${tx.txHash.slice(-8)}` : undefined,
           });
           break;
         case "failed":
-          toast.error(tx.description ?? UI_COPY.tx.failedToast, { id: tid });
+          toast.error(tx.description ?? t("txCenter.failedToast"), { id: tid });
           break;
         default:
           break;
       }
     }
-  }, [txs]);
+  }, [txs, t]);
 
   return null;
 }

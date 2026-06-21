@@ -2,6 +2,8 @@
 
 import clsx from "clsx";
 
+import { useI18n } from "@/lib/i18n";
+
 export type ConfirmRow = { label: string; value: React.ReactNode };
 
 type Props = {
@@ -22,13 +24,17 @@ export function ConfirmActionModal({
   title,
   rows,
   warning,
-  confirmText = "确认",
-  cancelText = "取消",
+  confirmText,
+  cancelText,
   variant = "default",
   busy,
   onConfirm,
   onClose,
 }: Props) {
+  const { t } = useI18n();
+  const resolvedConfirm = confirmText ?? t("common.confirm");
+  const resolvedCancel = cancelText ?? t("common.cancel");
+
   if (!open) return null;
   const danger = variant === "danger";
   return (
@@ -62,7 +68,7 @@ export function ConfirmActionModal({
             disabled={busy}
             className="min-h-[44px] w-full rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-200 disabled:opacity-40 sm:w-auto"
           >
-            {cancelText}
+            {resolvedCancel}
           </button>
           <button
             type="button"
@@ -73,7 +79,7 @@ export function ConfirmActionModal({
               danger ? "bg-red-400 text-black hover:bg-red-300" : "bg-emerald-400 text-black hover:bg-emerald-300",
             )}
           >
-            {busy ? "Working…" : confirmText}
+            {busy ? t("common.busy") : resolvedConfirm}
           </button>
         </div>
       </div>

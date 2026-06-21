@@ -3,34 +3,8 @@
 import clsx from "clsx";
 
 import { isStalePendingTx } from "@/lib/txActivityScope";
-import { UI_COPY } from "@/lib/uiCopy";
+import { useI18n } from "@/lib/i18n";
 import type { TxItem } from "@/store/useTxStore";
-
-function timeAgo(ts: number): string {
-  const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
-  return UI_COPY.tx.timeAgo(s);
-}
-
-function statusBadge(status: TxItem["status"]) {
-  switch (status) {
-    case "awaiting_signature":
-    case "pending":
-      return {
-        label: status === "awaiting_signature" ? UI_COPY.tx.awaitingSignature : UI_COPY.tx.pending,
-        className: "bg-amber-500/20 text-amber-200 ring-amber-500/40",
-      };
-    case "confirmed":
-      return { label: UI_COPY.tx.confirmed, className: "bg-emerald-500/20 text-emerald-200 ring-emerald-500/40" };
-    case "failed":
-      return { label: UI_COPY.tx.failed, className: "bg-red-500/20 text-red-200 ring-red-500/40" };
-    default:
-      return { label: status, className: "bg-zinc-500/20 text-zinc-300 ring-zinc-500/30" };
-  }
-}
-
-function txTypeLabel(type: string): string {
-  return UI_COPY.tx.typeLabel[type] ?? type;
-}
 
 type Props = {
   tx: TxItem;
@@ -38,17 +12,58 @@ type Props = {
 };
 
 export function TxItemCard({ tx, onDismiss }: Props) {
+  const { t } = useI18n();
+
+  const timeAgo = (ts: number): string => {
+    const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+    if (s < 60) return t("txCenter.timeAgoSec", { s });
+    const m = Math.floor(s / 60);
+    if (m < 60) return t("txCenter.timeAgoMin", { m });
+    const h = Math.floor(m / 60);
+    if (h < 48) return t("txCenter.timeAgoHour", { h });
+    return t("txCenter.timeAgoDay", { d: Math.floor(h / 24) });
+  };
+
+  const statusBadge = (status: TxItem["status"]) => {
+    switch (status) {
+      case "awaiting_signature":
+      case "pending":
+        return {
+          label: status === "awaiting_signature" ? t("txCenter.awaitingSignature") : t("txCenter.pending"),
+          className: "bg-amber-500/20 text-amber-200 ring-amber-500/40",
+        };
+      case "confirmed":
+        return { label: t("txCenter.confirmed"), className: "bg-emerald-500/20 text-emerald-200 ring-emerald-500/40" };
+      case "failed":
+        return { label: t("txCenter.failed"), className: "bg-red-500/20 text-red-200 ring-red-500/40" };
+      default:
+        return { label: status, className: "bg-zinc-500/20 text-zinc-300 ring-zinc-500/30" };
+    }
+  };
+
+  const txTypeLabel = (type: string): string => {
+    const labels: Record<string, string> = {
+      stake: t("txCenter.typeStake"),
+      approve: t("txCenter.typeApprove"),
+      withdraw: t("txCenter.typeWithdraw"),
+      claim: t("txCenter.typeClaim"),
+      compound: t("txCenter.typeCompound"),
+      emergency: t("txCenter.typeEmergency"),
+      governance: t("txCenter.typeGovernance"),
+      notify: t("txCenter.typeNotify"),
+      write: t("txCenter.typeWrite"),
+      airdrop: t("txCenter.typeClaim"),
+    };
+    return labels[type] ?? type;
+  };
+
+  const poolMeta = (pool: string) => (pool === "A" ? t("txCenter.poolFlexible") : t("txCenter.poolLocked"));
+
   const badge = statusBadge(tx.status);
   const meta = tx.metadata;
   const metaLine =
     meta && (meta.amount || meta.token || meta.pool)
-      ? [
-          meta.pool && UI_COPY.tx.poolMeta(meta.pool),
-          meta.amount,
-          meta.token,
-        ]
-          .filter(Boolean)
-          .join(" · ")
+      ? [meta.pool && poolMeta(meta.pool), meta.amount, meta.token].filter(Boolean).join(" · ")
       : null;
 
   return (
@@ -66,14 +81,14 @@ export function TxItemCard({ tx, onDismiss }: Props) {
         <span>{timeAgo(tx.updatedAt)}</span>
         {tx.explorerUrl ? (
           <a href={tx.explorerUrl} target="_blank" rel="noreferrer noopener" className="text-sky-400 hover:underline">
-            {UI_COPY.tx.explorer}
+            {t("txCenter.explorer")}
           </a>
         ) : tx.txHash ? (
           <span className="font-mono text-[10px] text-zinc-600">{tx.txHash.slice(0, 10)}…</span>
         ) : null}
         {onDismiss ? (
           <button type="button" onClick={() => onDismiss(tx.id)} className="text-zinc-500 hover:text-zinc-300">
-            {isStalePendingTx(tx) ? "移除过期" : "移除"}
+            {isStalePendingTx(tx) ? t("txCenter.removeStale") : t("txCenter.remove")}
           </button>
         ) : null}
       </div>

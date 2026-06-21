@@ -6,21 +6,22 @@ const ZERO = "0x0000000000000000000000000000000000000000" as const;
  */
 export const sepoliaDeploymentMeta = {
   chainId: 11155111 as const,
-  tokenA: "0xbd1ea15e7f4774df55b99d4bae731dd0b4e602de" as const,
-  tokenB: "0x65e926f4b96d9f29082fc6b3758132eccc73bbf1" as const,
-  /** DualPoolStaking（双 Timelock 治理 + forceClaimAll 门禁） */
-  staking: "0x161cb3cb4905c2c6fc8b19647e8a5a9761ae32ca" as const,
-  dualPoolUserModule: "0x3ae5fafb4f4e383a20fa6bf5ed70d005e152b96f" as const,
-  dualPoolAdminModule: "0x1324d32cde37d30152b79f8ef18d2c9a82d7ce9a" as const,
-  dualPoolStakingAdmin: "0xa0d9e776e8ebf697a29bb612268c9976c1e980ca" as const,
+  tokenA: "0xba2f8128e5f0a47f820010eedd3f96e0b6e0e67b" as const,
+  tokenB: "0x2a082fec5f9b75c27f85617d90a7d3ace62743c4" as const,
+  /** DualPoolStaking（含 pendingRewardA/B 视图） */
+  staking: "0xe088ffd3d50ea8b2a86abae175f24f92c027a844" as const,
+  dualPoolUserModule: "0x57b3d496320c6cc745cfaaa1d6cd80267b4e3031" as const,
+  dualPoolAdminModule: "0xe93692a8b3e44ac619c4253ebdc88bff56b2723f" as const,
+  dualPoolStakingAdmin: "0xaffa78fd52115f5964dbd7bfdf3910c58a532c88" as const,
   /** 参数类治理 Timelock（48h） */
-  timelockController: "0x6d95e0c8d0fa989de67a33a175bb451d8aa2aee7" as const,
+  timelockController: "0x0f6ff98fc9279cb0ceeba3c1e77c8d62b2729920" as const,
   /** 超级路径 Timelock（72h） */
-  timelockSuperController: "0xfdc3cefe1443eeff54ec4246df8529a96260b3eb" as const,
+  timelockSuperController: "0x90b28b77fb1865ef58c7608f760c2511e549df46" as const,
   timelockMinDelaySeconds: 172800 as const,
   timelockSuperMinDelaySeconds: 259200 as const,
   operatorRoleHolder: "0xb65214b2F45892399b2E4724d34996552534F94f" as const,
-  stakingDeployBlock: 11_095_818 as const,
+  tokenAFaucet: "0xd8834d4e101581f356f2d19ee65131b144cfd601" as const,
+  stakingDeployBlock: 11_109_413 as const,
 } as const;
 
 /** 防止 .env 中误加引号/空格导致打包进客户端的地址字面量语法错误。 */
@@ -58,6 +59,12 @@ export const contractAddresses = {
   ),
   tokenA: envOrSepoliaDefault(process.env.NEXT_PUBLIC_TOKEN_A_ADDRESS, "NEXT_PUBLIC_TOKEN_A_ADDRESS", sepoliaDeploymentMeta.tokenA),
   tokenB: envOrSepoliaDefault(process.env.NEXT_PUBLIC_TOKEN_B_ADDRESS, "NEXT_PUBLIC_TOKEN_B_ADDRESS", sepoliaDeploymentMeta.tokenB),
+  /** 配置后首页空投走 Faucet.claim；未配置且代币为旧版开放 mint 时回退 token.mint */
+  tokenAFaucet: envOrSepoliaDefault(
+    process.env.NEXT_PUBLIC_TOKEN_A_FAUCET_ADDRESS,
+    "NEXT_PUBLIC_TOKEN_A_FAUCET_ADDRESS",
+    sepoliaDeploymentMeta.tokenAFaucet,
+  ),
 };
 
 /** 模块与治理相关地址（当前仅用于只读展示或后续扩展；写操作仍经 `contractAddresses.staking`）。 */

@@ -1,5 +1,7 @@
 import type { Hash } from "viem";
 
+import type { TranslateFn } from "@/lib/i18n";
+
 /** 全应用统一的链上写交易状态（质押 / 提现 / 治理共用） */
 export type TxState =
   | "idle"
@@ -33,45 +35,34 @@ export function isTxBusy(s: TxState): boolean {
 }
 
 /** Modal / 文案：人类可读状态说明 */
-export function txStateMessage(state: TxState): string {
+export function txStateMessage(state: TxState, t: TranslateFn): string {
   switch (state) {
     case "idle":
-      return "就绪";
+      return t("txState.idle");
     case "needs_approval":
-      return "执行此操作前需先授权代币。";
+      return t("txState.needsApproval");
     case "approving":
-      return "正在准备授权交易…";
+      return t("txState.approving");
     case "approval_pending":
-      return "授权交易已提交，等待链上确认…";
+      return t("txState.approvalPending");
     case "approval_confirmed":
-      return "授权已确认。";
+      return t("txState.approvalConfirmed");
     case "awaiting_signature":
-      return "请在钱包中确认交易。";
+      return t("txState.awaitingSignature");
     case "submitting":
-      return "正在提交到网络…";
+      return t("txState.submitting");
     case "pending":
-      return "等待链上确认…";
+      return t("txState.pending");
     case "confirmed":
-      return "交易已确认。";
+      return t("txState.confirmed");
     case "failed":
-      return "交易失败。";
+      return t("txState.failed");
     default:
       return state;
   }
 }
 
-type IdlePrimary = "Stake" | "Approve" | "Submit" | "Confirm" | "质押" | "授权" | "提交" | "确认";
-
-const IDLE_PRIMARY_ZH: Record<string, string> = {
-  Stake: "质押",
-  Approve: "授权",
-  Submit: "提交",
-  Confirm: "确认",
-  质押: "质押",
-  授权: "授权",
-  提交: "提交",
-  确认: "确认",
-};
+type IdlePrimaryKey = "stake" | "submit" | "confirm";
 
 /**
  * 主按钮文案（与产品规范一致）
@@ -79,30 +70,31 @@ const IDLE_PRIMARY_ZH: Record<string, string> = {
  */
 export function transactionButtonLabel(
   state: TxState,
-  ctx: { needsApproval: boolean; idlePrimary: IdlePrimary },
+  t: TranslateFn,
+  ctx: { needsApproval: boolean; idlePrimary?: IdlePrimaryKey },
 ): string {
   switch (state) {
     case "needs_approval":
-      return "授权";
+      return t("txButton.approve");
     case "approving":
-      return "授权中…";
+      return t("txButton.approving");
     case "approval_pending":
-      return "授权确认中…";
+      return t("txButton.approvalPending");
     case "approval_confirmed":
-      return "已授权";
+      return t("txButton.approved");
     case "awaiting_signature":
-      return "请在钱包确认";
+      return t("txButton.awaitingSignature");
     case "submitting":
-      return "提交中…";
+      return t("txButton.submitting");
     case "pending":
-      return "确认中…";
+      return t("txButton.pending");
     case "confirmed":
-      return "已确认";
+      return t("txButton.confirmed");
     case "failed":
-      return "重试";
+      return t("txButton.failed");
     case "idle":
     default:
-      return ctx.needsApproval ? "授权" : IDLE_PRIMARY_ZH[ctx.idlePrimary] ?? ctx.idlePrimary;
+      return ctx.needsApproval ? t("txButton.approve") : t(`txButton.${ctx.idlePrimary ?? "submit"}`);
   }
 }
 

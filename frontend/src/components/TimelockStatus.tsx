@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import type { TimelockIndexedOp } from "@/hooks/useTimelockOps";
 import { formatCountdownHms } from "@/lib/timelockCountdown";
-import { UI_COPY } from "@/lib/uiCopy";
+import { useUiCopy } from "@/lib/uiCopy";
 
 export type TimelockUiState = "IDLE" | "PENDING" | "READY_TO_EXECUTE" | "EXECUTED" | "CANCELLED";
 
@@ -49,24 +49,8 @@ function resolveUiState(
   };
 }
 
-function statusTitle(state: TimelockUiState): string {
-  switch (state) {
-    case "IDLE":
-      return UI_COPY.timelock.notQueued;
-    case "PENDING":
-      return UI_COPY.timelock.queued;
-    case "READY_TO_EXECUTE":
-      return UI_COPY.timelock.ready;
-    case "EXECUTED":
-      return UI_COPY.timelock.executed;
-    case "CANCELLED":
-      return UI_COPY.timelock.cancelled;
-    default:
-      return state;
-  }
-}
-
 export function TimelockStatus({ op }: Props) {
+  const ui = useUiCopy();
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
   useEffect(() => {
     const timer = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
@@ -74,6 +58,23 @@ export function TimelockStatus({ op }: Props) {
   }, []);
 
   const data = useMemo(() => resolveUiState(op, now), [op, now]);
+
+  const statusTitle = (() => {
+    switch (data.state) {
+      case "IDLE":
+        return ui.timelock.notQueued;
+      case "PENDING":
+        return ui.timelock.queued;
+      case "READY_TO_EXECUTE":
+        return ui.timelock.ready;
+      case "EXECUTED":
+        return ui.timelock.executed;
+      case "CANCELLED":
+        return ui.timelock.cancelled;
+      default:
+        return data.state;
+    }
+  })();
 
   const toneClass =
     data.state === "READY_TO_EXECUTE"
@@ -93,40 +94,40 @@ export function TimelockStatus({ op }: Props) {
 
   return (
     <div className={`min-w-0 rounded-xl border p-3 text-xs ${toneClass}`}>
-      <div className="font-semibold tracking-wide">{statusTitle(data.state)}</div>
+      <div className="font-semibold tracking-wide">{statusTitle}</div>
       {data.state === "PENDING" && (
         <div className="mt-1 font-mono text-[11px] tabular-nums text-amber-200/95">
-          {UI_COPY.timelock.remaining} {countdown}
+          {ui.timelock.remaining} {countdown}
         </div>
       )}
       {data.state === "READY_TO_EXECUTE" && (
         <div className="mt-1 font-mono text-[11px] tabular-nums text-emerald-200/95">
-          {UI_COPY.timelock.remaining} {countdown}
+          {ui.timelock.remaining} {countdown}
         </div>
       )}
 
       <div className="mt-2 space-y-1 border-t border-white/10 pt-2 font-mono text-[11px] leading-relaxed opacity-95">
         {(data.state === "PENDING" || data.state === "READY_TO_EXECUTE") && data.executeAtMs !== null && (
           <div>
-            <span className="text-white/55">{UI_COPY.timelock.executeAt}: </span>
+            <span className="text-white/55">{ui.timelock.executeAt}: </span>
             <span>{executeAtStr}</span>
           </div>
         )}
         {(data.state === "PENDING" || data.state === "READY_TO_EXECUTE") && (
           <div>
-            <span className="text-white/55">{UI_COPY.timelock.remainingHms}: </span>
+            <span className="text-white/55">{ui.timelock.remainingHms}: </span>
             <span className="tabular-nums">{countdown}</span>
           </div>
         )}
         {(data.state === "EXECUTED" || data.state === "CANCELLED") && (
           <div>
             <span className="text-white/55">
-              {data.state === "EXECUTED" ? `${UI_COPY.timelock.executedAt}: ` : `${UI_COPY.timelock.cancelledAt}: `}
+              {data.state === "EXECUTED" ? `${ui.timelock.executedAt}: ` : `${ui.timelock.cancelledAt}: `}
             </span>
             <span>{data.settledAtLabel}</span>
           </div>
         )}
-        {data.state === "IDLE" && <div className="text-white/50">{UI_COPY.timelock.idleHint}</div>}
+        {data.state === "IDLE" && <div className="text-white/50">{ui.timelock.idleHint}</div>}
       </div>
     </div>
   );

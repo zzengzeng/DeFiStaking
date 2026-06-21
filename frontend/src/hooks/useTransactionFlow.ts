@@ -5,9 +5,9 @@ import type { Hash } from "viem";
 
 import { useTxCenter } from "@/hooks/useTxCenter";
 import { mapContractError } from "@/lib/errors";
+import { useI18n } from "@/lib/i18n";
 import type { TxState } from "@/lib/txFlowTypes";
 import { isTxBusy } from "@/lib/txFlowTypes";
-import { UI_COPY } from "@/lib/uiCopy";
 import type { TxItem } from "@/store/useTxStore";
 
 export type ExecuteTxOpts = {
@@ -40,8 +40,10 @@ export type UseTransactionFlowOptions = {
 
 /**
  * 本地按钮状态 + 全局 Tx Center（Zustand 持久化队列、多笔并发）。
+ * 失败时 error 字段为 mapContractError 结果，可直接展示。
  */
 export function useTransactionFlow(_options: UseTransactionFlowOptions = {}) {
+  const { t } = useI18n();
   const { startTransaction } = useTxCenter();
   const [state, setState] = useState<TxState>("idle");
   const [txHash, setTxHash] = useState<Hash | undefined>(undefined);
@@ -74,13 +76,13 @@ export function useTransactionFlow(_options: UseTransactionFlowOptions = {}) {
         setState("approval_confirmed");
         return h;
       } catch (e) {
-        const msg = mapContractError(e);
+        const msg = mapContractError(e, t);
         setError(msg);
         setState("failed");
         throw e;
       }
     },
-    [startTransaction],
+    [startTransaction, t],
   );
 
   const executeWrite = useCallback(
@@ -101,13 +103,13 @@ export function useTransactionFlow(_options: UseTransactionFlowOptions = {}) {
         setState("confirmed");
         return h;
       } catch (e) {
-        const msg = mapContractError(e);
+        const msg = mapContractError(e, t);
         setError(msg);
         setState("failed");
         throw e;
       }
     },
-    [startTransaction],
+    [startTransaction, t],
   );
 
   const isBusy = useMemo(() => isTxBusy(state), [state]);
@@ -128,6 +130,7 @@ export function useTransactionFlow(_options: UseTransactionFlowOptions = {}) {
 /** 质押：approve（如需）→ stake，两笔独立入队 Tx Center */
 export function useStakeWithApprovalFlow(flowOptions?: UseTransactionFlowOptions) {
   const flow = useTransactionFlow(flowOptions);
+  const { t } = useI18n();
   const [flowLock, setFlowLock] = useState(false);
 
   const runStakeFlow = useCallback(
@@ -142,7 +145,7 @@ export function useStakeWithApprovalFlow(flowOptions?: UseTransactionFlowOptions
         if (cfg.needsApproval) {
           await flow.executeApprove(
             {
-              actionLabel: UI_COPY.tx.approveStakeToken,
+              actionLabel: t("txCenter.approveStakeToken"),
               txType: "approve",
               metadata: md,
               onConfirmed: () => cfg.refetchAllowance(),
@@ -154,7 +157,7 @@ export function useStakeWithApprovalFlow(flowOptions?: UseTransactionFlowOptions
 
         await flow.executeWrite(
           {
-            actionLabel: UI_COPY.tx.stake,
+            actionLabel: t("txCenter.typeStake"),
             txType: "stake",
             metadata: md,
             onConfirmed: () => cfg.invalidate(),
@@ -166,7 +169,7 @@ export function useStakeWithApprovalFlow(flowOptions?: UseTransactionFlowOptions
         setFlowLock(false);
       }
     },
-    [flow],
+    [flow, t],
   );
 
   const busy = useMemo(() => flowLock || isTxBusy(flow.state), [flow.state, flowLock]);

@@ -20,12 +20,14 @@ import { POOL_COPY } from "@/lib/appMode";
 import { getCompoundDisabledReason } from "@/lib/compoundHints";
 import { formatTokenDisplay } from "@/lib/format";
 import { formatCountdownHms } from "@/lib/timelockCountdown";
+import { useI18n } from "@/lib/i18n";
 import { parseUserInfoTuple } from "@/lib/userInfo";
 
 const copy = POOL_COPY.locked;
 
 /** 产品端：锁仓质押 */
 export function ProductLockedPoolPage() {
+  const { t } = useI18n();
   const { address } = useAccount();
   const pool = usePoolB();
   const flow = useWriteWithStatus();
@@ -34,19 +36,22 @@ export function ProductLockedPoolPage() {
   const userA = parseUserInfoTuple(pool.userA);
   const tvlB = pool.poolB?.totalStaked ?? 0n;
   const rrB = pool.poolB?.rewardRate ?? 0n;
-  const yourRewards = user.rewards + userA.rewards;
+  const yourRewards = pool.pendingRewardB + pool.pendingRewardA;
   const busy = flow.state !== "idle";
 
   const compoundDisabledReason = useMemo(
     () =>
-      getCompoundDisabledReason({
-        compoundPreview: pool.compoundPreview,
-        status: pool.status,
-        globalBadDebt: pool.globalBadDebt,
-        claimCooldownRemainingSec: pool.claimCooldownRemainingSec,
-        canCompound: pool.canCompound,
-      }),
-    [pool.compoundPreview, pool.canCompound, pool.claimCooldownRemainingSec, pool.status, pool.globalBadDebt],
+      getCompoundDisabledReason(
+        {
+          compoundPreview: pool.compoundPreview,
+          status: pool.status,
+          globalBadDebt: pool.globalBadDebt,
+          claimCooldownRemainingSec: pool.claimCooldownRemainingSec,
+          canCompound: pool.canCompound,
+        },
+        t,
+      ),
+    [pool.compoundPreview, pool.canCompound, pool.claimCooldownRemainingSec, pool.status, pool.globalBadDebt, t],
   );
 
   const cooldownLabel =
@@ -55,7 +60,7 @@ export function ProductLockedPoolPage() {
   const runClaim = async () => {
     await flow.executeWrite(
       {
-        actionLabel: "领取奖励",
+        actionLabel: t("action.claim"),
         txType: "claim",
         metadata: { pool: "B", token: "TokenB" },
         onConfirmed: () => pool.refetchWalletAndPool(),
@@ -68,7 +73,7 @@ export function ProductLockedPoolPage() {
   const runCompound = async () => {
     await flow.executeWrite(
       {
-        actionLabel: "复利再投",
+        actionLabel: t("action.compound"),
         txType: "compound",
         metadata: { pool: "B", token: "TokenB" },
         onConfirmed: () => pool.refetchWalletAndPool(),
@@ -81,7 +86,7 @@ export function ProductLockedPoolPage() {
   const hasPosition = Boolean(address && (user.staked > 0n || yourRewards > 0n));
 
   const actionBlock = (
-    <ProductActionCard compact heading="质押">
+    <ProductActionCard compact heading={t("productPage.stakeHeading")}>
       <StakeWidget
         embedded
         compact
@@ -106,12 +111,11 @@ export function ProductLockedPoolPage() {
   return (
     <ProductPageShell poolAStakingToken={pool.poolA?.stakingToken} poolBStakingToken={pool.poolB?.stakingToken}>
       <ProductStakePageLayout
-        layout="split"
         hero={
           <div className="space-y-4 sm:space-y-5">
             <ProductPoolHero
-              title={copy.productTitle}
-              subtitle={copy.productSubtitle}
+              title={t("pool.locked.productTitle")}
+              subtitle={t("pool.locked.productSubtitle")}
               tokenSymbol={copy.stakeToken}
               rewardToken={copy.rewardToken}
               totalStakedWei={tvlB}
@@ -140,12 +144,14 @@ export function ProductLockedPoolPage() {
 
             {address && user.staked > 0n ? (
               <div className="dp-card p-5">
-                <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-500">锁仓进度</h2>
+                <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-500">{t("productPage.lockProgress")}</h2>
                 <div className="mt-4">
                   <LockProgress stakeTimestamp={pool.stakeTimestampB} unlockTime={pool.unlockTimeB} />
                 </div>
-                {cooldownLabel ? <p className="mt-3 text-xs text-amber-200/90">领取冷却：{cooldownLabel}</p> : null}
-                <FotClaimHint grossRewards={user.rewards} maxTransferFeeBP={pool.maxTransferFeeBP} />
+                {cooldownLabel ? (
+                  <p className="mt-3 text-xs text-amber-200/90">{t("productPage.claimCooldown", { countdown: cooldownLabel })}</p>
+                ) : null}
+                <FotClaimHint grossRewards={pool.pendingRewardB} maxTransferFeeBP={pool.maxTransferFeeBP} />
               </div>
             ) : null}
 

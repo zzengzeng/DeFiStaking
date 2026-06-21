@@ -10,20 +10,18 @@ import { http } from "wagmi";
 import { mainnet, sepolia } from "wagmi/chains";
 
 import { isMainnetTarget } from "@/config/chains";
-
-const walletConnectProjectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID?.trim() ?? "";
+import {
+  hasWalletConnect,
+  walletConnectProjectIdOrPlaceholder,
+} from "@/config/walletConnect";
 
 const sepoliaRpc = process.env.NEXT_PUBLIC_RPC_URL_SEPOLIA ?? "https://sepolia.drpc.org";
 const mainnetRpc = process.env.NEXT_PUBLIC_RPC_URL_MAINNET;
 
-/** WalletConnect 项目 ID（https://cloud.walletconnect.com） */
-export const hasWalletConnect = walletConnectProjectId.length > 0;
-
 const rainbowBase = {
   appName: "DualPool Staking",
   appDescription: "双池质押 · 灵活池与锁仓池",
-  // connectorsForWallets / getDefaultConfig 要求非空；未配置 WC 时仅用浏览器扩展钱包
-  projectId: walletConnectProjectId || "00000000000000000000000000000000",
+  projectId: walletConnectProjectIdOrPlaceholder,
   ssr: true as const,
 };
 
@@ -65,4 +63,12 @@ function buildWagmiConfig() {
   });
 }
 
-export const wagmiConfig = buildWagmiConfig();
+let wagmiConfigSingleton: ReturnType<typeof buildWagmiConfig> | undefined;
+
+/** 仅在客户端挂载 Web3Provider 时构建，避免 SSR 侧效（WalletConnect / indexedDB） */
+export function getWagmiConfig() {
+  if (!wagmiConfigSingleton) {
+    wagmiConfigSingleton = buildWagmiConfig();
+  }
+  return wagmiConfigSingleton;
+}

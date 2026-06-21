@@ -5,7 +5,8 @@ import { useAccount, useWriteContract } from "wagmi";
 import { dualPoolStakingAbi } from "@/contracts/abis/dualPoolStaking";
 import { contractAddresses } from "@/contracts/addresses";
 import { useStaking } from "@/hooks/useStaking";
-import { parseUserInfoTuple } from "@/lib/userInfo";
+
+export type ForceClaimBlockReason = "notAvailable" | "paused" | "emergency" | "cooldown" | "noRewards";
 
 /** 跨池紧急领取：仅 shutdown 或存在 badDebt 时链上允许。 */
 export function useForceClaimAll() {
@@ -13,8 +14,8 @@ export function useForceClaimAll() {
   const { writeContractAsync } = useWriteContract();
   const staking = useStaking();
 
-  const rewardsA = parseUserInfoTuple(staking.userA).rewards;
-  const rewardsB = parseUserInfoTuple(staking.userB).rewards;
+  const rewardsA = staking.pendingRewardA;
+  const rewardsB = staking.pendingRewardB;
   const totalRewards = rewardsA + rewardsB;
 
   const pathAvailable = staking.status === "SHUTDOWN" || staking.globalBadDebt > 0n;
@@ -31,16 +32,16 @@ export function useForceClaimAll() {
     claimCooldownRemainingSec === 0n &&
     totalRewards > 0n;
 
-  const forceClaimDisabledReason = !pathAvailable
-    ? "forceClaimAll 仅在 SHUTDOWN 或存在 badDebt 时可用；正常态请用 claimA / claimB"
+  const forceClaimBlockReason: ForceClaimBlockReason | null = !pathAvailable
+    ? "notAvailable"
     : staking.status === "PAUSED"
-      ? "协议已暂停"
+      ? "paused"
       : staking.status === "EMERGENCY"
-        ? "紧急模式（未 shutdown）请先 emergencyWithdraw，shutdown 后再 forceClaimAll"
+        ? "emergency"
         : claimCooldownRemainingSec > 0n
-          ? "领取冷却中"
+          ? "cooldown"
           : totalRewards === 0n
-            ? "暂无可领取奖励"
+            ? "noRewards"
             : null;
 
   const writeForceClaimAll = () =>
@@ -54,7 +55,7 @@ export function useForceClaimAll() {
   return {
     pathAvailable,
     canForceClaimAll,
-    forceClaimDisabledReason,
+    forceClaimBlockReason,
     claimCooldownRemainingSec,
     totalRewards,
     rewardsA,

@@ -1,3 +1,7 @@
+import type { TranslateFn } from "@/lib/i18n";
+import { translate } from "@/lib/i18n";
+import { useLocaleStore } from "@/store/useLocaleStore";
+
 /** 尝试提取 viem / 钱包返回的 revert 或短错误信息。 */
 export function extractRevertReason(error: unknown): string {
   if (error && typeof error === "object") {
@@ -11,39 +15,46 @@ export function extractRevertReason(error: unknown): string {
   return String(error).slice(0, 500);
 }
 
-/** 合约错误码映射：将链上 revert 转为用户可读提示。 */
-export function mapContractError(error: unknown): string {
+/**
+ * 将链上 revert / 钱包错误映射为 i18n 文案。
+ * @param t 组件内传 `useI18n().t`；非 React 场景用 `mapContractErrorLocalized`
+ */
+export function mapContractError(error: unknown, t: TranslateFn): string {
   const text = extractRevertReason(error);
 
-  if (text.includes("BadDebtExists") || text.toLowerCase().includes("bad debt")) return "存在 bad debt，当前不允许 claim。";
-  if (text.includes("BelowMinClaim")) return "领取金额低于最小 claim 限制。";
-  if (text.includes("TimelockNotReady")) return "Timelock 未到可执行时间，请稍后再执行。";
-  if (text.includes("TimelockParamChanged")) return "当前参数和已排队提案不一致，请先取消再重新排队。";
-  if (text.includes("ForceClaimAllNotAvailable")) return "forceClaimAll 仅在关停或存在坏账时可用，请使用 claimA/claimB。";
-  if (text.includes("EmergencyModeActive") || text.includes("EmergencyActive")) return "协议处于 Emergency 模式，当前操作不可用。";
-  if (text.includes("InvalidRecipient")) return "收款地址不可用：不能设置为质押合约自身，请更换治理金库或多签地址。";
-  if (text.includes("ExcessiveTransferFee")) return "代币转账税超过协议当前 maxTransferFeeBP 容忍上限，交易已保护性回滚。";
-  if (text.includes("InvalidMaxTransferFeeBp")) return "maxTransferFeeBP 参数无效，不能超过 10000 bp。";
-  if (text.includes("NotAContract")) return "模块地址无合约代码，请确认部署地址和网络。";
-  if (text.includes("InvariantViolation")) {
-    return "奖励池资金与负债校验未通过（InvariantViolation）。请先由运营向质押合约注入 TokenB（notifyReward），或向合约直接转入少量 TokenB 补足账面缺口后再试。";
+  if (text.includes("BadDebtExists") || text.toLowerCase().includes("bad debt")) return t("errors.badDebtExists");
+  if (text.includes("BelowMinClaim")) return t("errors.belowMinClaim");
+  if (text.includes("TimelockNotReady")) return t("errors.timelockNotReady");
+  if (text.includes("TimelockParamChanged")) return t("errors.timelockParamChanged");
+  if (text.includes("ForceClaimAllNotAvailable")) return t("errors.forceClaimAllNotAvailable");
+  if (text.includes("EmergencyModeActive") || text.includes("EmergencyActive")) return t("errors.emergencyModeActive");
+  if (text.includes("InvalidRecipient")) return t("errors.invalidRecipient");
+  if (text.includes("ExcessiveTransferFee")) return t("errors.excessiveTransferFee");
+  if (text.includes("InvalidMaxTransferFeeBp")) return t("errors.invalidMaxTransferFeeBp");
+  if (text.includes("NotAContract")) return t("errors.notAContract");
+  if (text.includes("InvariantViolation")) return t("errors.invariantViolation");
+  if (text.includes("ExceedsTVLCap")) return t("errors.exceedsTvlCap");
+  if (text.includes("UnlockTimePending")) return t("errors.unlockTimePending");
+  if (text.includes("InsufficientPending")) return t("errors.insufficientPending");
+  if (text.includes("User rejected") || text.includes("rejected") || text.includes("denied transaction")) {
+    return t("errors.userRejected");
   }
-  if (text.includes("ExceedsTVLCap")) return "超过 TVL 上限，无法继续质押。";
-  if (text.includes("UnlockTimePending")) return "锁仓尚未到期，当前不能正常退出。";
-  if (text.includes("InsufficientPending")) return "系统待发奖励不足，请稍后重试。";
-  if (text.includes("User rejected") || text.includes("rejected") || text.includes("denied transaction")) return "你已取消钱包签名。";
   if (text.includes("insufficient allowance") || text.includes("ERC20: insufficient allowance")) {
-    return "代币授权不足：请先对 ZZTKA（Pool A）或 ZZTKB（Pool B）执行 Approve，再质押。";
+    return t("errors.insufficientAllowance");
   }
   if (text.includes("insufficient balance") || text.includes("ERC20: transfer amount exceeds balance")) {
-    return "钱包代币余额不足。TokenA 可在首页领取新用户空投；TokenB 需通过质押奖励或转入获取。";
+    return t("errors.insufficientBalance");
   }
-  if (text.includes("gas limit too high")) {
-    return "交易模拟失败（合约会 revert）。新部署常见原因：① 未领 TokenA 空投 ② 未 Approve ③ 运营注资未做。协议当前未暂停；若刚改 .env.local 请重启 yarn dev。";
-  }
-  if (text.includes("NoRewardsToClaim") || text.includes("no rewards to claim")) return "当前没有可领取的奖励。";
-  if (text.includes("NoRewardsToCompound") || text.includes("nothing to compound")) return "当前没有可复投的奖励。";
-  if (text.includes("ClaimCooldown") || text.includes("claim cooldown")) return "Claim 冷却尚未结束，请稍后再试。";
+  if (text.includes("gas limit too high")) return t("errors.gasLimitTooHigh");
+  if (text.includes("NoRewardsToClaim") || text.includes("no rewards to claim")) return t("errors.noRewardsToClaim");
+  if (text.includes("NoRewardsToCompound") || text.includes("nothing to compound")) return t("errors.noRewardsToCompound");
+  if (text.includes("ClaimCooldown") || text.includes("claim cooldown")) return t("errors.claimCooldown");
 
-  return text.length > 0 ? text : "交易失败，请检查参数和链上状态后重试。";
+  return text.length > 0 ? text : t("errors.genericFailed");
+}
+
+/** 读取 persist 中的 locale，供 executeTransaction / toast 等非组件路径使用 */
+export function mapContractErrorLocalized(error: unknown): string {
+  const locale = useLocaleStore.getState().locale;
+  return mapContractError(error, (key, vars) => translate(locale, key, vars));
 }

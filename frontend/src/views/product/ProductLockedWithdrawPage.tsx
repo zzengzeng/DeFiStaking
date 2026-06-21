@@ -18,12 +18,14 @@ import { usePoolB } from "@/hooks/usePoolB";
 import { useWriteWithStatus } from "@/hooks/useWriteWithStatus";
 import { POOL_COPY } from "@/lib/appMode";
 import { formatTokenDisplay } from "@/lib/format";
+import { useI18n } from "@/lib/i18n";
 import { parseUserInfoTuple } from "@/lib/userInfo";
 
 const copy = POOL_COPY.locked;
 
 /** 产品端：赎回专页（锁仓池） */
 export function ProductLockedWithdrawPage() {
+  const { t } = useI18n();
   const { address } = useAccount();
   const pool = usePoolB();
   const flow = useWriteWithStatus();
@@ -36,7 +38,7 @@ export function ProductLockedWithdrawPage() {
   const runWithdraw = async (amt: string) => {
     await flow.executeWrite(
       {
-        actionLabel: "赎回（锁仓池）",
+        actionLabel: t("action.withdrawLocked"),
         txType: "withdraw",
         metadata: { pool: "B", token: "TokenB", amount: amt },
         onConfirmed: () => pool.refetchWalletAndPool(),
@@ -49,7 +51,7 @@ export function ProductLockedWithdrawPage() {
   const runClaim = async () => {
     await flow.executeWrite(
       {
-        actionLabel: "领取奖励（锁仓池）",
+        actionLabel: t("action.claimLockedPool"),
         txType: "claim",
         metadata: { pool: "B", token: "TokenB" },
         onConfirmed: () => pool.refetchWalletAndPool(),
@@ -59,12 +61,11 @@ export function ProductLockedWithdrawPage() {
     flow.reset({ closeGlobal: true });
   };
 
-  const hasPosition = Boolean(
-    address && (user.staked > 0n || user.rewards > 0n),
-  );
+  const pendingB = pool.pendingRewardB;
+  const hasPosition = Boolean(address && (user.staked > 0n || pendingB > 0n));
 
   const actionBlock = (
-    <ProductActionCard compact heading="赎回操作">
+    <ProductActionCard compact heading={t("productPage.withdrawHeading")}>
       <WithdrawWidget
         embedded
         tokenSymbol={copy.stakeToken}
@@ -87,18 +88,14 @@ export function ProductLockedWithdrawPage() {
   );
 
   return (
-    <ProductPageShell
-      poolAStakingToken={pool.poolA?.stakingToken}
-      poolBStakingToken={pool.poolB?.stakingToken}
-    >
+    <ProductPageShell poolAStakingToken={pool.poolA?.stakingToken} poolBStakingToken={pool.poolB?.stakingToken}>
       <ProductStakePageLayout
-        layout="split"
         hero={
           <div className="space-y-4 sm:space-y-5">
             <ProductPageTitle
               centered
-              title="赎回质押"
-              subtitle="锁仓池赎回 TokenB；查看解锁进度与费用，选择合适时机赎回。"
+              title={t("productPage.withdrawTitle")}
+              subtitle={t("productPage.withdrawSubtitleLocked")}
             />
             <WithdrawPoolTabs />
             <ProductPoolMetrics
@@ -115,7 +112,7 @@ export function ProductLockedWithdrawPage() {
               <PositionSummary
                 stakedLabel={formatTokenDisplay(user.staked, "TokenB")}
                 stakedWei={user.staked}
-                rewardsWei={user.rewards}
+                rewardsWei={pendingB}
                 onClaim={() => void runClaim()}
                 claimDisabled={!pool.canClaim || busy}
                 claimBusy={busy}
@@ -124,11 +121,11 @@ export function ProductLockedWithdrawPage() {
             ) : null}
 
             <ProductWithdrawInfoPanel
-              poolName="锁仓池"
+              poolName={t("pool.locked.consoleTitle")}
               tokenSymbol={copy.stakeToken}
               rewardToken={copy.rewardToken}
               stakedWei={user.staked}
-              rewardsWei={user.rewards}
+              rewardsWei={pendingB}
               stakeHref={copy.earnHref}
               locked
             />
@@ -136,35 +133,22 @@ export function ProductLockedWithdrawPage() {
             {address && user.staked > 0n ? (
               <>
                 <div className="dp-card p-5 sm:p-6">
-                  <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-500">
-                    解锁进度
-                  </h2>
+                  <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-500">{t("productPage.unlockProgress")}</h2>
                   <div className="mt-4">
-                    <LockProgress
-                      stakeTimestamp={pool.stakeTimestampB}
-                      unlockTime={pool.unlockTimeB}
-                    />
+                    <LockProgress stakeTimestamp={pool.stakeTimestampB} unlockTime={pool.unlockTimeB} />
                   </div>
                 </div>
 
                 <div className="dp-card p-5 sm:p-6">
-                  <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-500">
-                    赎回提示
-                  </h2>
+                  <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-500">{t("productPage.withdrawHint")}</h2>
                   <div className="mt-3">
-                    <FotClaimHint
-                      grossRewards={user.rewards}
-                      maxTransferFeeBP={pool.maxTransferFeeBP}
-                    />
+                    <FotClaimHint grossRewards={pendingB} maxTransferFeeBP={pool.maxTransferFeeBP} />
                   </div>
                 </div>
               </>
             ) : null}
 
-            <ProductEscapeActions
-              onRefetch={() => pool.refetchWalletAndPool()}
-              emergencyPools={["B"]}
-            />
+            <ProductEscapeActions onRefetch={() => pool.refetchWalletAndPool()} emergencyPools={["B"]} />
           </>
         }
         action={actionBlock}

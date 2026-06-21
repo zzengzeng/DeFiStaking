@@ -2,7 +2,7 @@
 
 import { formatToken, safeNumber } from "@/lib/format";
 import { estAprPercent, estApyDailyCompoundPercent, userSharePercent } from "@/lib/poolMetrics";
-import { CONSOLE_COPY } from "@/lib/consoleCopy";
+import { useConsoleCopy } from "@/lib/consoleCopy";
 
 type Props = {
   variant?: "product" | "console";
@@ -24,6 +24,7 @@ export function PoolHeaderStats({
   userStakedWei,
   walletConnected,
 }: Props) {
+  const copy = useConsoleCopy();
   const apr = estAprPercent(rewardRateWei, totalStakedWei);
   const apy = estApyDailyCompoundPercent(apr);
   const sharePct = walletConnected && totalStakedWei > 0n ? userSharePercent(userStakedWei, totalStakedWei) : null;
@@ -33,33 +34,33 @@ export function PoolHeaderStats({
       <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">{poolLabel}</div>
       <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div className="min-w-0 rounded-xl border border-zinc-800 bg-zinc-950/80 p-3">
-          <div className="text-xs text-zinc-500">{CONSOLE_COPY.stats.tvl}</div>
+          <div className="text-xs text-zinc-500">{copy.stats.tvl}</div>
           <div className="mt-1 break-words font-mono text-base font-semibold text-zinc-100 sm:text-lg">
             {formatToken(totalStakedWei)} {tokenSymbol}
           </div>
         </div>
         <div className="min-w-0 rounded-xl border border-zinc-800 bg-zinc-950/80 p-3">
-          <div className="text-xs text-zinc-500">{CONSOLE_COPY.stats.apr}</div>
+          <div className="text-xs text-zinc-500">{copy.stats.apr}</div>
           <div className="mt-1 text-base font-semibold text-zinc-100 sm:text-lg">{safeNumber(apr).toFixed(2)}%</div>
         </div>
         <div className="min-w-0 rounded-xl border border-zinc-800 bg-zinc-950/80 p-3">
-          <div className="text-xs text-zinc-500">{CONSOLE_COPY.stats.apy}</div>
+          <div className="text-xs text-zinc-500">{copy.stats.apy}</div>
           <div
             className="mt-1 text-base font-semibold text-emerald-200/90 sm:text-lg"
-            title={apy === null ? "APR 过高，日复利近似无意义" : undefined}
+            title={apy === null ? copy.stats.apyTooHigh : undefined}
           >
             {apy === null ? "—" : `${safeNumber(apy).toFixed(2)}%`}
           </div>
         </div>
         <div className="min-w-0 rounded-xl border border-zinc-800 bg-zinc-950/80 p-3">
-          <div className="text-xs text-zinc-500">{CONSOLE_COPY.stats.yourShare}</div>
+          <div className="text-xs text-zinc-500">{copy.stats.yourShare}</div>
           <div className="mt-1 text-base font-semibold text-sky-200/90 sm:text-lg">
             {!walletConnected ? "—" : sharePct !== null && sharePct > 0 ? `${safeNumber(sharePct).toFixed(4)}%` : "0%"}
           </div>
         </div>
       </div>
       {variant === "console" ? (
-        <p className="mt-3 text-[11px] leading-relaxed text-zinc-600">{CONSOLE_COPY.stats.footnote}</p>
+        <p className="mt-3 text-[11px] leading-relaxed text-zinc-600">{copy.stats.footnote}</p>
       ) : null}
     </div>
   );

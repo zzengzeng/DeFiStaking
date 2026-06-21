@@ -1,4 +1,5 @@
 import type { CompoundPreview } from "@/components/product/widgets/PositionSummary";
+import type { TranslateFn } from "@/lib/i18n";
 import { formatCountdownHms } from "@/lib/timelockCountdown";
 
 type CompoundContext = {
@@ -10,15 +11,17 @@ type CompoundContext = {
 };
 
 /** 用户可读的复利不可用原因（产品端展示）。 */
-export function getCompoundDisabledReason(ctx: CompoundContext): string | null {
+export function getCompoundDisabledReason(ctx: CompoundContext, t: TranslateFn): string | null {
   if (ctx.canCompound) return null;
   if (ctx.compoundPreview.totalWei <= 0n) {
-    return "暂无待领奖励。质押并等待收益累积后，可将双池 TokenB 奖励复利到锁仓池本金。";
+    return t("compound.noRewardsReason");
   }
-  if (ctx.status !== "NORMAL") return "协议非正常状态，暂不可复利再投。";
-  if (ctx.globalBadDebt > 0n) return "协议存在坏账，暂不可复利再投。";
+  if (ctx.status !== "NORMAL") return t("compound.abnormalStatus");
+  if (ctx.globalBadDebt > 0n) return t("compound.badDebt");
   if (ctx.claimCooldownRemainingSec > 0n) {
-    return `领取/复利冷却中，${formatCountdownHms(Number(ctx.claimCooldownRemainingSec))} 后可操作。`;
+    return t("compound.cooldown", {
+      countdown: formatCountdownHms(Number(ctx.claimCooldownRemainingSec)),
+    });
   }
-  return "当前不可复利再投。";
+  return t("compound.unavailable");
 }

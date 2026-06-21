@@ -2,6 +2,8 @@
 
 import clsx from "clsx";
 
+import { TokenIcon } from "@/components/TokenIcon";
+
 type PoolTab = {
   id: string;
   label: string;
@@ -24,13 +26,14 @@ export function PoolTabs({ tabs, activeId, onChange }: Props) {
           type="button"
           onClick={() => onChange(tab.id)}
           className={clsx(
-            "min-h-[36px] flex-1 rounded-lg px-3 py-1.5 text-sm font-medium transition",
+            "flex min-h-[36px] flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-medium transition sm:px-3",
             activeId === tab.id
               ? "bg-[var(--dp-accent)] text-black"
               : "text-zinc-400 hover:text-zinc-200",
           )}
         >
-          {tab.label}
+          <TokenIcon symbol={tab.token} size="xs" className={activeId === tab.id ? "ring-1 ring-black/10" : undefined} />
+          <span className="truncate">{tab.label}</span>
         </button>
       ))}
     </div>

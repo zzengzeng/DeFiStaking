@@ -17,8 +17,10 @@ import { contractAddresses } from "@/contracts/addresses";
 import { usePoolA } from "@/hooks/usePoolA";
 import { usePoolAStakeSince } from "@/hooks/usePoolAStakeSince";
 import { useWriteWithStatus } from "@/hooks/useWriteWithStatus";
-import { CONSOLE_COPY } from "@/lib/consoleCopy";
+import { useConsoleCopy } from "@/lib/consoleCopy";
 import { formatToken } from "@/lib/format";
+import { useI18n } from "@/lib/i18n";
+import type { TranslateFn } from "@/lib/i18n";
 import { formatCountdownHms } from "@/lib/timelockCountdown";
 
 const computeWithdrawPreviewA = (amount: bigint) => ({
@@ -30,19 +32,26 @@ const computeWithdrawPreviewA = (amount: bigint) => ({
   isLocked: false,
 });
 
-function formatStakeDuration(stakeSinceTs: number | undefined, userStakeA: bigint) {
+function formatStakeDuration(t: TranslateFn, stakeSinceTs: number | undefined, userStakeA: bigint) {
   if (!stakeSinceTs || userStakeA <= 0n) return null;
   const delta = Math.max(0, Math.floor(Date.now() / 1000) - stakeSinceTs);
   const days = Math.floor(delta / 86400);
   const hours = Math.floor((delta % 86400) / 3600);
   const mins = Math.floor((delta % 3600) / 60);
-  if (days > 0) return `${days} 天 ${hours} 小时 ${mins} 分钟`;
-  if (hours > 0) return `${hours} 小时 ${mins} 分钟`;
-  return `${mins} 分钟`;
+  if (days > 0) return t("console.poolA.stakeDurationFull", { days, hours, mins });
+  if (hours > 0) return t("console.poolA.stakeDurationHours", { hours, mins });
+  return t("console.poolA.stakeDurationMins", { mins });
 }
 
-/** 控制台：灵活池完整合约交互视图 */
+/**
+ * 灵活池（Pool A）控制台：完整 stake/withdraw/claim/emergency + 原始 userInfo 字段。
+ * 数据：`usePoolA`；写交易：`useWriteWithStatus`；文案：`useConsoleCopy` + `useI18n`。
+ *
+ * @see views/console/README.md
+ */
 export function ConsolePoolAPage() {
+  const { t } = useI18n();
+  const copy = useConsoleCopy();
   const { address, isConnecting } = useAccount();
   const pool = usePoolA();
   const flow = useWriteWithStatus();
@@ -52,7 +61,7 @@ export function ConsolePoolAPage() {
   const tvlA = pool.poolA?.totalStaked ?? 0n;
   const rrA = pool.poolA?.rewardRate ?? 0n;
   const userStakeA = pool.userA?.[0] ?? 0n;
-  const pendingA = pool.userA?.[1] ?? 0n;
+  const pendingA = pool.pendingRewardA;
   const noPosition = Boolean(address) && !loading && userStakeA <= 0n;
   const { data: stakeSinceTs } = usePoolAStakeSince(userStakeA);
   const busy = flow.state !== "idle";
@@ -61,7 +70,7 @@ export function ConsolePoolAPage() {
     async (amt: string) => {
       await flow.executeWrite(
         {
-          actionLabel: "赎回（灵活池）",
+          actionLabel: copy.poolA.actionWithdraw,
           txType: "withdraw",
           metadata: { pool: "A", token: "TokenA", amount: amt },
           onConfirmed: () => pool.refetchWalletAndPool(),
@@ -70,13 +79,13 @@ export function ConsolePoolAPage() {
       );
       flow.reset({ closeGlobal: true });
     },
-    [flow, pool],
+    [copy.poolA.actionWithdraw, flow, pool],
   );
 
   const runClaim = async () => {
     await flow.executeWrite(
       {
-        actionLabel: "领取（灵活池）",
+        actionLabel: copy.poolA.actionClaim,
         txType: "claim",
         metadata: { pool: "A", token: "TokenB" },
         onConfirmed: () => pool.refetchWalletAndPool(),
@@ -89,7 +98,7 @@ export function ConsolePoolAPage() {
   const runEmergencyA = async () => {
     await flow.executeWrite(
       {
-        actionLabel: CONSOLE_COPY.poolA.emergencyTitle,
+        actionLabel: copy.poolA.emergencyTitle,
         txType: "emergency",
         metadata: { pool: "A", token: "TokenA" },
         onConfirmed: () => pool.refetchWalletAndPool(),
@@ -101,21 +110,21 @@ export function ConsolePoolAPage() {
 
   const cooldownLabel =
     pool.claimCooldownRemainingSec > 0n ? formatCountdownHms(Number(pool.claimCooldownRemainingSec)) : null;
-  const stakeDurationLabel = formatStakeDuration(stakeSinceTs ?? undefined, userStakeA);
+  const stakeDurationLabel = formatStakeDuration(t, stakeSinceTs ?? undefined, userStakeA);
 
   return (
     <div className="min-w-0 space-y-4 sm:space-y-5">
       <section className="rounded-xl border border-zinc-800 bg-zinc-900/70 p-4 sm:p-5">
-        <div className="text-xs font-medium uppercase tracking-wide text-amber-200/80">{CONSOLE_COPY.poolA.eyebrow}</div>
-        <h1 className="mt-2 font-mono text-xl font-semibold text-zinc-100 sm:text-2xl">{CONSOLE_COPY.poolA.title}</h1>
-        <p className="mt-2 max-w-2xl text-sm leading-relaxed text-zinc-500">{CONSOLE_COPY.poolA.desc}</p>
+        <div className="text-xs font-medium uppercase tracking-wide text-amber-200/80">{copy.poolA.eyebrow}</div>
+        <h1 className="mt-2 font-mono text-xl font-semibold text-zinc-100 sm:text-2xl">{copy.poolA.title}</h1>
+        <p className="mt-2 max-w-2xl text-sm leading-relaxed text-zinc-500">{copy.poolA.desc}</p>
       </section>
 
       <DeploymentMismatchAlert poolAStakingToken={pool.poolA?.stakingToken} poolBStakingToken={pool.poolB?.stakingToken} />
 
       <PoolHeaderStats
         variant="console"
-        poolLabel={CONSOLE_COPY.poolA.metrics}
+        poolLabel={copy.poolA.metrics}
         tokenSymbol="TokenA"
         totalStakedWei={tvlA}
         rewardRateWei={rrA}
@@ -127,14 +136,14 @@ export function ConsolePoolAPage() {
 
       <ConfirmActionModal
         open={emergencyOpen}
-        title={CONSOLE_COPY.poolA.emergencyTitle}
+        title={copy.poolA.emergencyTitle}
         variant="danger"
         rows={[
-          { label: CONSOLE_COPY.poolA.principalReturned, value: `${formatToken(userStakeA)} TokenA` },
-          { label: CONSOLE_COPY.poolA.rewardsForfeited, value: `${formatToken(pendingA)} TokenB` },
+          { label: copy.poolA.principalReturned, value: `${formatToken(userStakeA)} TokenA` },
+          { label: copy.poolA.rewardsForfeited, value: `${formatToken(pendingA)} TokenB` },
         ]}
-        warning={CONSOLE_COPY.poolA.emergencyWarning}
-        confirmText={CONSOLE_COPY.poolA.emergencyConfirm}
+        warning={copy.poolA.emergencyWarning}
+        confirmText={copy.poolA.emergencyConfirm}
         busy={busy}
         onClose={() => !busy && setEmergencyOpen(false)}
         onConfirm={async () => {
@@ -150,8 +159,8 @@ export function ConsolePoolAPage() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <StakeCard
           variant="console"
-          title={CONSOLE_COPY.poolA.stakeTitle}
-          hint={CONSOLE_COPY.poolA.stakeHint}
+          title={copy.poolA.stakeTitle}
+          hint={copy.poolA.stakeHint}
           disabled={!pool.canStake}
           balanceWei={pool.tokenABalance}
           balanceSymbol="TokenA"
@@ -168,7 +177,7 @@ export function ConsolePoolAPage() {
           }}
         />
         <WithdrawPanel
-          title={CONSOLE_COPY.poolA.withdrawTitle}
+          title={copy.poolA.withdrawTitle}
           computePreview={computeWithdrawPreviewA}
           protocolStatus={pool.status}
           maxWithdrawWei={userStakeA}
@@ -181,10 +190,10 @@ export function ConsolePoolAPage() {
       </div>
 
       <div className="min-w-0 rounded-xl border border-zinc-800 bg-zinc-900/70 p-3 sm:p-4">
-        <h3 className="font-mono text-lg font-semibold text-zinc-100">{CONSOLE_COPY.poolA.position}</h3>
+        <h3 className="font-mono text-lg font-semibold text-zinc-100">{copy.poolA.position}</h3>
         {!address && (
           <div className="mt-3">
-            <ProductStateCard compact title={CONSOLE_COPY.common.walletNotConnected} description={CONSOLE_COPY.poolA.walletDesc} />
+            <ProductStateCard compact title={copy.common.walletNotConnected} description={copy.poolA.walletDesc} />
           </div>
         )}
         {address && loading ? (
@@ -194,36 +203,36 @@ export function ConsolePoolAPage() {
         ) : null}
         {address && !loading && noPosition && (
           <div className="mt-3">
-            <ProductStateCard compact title={CONSOLE_COPY.common.noPosition} description={CONSOLE_COPY.poolA.noPositionDesc} />
+            <ProductStateCard compact title={copy.common.noPosition} description={copy.poolA.noPositionDesc} />
           </div>
         )}
         {address && !loading && !noPosition && (
           <>
             <p className="mt-2 text-sm text-zinc-400">
-              {CONSOLE_COPY.poolA.staked}: <span className="font-mono text-zinc-200">{formatToken(userStakeA)}</span> TokenA
+              {copy.poolA.staked}: <span className="font-mono text-zinc-200">{formatToken(userStakeA)}</span> TokenA
             </p>
             <p className="text-sm text-zinc-400">
-              {CONSOLE_COPY.poolA.pendingRewards}: <span className="font-mono text-emerald-300/90">{formatToken(pendingA)}</span> TokenB
+              {copy.poolA.pendingRewards}: <span className="font-mono text-emerald-300/90">{formatToken(pendingA)}</span> TokenB
             </p>
             {stakeDurationLabel ? (
               <p className="text-sm text-zinc-400">
-                {CONSOLE_COPY.poolA.stakingDuration}: <span className="font-mono text-zinc-200">{stakeDurationLabel}</span>
+                {copy.poolA.stakingDuration}: <span className="font-mono text-zinc-200">{stakeDurationLabel}</span>
               </p>
             ) : null}
             <p className="text-sm text-zinc-400">
-              {CONSOLE_COPY.poolA.rewardPaidLifetime}: <span className="font-mono text-zinc-500">{formatToken(pool.userA?.[2] ?? 0n)}</span>
+              {copy.poolA.rewardPaidLifetime}: <span className="font-mono text-zinc-500">{formatToken(pool.userA?.[2] ?? 0n)}</span>
             </p>
           </>
         )}
         {cooldownLabel ? (
           <p className="mt-2 text-xs text-amber-200/90">
-            {CONSOLE_COPY.poolA.claimCooldown}: {cooldownLabel}
+            {copy.poolA.claimCooldown}: {cooldownLabel}
           </p>
         ) : null}
         <FotClaimHint grossRewards={pendingA} maxTransferFeeBP={pool.maxTransferFeeBP} />
         <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
           <ConsoleButton fullWidth disabled={!pool.canClaim || busy} onClick={() => void runClaim()}>
-            {busy ? CONSOLE_COPY.common.pending : CONSOLE_COPY.common.claim}
+            {busy ? copy.common.pending : copy.common.claim}
           </ConsoleButton>
           <ConsoleButton
             fullWidth
@@ -231,17 +240,17 @@ export function ConsolePoolAPage() {
             disabled={!pool.canEmergencyWithdraw || busy}
             onClick={() => setEmergencyOpen(true)}
           >
-            {CONSOLE_COPY.common.emergencyWithdraw}
+            {copy.common.emergencyWithdraw}
           </ConsoleButton>
         </div>
         {pool.claimDisabledReason ? (
           <p className="mt-2 text-xs text-zinc-500">
-            {CONSOLE_COPY.poolA.claimUnavailable}: {pool.claimDisabledReason}
+            {copy.poolA.claimUnavailable}: {pool.claimDisabledReason}
           </p>
         ) : null}
         {pool.emergencyDisabledReason ? (
           <p className="text-xs text-zinc-500">
-            {CONSOLE_COPY.poolA.emergencyUnavailable}: {pool.emergencyDisabledReason}
+            {copy.poolA.emergencyUnavailable}: {pool.emergencyDisabledReason}
           </p>
         ) : null}
       </div>

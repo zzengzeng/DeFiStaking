@@ -4,6 +4,8 @@ import clsx from "clsx";
 import { useCallback, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
+import { useI18n } from "@/lib/i18n";
+
 type Align = "start" | "end";
 type Side = "top" | "bottom";
 
@@ -53,6 +55,7 @@ export function InfoTip({
   align = "start",
   side = "bottom",
 }: Props) {
+  const { t } = useI18n();
   const [visible, setVisible] = useState(false);
   const [pinned, setPinned] = useState(false);
   const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
@@ -153,7 +156,7 @@ export function InfoTip({
         <button
           ref={buttonRef}
           type="button"
-          aria-label={ariaLabel ?? "更多信息"}
+          aria-label={ariaLabel ?? t("common.moreInfo")}
           aria-describedby={visible ? tooltipId : undefined}
           aria-expanded={visible}
           onMouseEnter={show}

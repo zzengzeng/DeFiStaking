@@ -7,8 +7,13 @@ import { toast } from "sonner";
 
 import { ConfirmActionModal } from "@/components/ConfirmActionModal";
 import { ConnectWalletButton } from "@/components/ConnectWalletButton";
+import { NetworkFeeHint } from "@/components/NetworkFeeHint";
+import { TransactionPreview } from "@/components/product/TransactionPreview";
+import { TokenLabel } from "@/components/TokenLabel";
+import { UsdSubtext } from "@/components/UsdSubtext";
 import { bpToPercent, formatToken, safeNumber } from "@/lib/format";
 import { walletReceiveAfterFee } from "@/lib/fot";
+import { dateLocale, useI18n } from "@/lib/i18n";
 import { formatCountdownHms } from "@/lib/timelockCountdown";
 
 type Preview = {
@@ -50,9 +55,7 @@ function trimDecimalInput(raw: string): string {
   return s === "" ? "0" : s;
 }
 
-/**
- * 赎回组件：大输入、预计到账前置、费用拆解、全宽主按钮。
- */
+/** 赎回组件：大输入、预计到账前置、费用拆解、全宽主按钮。 */
 export function WithdrawWidget({
   tokenSymbol,
   computePreview,
@@ -66,6 +69,7 @@ export function WithdrawWidget({
   embedded = false,
 }: Props) {
   const { isConnected } = useAccount();
+  const { t, locale } = useI18n();
   const feeTiersVisible = showFeeTiers ?? Boolean(suggestion);
   const [amount, setAmount] = useState("");
   const [debouncedAmount, setDebouncedAmount] = useState("");
@@ -75,8 +79,8 @@ export function WithdrawWidget({
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const t = setInterval(() => setTick((x) => x + 1), 1000);
-    return () => clearInterval(t);
+    const timer = setInterval(() => setTick((x) => x + 1), 1000);
+    return () => clearInterval(timer);
   }, []);
 
   useEffect(() => {
@@ -109,7 +113,7 @@ export function WithdrawWidget({
       return {
         kind: "locked" as const,
         countdown: formatCountdownHms(Number(left)),
-        unlockDate: new Date(Number(unlockTime) * 1000).toLocaleString("zh-CN"),
+        unlockDate: new Date(Number(unlockTime) * 1000).toLocaleString(dateLocale(locale)),
         penalty: bpToPercent(penaltyFeeBP),
       };
     }
@@ -127,7 +131,7 @@ export function WithdrawWidget({
       };
     }
     return { kind: "optimal" as const };
-  }, [suggestion, tick]);
+  }, [suggestion, tick, locale]);
 
   const fotActive = maxTransferFeeBP > 0n;
   const walletEst = walletReceiveAfterFee(preview.netAmount < 0n ? 0n : preview.netAmount, maxTransferFeeBP);
@@ -144,7 +148,12 @@ export function WithdrawWidget({
   const openConfirm = () => {
     if (!amount || disabled || pending || parsedLive <= 0n) return;
     if (exceedsMax) {
-      toast.error("超过可赎回数量", { description: `最多 ${formatToken(maxWithdrawWei ?? 0n)} ${tokenSymbol}` });
+      toast.error(t("withdraw.exceedsToast"), {
+        description: t("withdraw.exceedsToastDesc", {
+          amount: formatToken(maxWithdrawWei ?? 0n),
+          token: tokenSymbol,
+        }),
+      });
       return;
     }
     setConfirmOpen(true);
@@ -168,76 +177,118 @@ export function WithdrawWidget({
     <>
       <ConfirmActionModal
         open={confirmOpen}
-        title="确认赎回"
+        title={t("withdraw.confirmTitle")}
         rows={[
-          { label: "赎回数量", value: `${formatToken(parsedLive)} ${tokenSymbol}` },
-          { label: "预计到账", value: `${formatToken(displayReceive)} ${tokenSymbol}` },
-          { label: "手续费", value: `${formatToken(previewInput.feeAmount)} (${bpToPercent(previewInput.feeBp)})` },
-          { label: "提前退出罚金", value: `${formatToken(previewInput.penaltyAmount)} (${bpToPercent(previewInput.penaltyBp)})` },
+          { label: t("withdraw.amount"), value: `${formatToken(parsedLive)} ${tokenSymbol}` },
+          { label: t("withdraw.receive"), value: `${formatToken(displayReceive)} ${tokenSymbol}` },
+          { label: t("withdraw.fee"), value: `${formatToken(previewInput.feeAmount)} (${bpToPercent(previewInput.feeBp)})` },
+          {
+            label: t("withdraw.earlyPenalty"),
+            value: `${formatToken(previewInput.penaltyAmount)} (${bpToPercent(previewInput.penaltyBp)})`,
+          },
         ]}
-        warning={
-          previewInput.isLocked
-            ? "锁仓期内赎回将产生罚金，请确认预计到账金额。"
-            : "网络 Gas 费用另计。金额为链上参数估算值。"
-        }
-        confirmText="确认赎回"
+        warning={previewInput.isLocked ? t("withdraw.lockedWarning") : t("withdraw.gasWarning")}
+        confirmText={t("withdraw.confirmBtn")}
         busy={pending}
         onClose={() => !pending && setConfirmOpen(false)}
         onConfirm={() => void submit()}
       />
 
-      {/* 预计到账大数字前置 */}
       <div className="rounded-xl border border-[var(--dp-border)] bg-[var(--dp-accent-muted)] px-4 py-3.5">
-        <div className="text-xs font-medium uppercase tracking-wide text-[var(--dp-accent)]">预计到账</div>
+        <div className="text-xs font-medium uppercase tracking-wide text-[var(--dp-accent)]">{t("withdraw.receive")}</div>
         <div className="mt-1 text-3xl font-bold tracking-tight text-zinc-50">
           {hasPosition || parsedLive > 0n ? formatToken(displayReceive, 18, 4) : "0"}
-          <span className="ml-2 text-lg font-semibold text-zinc-400">{tokenSymbol}</span>
+          <span className="ml-2 inline-flex align-middle">
+            <TokenLabel symbol={tokenSymbol} size="sm" symbolClassName="text-lg text-zinc-300" />
+          </span>
         </div>
+        {displayReceive > 0n ? (
+          <UsdSubtext amountWei={displayReceive} symbol={tokenSymbol} className="mt-1 block" />
+        ) : null}
         {fotActive ? (
           <p className="mt-1 text-xs text-zinc-500">
-            协议发出 {formatToken(preview.netAmount)} {tokenSymbol}，转账税最高 {bpToPercent(maxTransferFeeBP)} 由用户承担
+            {t("withdraw.fotProtocolLine", {
+              amount: formatToken(preview.netAmount),
+              token: tokenSymbol,
+              pct: bpToPercent(maxTransferFeeBP),
+            })}
           </p>
         ) : null}
       </div>
 
       <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
         <div className="rounded-lg border border-[var(--dp-border)] bg-[var(--dp-surface-raised)] px-3 py-2.5">
-          <div className="text-xs text-zinc-500">手续费</div>
+          <div className="text-xs text-zinc-500">{t("withdraw.fee")}</div>
           <div className="mt-0.5 font-medium text-zinc-200">
             {formatToken(preview.feeAmount)} <span className="text-zinc-500">({bpToPercent(preview.feeBp)})</span>
           </div>
         </div>
         <div className="rounded-lg border border-[var(--dp-border)] bg-[var(--dp-surface-raised)] px-3 py-2.5">
-          <div className="text-xs text-zinc-500">罚金</div>
+          <div className="text-xs text-zinc-500">{t("withdraw.penalty")}</div>
           <div className={`mt-0.5 font-medium ${preview.penaltyAmount > 0n ? "text-red-300" : "text-zinc-200"}`}>
             {formatToken(preview.penaltyAmount)} <span className="text-zinc-500">({bpToPercent(preview.penaltyBp)})</span>
           </div>
         </div>
       </div>
 
+      {parsedLive > 0n || hasPosition ? (
+        <div className="mt-4">
+          <TransactionPreview
+            rows={[
+              {
+                label: t("txPreview.principal"),
+                value: `${formatToken(inputAmount, 18, 4)} ${tokenSymbol}`,
+              },
+              {
+                label: t("txPreview.protocolPayout"),
+                value: `${formatToken(preview.netAmount < 0n ? 0n : preview.netAmount, 18, 4)} ${tokenSymbol}`,
+                subvalue: t("txPreview.grossAfterFee"),
+              },
+              {
+                label: t("txPreview.walletReceive"),
+                value: `${formatToken(displayReceive, 18, 4)} ${tokenSymbol}`,
+                subvalue: fotActive ? t("txPreview.fotEstimate", { pct: bpToPercent(maxTransferFeeBP) }) : undefined,
+                tone: "good",
+              },
+              {
+                label: t("txPreview.totalDeduction"),
+                value: `${formatToken(preview.feeAmount + preview.penaltyAmount, 18, 4)} ${tokenSymbol}`,
+                subvalue: t("txPreview.feePenaltyBreakdown", {
+                  fee: bpToPercent(preview.feeBp),
+                  penalty: bpToPercent(preview.penaltyBp),
+                }),
+                tone: preview.feeAmount + preview.penaltyAmount > 0n ? "warn" : "neutral",
+              },
+            ]}
+            footnote={fotActive ? t("txPreview.fotWithdrawFootnote") : t("txPreview.netFootnote")}
+          />
+        </div>
+      ) : null}
+
       {unlockHint?.kind === "locked" ? (
         <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-sm text-amber-100">
-          <div className="font-medium">锁仓中 · 剩余 {unlockHint.countdown}</div>
+          <div className="font-medium">{t("withdraw.lockedRemaining", { countdown: unlockHint.countdown })}</div>
           <div className="mt-1 text-xs text-amber-200/80">
-            解锁时间 {unlockHint.unlockDate}；提前退出罚金约 {unlockHint.penalty}
+            {t("withdraw.lockedPenalty", {
+              date: unlockHint.unlockDate,
+              penalty: unlockHint.penalty,
+            })}
           </div>
         </div>
       ) : unlockHint?.kind === "fee" ? (
         <div className="mt-3 rounded-lg border border-sky-500/25 bg-sky-500/10 px-3 py-2.5 text-sm text-sky-100">
-          <div className="font-medium">当前赎回费率 {unlockHint.fee}</div>
-          <div className="mt-1 text-xs text-sky-200/80">约 {unlockHint.countdown} 后费率可能更优</div>
+          <div className="font-medium">{t("withdraw.feeTier", { fee: unlockHint.fee })}</div>
+          <div className="mt-1 text-xs text-sky-200/80">{t("withdraw.feeTierNext", { countdown: unlockHint.countdown })}</div>
         </div>
       ) : feeTiersVisible ? (
-        <p className="mt-3 text-xs text-emerald-400/90">当前处于较优赎回窗口，无额外手续费。</p>
+        <p className="mt-3 text-xs text-emerald-400/90">{t("withdraw.optimal")}</p>
       ) : (
-        <p className="mt-3 text-xs text-zinc-500">灵活池无锁仓与赎回手续费。</p>
+        <p className="mt-3 text-xs text-zinc-500">{t("withdraw.flexibleNoFee")}</p>
       )}
 
       <div className="mt-4 flex items-center justify-between gap-3 text-sm font-medium text-zinc-400">
-        <span>赎回数量</span>
-        <span className="rounded-lg bg-[var(--dp-accent-muted)] px-2.5 py-1 text-sm font-semibold text-[var(--dp-accent)]">
-          {tokenSymbol}
-        </span>
+        <span>{t("withdraw.amount")}</span>
+        <TokenLabel symbol={tokenSymbol} size="sm" symbolClassName="text-sm text-[var(--dp-accent)]" />
       </div>
       <div className="mt-2 rounded-xl border border-[var(--dp-border)] bg-[var(--dp-surface-raised)] p-4">
         <input
@@ -252,7 +303,10 @@ export function WithdrawWidget({
         {hasPosition && isConnected ? (
           <div className="mt-2 flex items-center justify-between text-sm">
             <span className="text-zinc-500">
-              可赎回 {formatToken(maxWithdrawWei ?? 0n, 18, 4)} {tokenSymbol}
+              {t("withdraw.redeemable", {
+                amount: formatToken(maxWithdrawWei ?? 0n, 18, 4),
+                token: tokenSymbol,
+              })}
             </span>
             <button
               type="button"
@@ -260,18 +314,23 @@ export function WithdrawWidget({
               disabled={disabled || pending}
               className="font-semibold text-[var(--dp-accent)] hover:underline disabled:opacity-40"
             >
-              全部
+              {t("withdraw.all")}
             </button>
+          </div>
+        ) : null}
+        {parsedLive > 0n ? (
+          <div className="mt-1 flex justify-end">
+            <UsdSubtext amountWei={parsedLive} symbol={tokenSymbol} />
           </div>
         ) : null}
       </div>
 
-      {exceedsMax ? <p className="mt-2 text-xs text-red-400">超过可赎回余额</p> : null}
+      {exceedsMax ? <p className="mt-2 text-xs text-red-400">{t("withdraw.exceedsMax")}</p> : null}
 
       <div className="mt-5">
         {!isConnected ? (
           <ConnectWalletButton className="dp-button min-h-[52px] w-full rounded-xl text-base">
-            连接钱包以赎回
+            {t("withdraw.connect")}
           </ConnectWalletButton>
         ) : (
           <button
@@ -280,19 +339,31 @@ export function WithdrawWidget({
             disabled={disabled || pending || parsedLive <= 0n || !hasPosition}
             className="dp-button min-h-[52px] w-full rounded-xl text-base disabled:opacity-45"
           >
-            {pending ? "处理中…" : protocolStatus === "EMERGENCY" ? "赎回（紧急模式下请用紧急退出）" : "赎回"}
+            {pending
+              ? t("withdraw.busy")
+              : protocolStatus === "EMERGENCY"
+                ? t("withdraw.emergency")
+                : t("withdraw.submit")}
           </button>
         )}
       </div>
 
       {inputAmount > 0n && preview.feeAmount + preview.penaltyAmount > 0n ? (
         <p className="mt-3 text-center text-xs text-zinc-500">
-          总扣费约 {formatToken(preview.feeAmount + preview.penaltyAmount)} {tokenSymbol}
+          {t("withdraw.totalFeeApprox", {
+            amount: formatToken(preview.feeAmount + preview.penaltyAmount),
+            token: tokenSymbol,
+          })}
           {inputAmount > 0n
-            ? `（占 ${safeNumber(Number(((preview.feeAmount + preview.penaltyAmount) * 10_000n) / inputAmount) / 100).toFixed(2)}%）`
+            ? t("withdraw.pctOfTotal", {
+                pct: safeNumber(
+                  Number(((preview.feeAmount + preview.penaltyAmount) * 10_000n) / inputAmount) / 100,
+                ).toFixed(2),
+              })
             : ""}
         </p>
       ) : null}
+      <NetworkFeeHint className="mt-3" />
     </>
   );
 

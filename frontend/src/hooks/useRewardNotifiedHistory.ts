@@ -5,6 +5,7 @@ import { useChainId } from "wagmi";
 
 import type { IndexedNotifyReward } from "@/types/notifyRewardLog";
 
+/** 服务端索引的 RewardNotified 历史（`/api/notify-rewards`）；与 `useNotifyRewardLogs` 浏览器直扫互补。 */
 export function useRewardNotifiedHistory(enabled = true) {
   const chainId = useChainId();
   return useQuery({

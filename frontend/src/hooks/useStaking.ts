@@ -7,6 +7,7 @@ import { useAccount, useReadContracts } from "wagmi";
 import { dualPoolStakingAbi } from "@/contracts/abis/dualPoolStaking";
 import { contractAddresses } from "@/contracts/addresses";
 import { type ProtocolStatus } from "@/store/useUiStore";
+import { parseUserInfoTuple } from "@/lib/userInfo";
 
 type PoolInfo = {
   stakingToken: `0x${string}`;
@@ -62,6 +63,17 @@ function pick<T>(data: readonly unknown[] | undefined, index: number, fallback: 
   return fallback;
 }
 
+/** `pendingReward*` 调用失败时回退到已结算的 `userInfo.rewards`（兼容旧合约或 RPC 偶发失败）。 */
+function pickPendingReward(
+  data: readonly unknown[] | undefined,
+  pendingIndex: number,
+  userInfo: unknown,
+): bigint {
+  const row = data?.[pendingIndex] as { status: string; result?: unknown } | undefined;
+  if (row?.status === "success" && row.result !== undefined) return row.result as bigint;
+  return parseUserInfoTuple(userInfo).rewards;
+}
+
 /** 统一读取协议全局状态、池子状态与用户状态（单次 multicall，减少 RPC 往返）。 */
 export function useStaking() {
   const { address } = useAccount();
@@ -90,6 +102,8 @@ export function useStaking() {
       { address: STAKING, abi: ABI, functionName: "unlockTimeB", args: [address] },
       { address: STAKING, abi: ABI, functionName: "stakeTimestampB", args: [address] },
       { address: STAKING, abi: ABI, functionName: "lastClaimTime", args: [address] },
+      { address: STAKING, abi: ABI, functionName: "pendingRewardA", args: [address] },
+      { address: STAKING, abi: ABI, functionName: "pendingRewardB", args: [address] },
     ];
   }, [address]);
 
@@ -97,7 +111,8 @@ export function useStaking() {
     contracts,
     query: {
       staleTime: 15_000,
-      refetchOnWindowFocus: false,
+      refetchInterval: 20_000,
+      refetchOnWindowFocus: true,
     },
   });
 
@@ -134,6 +149,8 @@ export function useStaking() {
     const unlockTimeB = address ? pick<bigint>(d, 15, 0n) : 0n;
     const stakeTimestampB = address ? pick<bigint>(d, 16, 0n) : 0n;
     const lastClaimTime = address ? pick<bigint>(d, 17, 0n) : 0n;
+    const pendingRewardA = address ? pickPendingReward(d, 18, userA) : 0n;
+    const pendingRewardB = address ? pickPendingReward(d, 19, userB) : 0n;
 
     return {
       status,
@@ -151,6 +168,8 @@ export function useStaking() {
       maxTransferFeeBP,
       userA,
       userB,
+      pendingRewardA,
+      pendingRewardB,
       unlockTimeB,
       stakeTimestampB,
       lastClaimTime,

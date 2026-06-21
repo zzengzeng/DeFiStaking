@@ -9,9 +9,9 @@ import { ConsoleButton } from "@/components/console/ConsoleButton";
 import { WithdrawPreview } from "@/components/WithdrawPreview";
 import { bpToPercent, formatToken, safeNumber } from "@/lib/format";
 import { formatCountdownHms } from "@/lib/timelockCountdown";
-import { CONSOLE_COPY as C } from "@/lib/consoleCopy";
+import { useConsoleCopy } from "@/lib/consoleCopy";
 
-export type SmartActionTag = typeof C.withdraw.tagNow | typeof C.withdraw.tagWait | typeof C.withdraw.tagEmergency;
+export type SmartActionTag = string;
 
 type Props = {
   title: string;
@@ -73,6 +73,7 @@ export function WithdrawPanel({
   maxTransferFeeBP = 0n,
   showFeeTiers,
 }: Props) {
+  const copy = useConsoleCopy();
   const feeTiersVisible = showFeeTiers ?? Boolean(suggestion);
   const [amount, setAmount] = useState("");
   const [debouncedAmount, setDebouncedAmount] = useState("");
@@ -148,10 +149,10 @@ export function WithdrawPanel({
       return { waitDays: 0, waitKind: "none" as const };
     })();
 
-    let actionTag: SmartActionTag = C.withdraw.tagNow;
-    if (protocolStatus === "EMERGENCY") actionTag = C.withdraw.tagEmergency;
-    else if (locked || (!locked && currentFeeBp > 0n)) actionTag = C.withdraw.tagWait;
-    else actionTag = C.withdraw.tagNow;
+    let actionTag: SmartActionTag = copy.withdraw.tagNow;
+    if (protocolStatus === "EMERGENCY") actionTag = copy.withdraw.tagEmergency;
+    else if (locked || (!locked && currentFeeBp > 0n)) actionTag = copy.withdraw.tagWait;
+    else actionTag = copy.withdraw.tagNow;
 
     /** 下一更优窗口时间戳与费用对比（basisAmount 为预览基准） */
     let nextBestTs = nowSec;
@@ -174,7 +175,7 @@ export function WithdrawPanel({
     const savePctOfAmount =
       basisAmount > 0n && saveWei > 0n ? safeNumber(Number((saveWei * 10_000n) / basisAmount) / 100) : 0;
     const countdownSec = nextBestTs > nowSec ? nextBestTs - nowSec : 0n;
-    const optimalLabel = nextBestTs > nowSec ? new Date(Number(nextBestTs) * 1000).toLocaleString() : C.withdraw.optimalNow;
+    const optimalLabel = nextBestTs > nowSec ? new Date(Number(nextBestTs) * 1000).toLocaleString() : copy.withdraw.optimalNow;
 
     const waitDaysMessaging =
       saveWei > 0n && nextBestTs > nowSec
@@ -185,7 +186,7 @@ export function WithdrawPanel({
 
     const earnLine =
       saveWei > 0n && waitDaysMessaging > 0
-        ? `等待 ${waitDaysMessaging} 天后可多获得 +${formatToken(saveWei)} TokenB`
+        ? copy.withdraw.earnLine(waitDaysMessaging, formatToken(saveWei))
         : null;
 
     const feeSaveBp = !locked && currentFeeBp > 0n ? saveBp : 0n;
@@ -210,7 +211,7 @@ export function WithdrawPanel({
       waitDaysMessaging,
       feeSaveBp,
     };
-  }, [suggestion, protocolStatus, basisAmount, tick]);
+  }, [suggestion, protocolStatus, basisAmount, tick, copy]);
 
   const exceedsMax =
     maxWithdrawWei !== undefined && maxWithdrawWei > 0n && parsedLive > maxWithdrawWei;
@@ -225,8 +226,8 @@ export function WithdrawPanel({
     if (!amount || disabled || pending) return;
     if (parsedLive <= 0n) return;
     if (exceedsMax) {
-      toast.error("超过可提数量", {
-        description: `最多可提 ${formatToken(maxWithdrawWei ?? 0n)} ${tokenSymbol}`,
+      toast.error(copy.withdraw.exceedsMaxTitle, {
+        description: copy.withdraw.exceedsMaxDesc(formatToken(maxWithdrawWei ?? 0n), tokenSymbol),
       });
       return;
     }
@@ -251,46 +252,50 @@ export function WithdrawPanel({
     const days = smart.waitDaysMessaging || smart.best.waitDays;
     const unlockDate = new Date(Number(smart.unlockTime) * 1000).toLocaleString();
     if (smart.best.waitKind === "unlock") {
-      toast.info("提醒已记录", {
-        description: `约 ${days} 天后解锁可避免 ${Number(suggestion?.penaltyFeeBP ?? 0n) / 100}% 罚金。解锁时间参考：${unlockDate}`,
+      toast.info(copy.withdraw.reminderRecorded, {
+        description: copy.withdraw.reminderUnlockDesc(
+          days,
+          String(Number(suggestion?.penaltyFeeBP ?? 0n) / 100),
+          unlockDate,
+        ),
       });
-      setWaitReminder(`已记录：约 ${days} 天后可避免罚金（解锁约 ${unlockDate}）`);
+      setWaitReminder(copy.withdraw.reminderUnlockRecorded(days, unlockDate));
     } else {
-      toast.info("提醒已记录", {
-        description: `约 ${days} 天后费率阶梯更优，可再打开本页提现以节省手续费。`,
+      toast.info(copy.withdraw.reminderRecorded, {
+        description: copy.withdraw.reminderFeeDesc(days),
       });
-      setWaitReminder(`已记录：约 ${days} 天后手续费更优`);
+      setWaitReminder(copy.withdraw.reminderFeeRecorded(days));
     }
     if (maxWithdrawWei !== undefined && maxWithdrawWei > 0n) {
       const filled = trimDecimalInput(formatUnits(maxWithdrawWei, 18));
       setAmount(filled);
-      toast.success("已一键填入最大可提数量", { description: "提交前请确认解锁/费率是否符合预期。" });
+      toast.success(copy.withdraw.maxFilledTitle, { description: copy.withdraw.maxFilledDesc });
     }
     amountInputRef.current?.focus();
   };
 
   const tagStyles =
-    smart?.actionTag === C.withdraw.tagEmergency
+    smart?.actionTag === copy.withdraw.tagEmergency
       ? "border-orange-500/40 bg-orange-500/15 text-orange-200"
-      : smart?.actionTag === C.withdraw.tagWait
+      : smart?.actionTag === copy.withdraw.tagWait
         ? "border-amber-500/40 bg-amber-500/10 text-amber-200"
         : "border-emerald-500/40 bg-emerald-500/10 text-emerald-200";
 
   const confirmRows = [
-    { label: C.withdraw.principal, value: `${formatToken(parsedLive)} ${tokenSymbol}` },
-    { label: C.withdraw.receiveEst, value: `${formatToken(previewLive.netAmount)} ${tokenSymbol}` },
-    { label: C.withdraw.feeEst, value: `${formatToken(previewLive.feeAmount)} ${tokenSymbol}` },
-    { label: C.withdraw.penaltyEst, value: `${formatToken(previewLive.penaltyAmount)} ${tokenSymbol}` },
+    { label: copy.withdraw.principal, value: `${formatToken(parsedLive)} ${tokenSymbol}` },
+    { label: copy.withdraw.receiveEst, value: `${formatToken(previewLive.netAmount)} ${tokenSymbol}` },
+    { label: copy.withdraw.feeEst, value: `${formatToken(previewLive.feeAmount)} ${tokenSymbol}` },
+    { label: copy.withdraw.penaltyEst, value: `${formatToken(previewLive.penaltyAmount)} ${tokenSymbol}` },
   ];
 
   return (
     <div className="min-w-0 rounded-2xl border border-zinc-800 bg-gradient-to-b from-zinc-950 to-zinc-900/60 p-3 transition hover:border-zinc-700 sm:p-4">
       <ConfirmActionModal
         open={confirmOpen}
-        title={C.withdraw.confirmTitle}
+        title={copy.withdraw.confirmTitle}
         rows={confirmRows}
-        warning={previewLive.isLocked ? C.withdraw.confirmLocked : C.withdraw.confirmNormal}
-        confirmText={C.withdraw.confirmSubmit}
+        warning={previewLive.isLocked ? copy.withdraw.confirmLocked : copy.withdraw.confirmNormal}
+        confirmText={copy.withdraw.confirmSubmit}
         busy={pending}
         onClose={() => !pending && setConfirmOpen(false)}
         onConfirm={() => void submitConfirmed()}
@@ -308,29 +313,29 @@ export function WithdrawPanel({
         />
         {feeTiersVisible ? (
           <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-2 text-xs text-zinc-400">
-            <div>费率档位：</div>
-            <div>&lt;90 天 → withdrawFee ({bpToPercent(suggestion?.withdrawFeeBP ?? 0n)})</div>
-            <div>90–180 天 → midTerm ({bpToPercent(suggestion?.midTermFeeBP ?? 0n)})</div>
-            <div>&gt;180 天 → 0%</div>
-            {preview.isLocked && <div className="mt-1 text-red-300">{C.withdraw.lockedPenalty} {bpToPercent(suggestion?.penaltyFeeBP ?? 0n)}。</div>}
+            <div>{copy.withdraw.feeTierTitle}</div>
+            <div>{copy.withdraw.feeTierLt90(bpToPercent(suggestion?.withdrawFeeBP ?? 0n))}</div>
+            <div>{copy.withdraw.feeTier90_180(bpToPercent(suggestion?.midTermFeeBP ?? 0n))}</div>
+            <div>{copy.withdraw.feeTierGt180}</div>
+            {preview.isLocked && <div className="mt-1 text-red-300">{copy.withdraw.lockedPenalty} {bpToPercent(suggestion?.penaltyFeeBP ?? 0n)}。</div>}
           </div>
         ) : (
-          <p className="rounded-lg border border-zinc-800 bg-zinc-950/80 px-3 py-2 text-xs text-zinc-500">{C.withdraw.noLockFee}</p>
+          <p className="rounded-lg border border-zinc-800 bg-zinc-950/80 px-3 py-2 text-xs text-zinc-500">{copy.withdraw.noLockFee}</p>
         )}
         {smart && (
           <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3 text-sm">
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-              <span className="text-xs font-semibold tracking-wide text-zinc-300">{C.withdraw.smartSuggestions}</span>
+              <span className="text-xs font-semibold tracking-wide text-zinc-300">{copy.withdraw.smartSuggestions}</span>
               <span className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${tagStyles}`}>{smart.actionTag}</span>
             </div>
 
             <div className="mb-3 rounded-lg border border-zinc-800 bg-zinc-900/60 p-3 text-xs text-zinc-300">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">{C.withdraw.comparison}</div>
-              <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">{C.withdraw.comparisonHint}</p>
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">{copy.withdraw.comparison}</div>
+              <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">{copy.withdraw.comparisonHint}</p>
 
               {smart.countdownSec > 0n && (
                 <div className="mt-2 flex flex-col gap-0.5 rounded-md border border-zinc-700/60 bg-zinc-950/50 px-2 py-1.5 font-mono text-[11px] text-zinc-400 sm:flex-row sm:items-center sm:justify-between">
-                  <span>更优窗口</span>
+                  <span>{copy.withdraw.betterWindow}</span>
                   <span className="text-zinc-300">{smart.optimalLabel}</span>
                   <span className="tabular-nums text-amber-200/90">{formatCountdownHms(Number(smart.countdownSec))}</span>
                 </div>
@@ -343,20 +348,20 @@ export function WithdrawPanel({
                   )}
                   <div className="mt-3 grid gap-2 rounded-md border border-zinc-700/80 bg-zinc-950/80 p-2.5">
                     <div className="flex flex-col justify-between gap-0.5 border-b border-zinc-800 pb-2 sm:flex-row sm:items-baseline sm:gap-4">
-                      <span className="text-zinc-500">{C.withdraw.withdrawNow}</span>
+                      <span className="text-zinc-500">{copy.withdraw.withdrawNow}</span>
                       <span className="font-mono text-sm font-semibold text-zinc-100">{formatToken(smart.receiveNowWei)} TokenB</span>
                     </div>
                     <div className="flex flex-col justify-between gap-0.5 border-b border-zinc-800 pb-2 sm:flex-row sm:items-baseline sm:gap-4">
-                      <span className="text-zinc-500">{C.withdraw.withdrawLater}</span>
+                      <span className="text-zinc-500">{copy.withdraw.withdrawLater}</span>
                       <span className="font-mono text-sm font-semibold text-emerald-200/95">{formatToken(smart.receiveOptWei)} TokenB</span>
                     </div>
                     <div className="flex flex-col justify-between gap-0.5 sm:flex-row sm:items-baseline sm:gap-4">
-                      <span className="text-zinc-500">{C.withdraw.difference}</span>
+                      <span className="text-zinc-500">{copy.withdraw.difference}</span>
                       <span className={`font-mono text-sm font-semibold ${smart.saveWei > 0n ? "text-emerald-300" : "text-zinc-400"}`}>
                         {smart.saveWei > 0n ? "+" : ""}
                         {formatToken(smart.saveWei)} TokenB
                         {smart.savePctOfAmount > 0 ? (
-                          <span className="ml-1 text-xs font-normal text-zinc-500">({safeNumber(smart.savePctOfAmount).toFixed(2)}% {C.withdraw.basisPct})</span>
+                          <span className="ml-1 text-xs font-normal text-zinc-500">({safeNumber(smart.savePctOfAmount).toFixed(2)}% {copy.withdraw.basisPct})</span>
                         ) : null}
                       </span>
                     </div>
@@ -367,25 +372,25 @@ export function WithdrawPanel({
                       onClick={onWaitDaysClick}
                       className="mt-2 w-full rounded-lg border border-sky-500/40 bg-sky-500/10 px-2 py-1.5 text-[11px] font-semibold text-sky-200 transition hover:bg-sky-500/20 sm:w-auto"
                     >
-                      记录提醒（{smart.waitDaysMessaging || smart.best.waitDays} 天）
+                      {copy.withdraw.recordReminder(smart.waitDaysMessaging || smart.best.waitDays)}
                     </button>
                   )}
                 </>
               ) : (
-                <p className="mt-2 text-zinc-500">{C.withdraw.enterAmountHint}</p>
+                <p className="mt-2 text-zinc-500">{copy.withdraw.enterAmountHint}</p>
               )}
             </div>
 
             <div className="rounded-lg border border-zinc-800 bg-zinc-950/80 p-3 text-xs">
               {smart.locked && (
-                <div className="text-red-300/95">{C.withdraw.lockedPenalty} {bpToPercent(suggestion?.penaltyFeeBP ?? 0n)}。</div>
+                <div className="text-red-300/95">{copy.withdraw.lockedPenalty} {bpToPercent(suggestion?.penaltyFeeBP ?? 0n)}。</div>
               )}
               {!smart.locked && smart.currentFeeBp > 0n && smart.best.waitKind === "fee" && smart.feeSaveBp > 0n && (
-                <div className="text-zinc-400">{C.withdraw.feeTier} {bpToPercent(smart.feeSaveBp)}。</div>
+                <div className="text-zinc-400">{copy.withdraw.feeTier} {bpToPercent(smart.feeSaveBp)}。</div>
               )}
-              {smart.best.waitKind === "none" && !smart.locked && <div className="text-zinc-500">{C.withdraw.noDelayAdvantage}</div>}
+              {smart.best.waitKind === "none" && !smart.locked && <div className="text-zinc-500">{copy.withdraw.noDelayAdvantage}</div>}
               {protocolStatus === "EMERGENCY" && (
-                <div className="mt-2 text-orange-200/95">{C.withdraw.emergencyHint}</div>
+                <div className="mt-2 text-orange-200/95">{copy.withdraw.emergencyHint}</div>
               )}
             </div>
             {waitReminder && <div className="mt-2 rounded-lg border border-sky-500/30 bg-sky-500/10 px-2 py-1.5 text-xs text-sky-100">{waitReminder}</div>}
@@ -400,7 +405,7 @@ export function WithdrawPanel({
             const value = e.target.value.replace(/[^\d.]/g, "");
             setAmount(value);
           }}
-          placeholder={C.withdraw.amountPlaceholder}
+          placeholder={copy.withdraw.amountPlaceholder}
           className="min-h-[44px] min-w-0 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-zinc-500 sm:flex-1"
         />
         <div className="flex w-full min-w-0 flex-col gap-2 sm:w-auto sm:flex-none sm:flex-row sm:items-stretch sm:gap-2">
@@ -411,7 +416,7 @@ export function WithdrawPanel({
               disabled={disabled || pending}
               className="min-h-[44px] w-full shrink-0 rounded-lg border border-zinc-600 px-3 py-2 text-xs font-semibold text-zinc-200 transition hover:border-zinc-500 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto sm:min-w-[4.5rem]"
             >
-              {C.withdraw.max}
+              {copy.withdraw.max}
             </button>
           ) : null}
           <ConsoleButton
@@ -420,18 +425,18 @@ export function WithdrawPanel({
             onClick={openConfirm}
             className="sm:min-w-[7rem] sm:flex-1"
           >
-            {pending ? C.common.pending : C.withdraw.submit}
+            {pending ? copy.common.pending : copy.withdraw.submit}
           </ConsoleButton>
         </div>
       </div>
       {maxWithdrawWei !== undefined && maxWithdrawWei > 0n ? (
         <p className="mt-2 text-xs text-zinc-500">
-          已质押: {formatToken(maxWithdrawWei)} {tokenSymbol}
-          {amount ? ` · ${C.withdraw.inputLabel}: ${formatToken(parsed)} ${tokenSymbol}` : null}
-          {exceedsMax ? <span className="text-red-300/90"> · {C.withdraw.exceedsBalance}</span> : null}
+          {copy.withdraw.stakedLine(formatToken(maxWithdrawWei), tokenSymbol)}
+          {amount ? ` · ${copy.withdraw.inputLabel}: ${formatToken(parsed)} ${tokenSymbol}` : null}
+          {exceedsMax ? <span className="text-red-300/90"> · {copy.withdraw.exceedsBalance}</span> : null}
         </p>
       ) : (
-        <p className="mt-2 text-xs text-zinc-500">{C.withdraw.inputLabel}: {amount ? formatToken(parsed) : "0"} {tokenSymbol}</p>
+        <p className="mt-2 text-xs text-zinc-500">{copy.withdraw.inputLabel}: {amount ? formatToken(parsed) : "0"} {tokenSymbol}</p>
       )}
     </div>
   );

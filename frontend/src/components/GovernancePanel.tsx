@@ -6,28 +6,23 @@ import { sepolia } from "wagmi/chains";
 
 import { ConfirmActionModal } from "@/components/ConfirmActionModal";
 import { ConsoleButton } from "@/components/console/ConsoleButton";
+import { ConsoleStatusBadge } from "@/components/console/ConsoleStatusBadge";
 import { GovernanceTimelockCards } from "@/components/GovernanceTimelockCards";
 import { InfoTip } from "@/components/InfoTip";
 import { OperatorNotifyRewardsSection } from "@/components/OperatorNotifyRewardsSection";
+import { TimelockQueue } from "@/components/TimelockQueue";
 import { dualPoolStakingAbi } from "@/contracts/abis/dualPoolStaking";
 import { timelockControllerAbi } from "@/contracts/abis/timelockController";
 import { contractAddresses, governanceAddresses, sepoliaAuxAddresses, sepoliaDeploymentMeta } from "@/contracts/addresses";
 import { useProtocolRoles } from "@/hooks/useProtocolRoles";
 import { useStaking } from "@/hooks/useStaking";
+import { useTimelockOps } from "@/hooks/useTimelockOps";
 import { useTimelockGovernanceRoles } from "@/hooks/useTimelockGovernanceRoles";
 import { useWriteWithStatus } from "@/hooks/useWriteWithStatus";
 import { getAddressExplorerUrl } from "@/lib/explorerLink";
+import { useI18n } from "@/lib/i18n";
 import { isTxBusy } from "@/lib/txFlowTypes";
-import { UI_COPY } from "@/lib/uiCopy";
-
-const GOV_TIMELOCK_HELPER =
-  "参数类变更走 48h TimelockController；模块/角色超级路径走 72h Timelock。流程均为 PROPOSER schedule → 等待 minDelay → EXECUTOR execute → DualPoolStakingAdmin → 核心。";
-
-const TOOLTIP_PAUSE =
-  "暂停会阻止用户侧状态变更（质押、领取、复利、普通赎回等）。本金与已累积奖励仍留在合约中，不会自动清算，但用户在恢复前无法操作资金。";
-
-const TOOLTIP_EMERGENCY =
-  "紧急模式会收窄退出路径：锁仓池仅可紧急退出（放弃奖励，本金走紧急路径）；灵活池在同一全局标志下按合约规则处理。资金仍在链上，但经济敞口会变化——启用前请仔细评估。";
+import { useUiCopy } from "@/lib/uiCopy";
 
 function AddrRow({ chainId, label, addr }: { chainId: number; label: string; addr: string }) {
   const href = getAddressExplorerUrl(chainId, addr as `0x${string}`);
@@ -41,7 +36,23 @@ function AddrRow({ chainId, label, addr }: { chainId: number; label: string; add
   );
 }
 
+function QueueSummaryTile({ label, value, tone }: { label: string; value: number; tone: "muted" | "warn" | "good" }) {
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-950/80 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-xs text-zinc-500">{label}</div>
+        <ConsoleStatusBadge tone={tone} className="min-w-0 px-2">
+          {value}
+        </ConsoleStatusBadge>
+      </div>
+      <div className="mt-2 font-mono text-2xl font-semibold text-zinc-100">{value}</div>
+    </div>
+  );
+}
+
 export function GovernancePanel() {
+  const { t } = useI18n();
+  const ui = useUiCopy();
   const { address } = useAccount();
   const chainId = useChainId();
   const { writeContractAsync } = useWriteContract();
@@ -49,6 +60,7 @@ export function GovernancePanel() {
   const { isOperator, refetchRoles } = useProtocolRoles();
   const tlGov = useTimelockGovernanceRoles(governanceAddresses.timelock);
   const tlSuper = useTimelockGovernanceRoles(governanceAddresses.timelockSuper);
+  const timelockOps = useTimelockOps();
   const flow = useWriteWithStatus();
 
   const [confirm, setConfirm] = useState<{ kind: "pause" | "emergency" | null }>({ kind: null });
@@ -80,6 +92,17 @@ export function GovernancePanel() {
     tlSuper.canPropose ||
     tlSuper.canExecute ||
     tlSuper.canCancel;
+  const ops = timelockOps.data ?? [];
+  const queueStats = ops.reduce(
+    (acc, op) => {
+      if (op.state === "READY") acc.ready += 1;
+      else if (op.state === "CREATED") acc.pending += 1;
+      else if (op.state === "EXECUTED") acc.executed += 1;
+      else if (op.state === "CANCELLED") acc.cancelled += 1;
+      return acc;
+    },
+    { pending: 0, ready: 0, executed: 0, cancelled: 0 },
+  );
 
   const afterTx = async () => {
     await Promise.all([staking.refetchAll(), refetchRoles(), tlGov.refetchTimelockRoles(), tlSuper.refetchTimelockRoles()]);
@@ -108,26 +131,24 @@ export function GovernancePanel() {
     }
   };
 
+  const desc =
+    isOperator && canTimelockPanel
+      ? t("governance.descBoth")
+      : isOperator
+        ? t("governance.descOperator")
+        : canTimelockPanel
+          ? t("governance.descTimelock")
+          : t("governance.descNone");
+
   return (
     <div className="min-w-0 space-y-4 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-3 sm:p-5">
-      <h3 className="text-lg font-semibold text-zinc-100">治理</h3>
-      <p className="text-xs leading-relaxed text-zinc-500">
-        {isOperator && canTimelockPanel
-          ? "当前钱包同时具备 Timelock 治理角色与核心 OPERATOR_ROLE：下方分别展示运营热操作与 Timelock 调度。"
-          : isOperator
-            ? "当前钱包具备 OPERATOR_ROLE：仅可直连核心执行 pause / 紧急模式等热路径。"
-            : canTimelockPanel
-              ? "当前钱包具备 TimelockController 的 PROPOSER / EXECUTOR / CANCELLER 之一：可通过 schedule / execute 驱动 DualPoolStakingAdmin 调用核心。"
-              : "当前钱包未检测到 Timelock 治理角色或 OPERATOR_ROLE。"}
-      </p>
+      <h3 className="text-lg font-semibold text-zinc-100">{t("governance.title")}</h3>
+      <p className="text-xs leading-relaxed text-zinc-500">{desc}</p>
 
       {isOperator ? (
         <section className="space-y-3 overflow-visible rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 sm:p-4">
-          <h4 className="text-sm font-semibold text-amber-100/95">运营（OPERATOR_ROLE · 直连核心）</h4>
-          <p className="text-[11px] leading-relaxed text-zinc-500">
-            热路径（0h）：<span className="font-mono text-zinc-400">pause</span>、<span className="font-mono text-zinc-400">enableEmergencyMode</span>、
-            <span className="font-mono text-zinc-400">notifyRewardAmountA/B</span>。奖励注入见下方；参数变更走 Timelock（≥48h）。
-          </p>
+          <h4 className="text-sm font-semibold text-amber-100/95">{t("governance.operatorSectionTitle")}</h4>
+          <p className="text-[11px] leading-relaxed text-zinc-500">{t("governance.operatorSectionDesc")}</p>
           <div className="flex flex-col gap-3 overflow-visible sm:flex-row sm:flex-wrap sm:items-stretch">
             <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:max-w-[min(100%,280px)]">
               <ConsoleButton
@@ -136,9 +157,9 @@ export function GovernancePanel() {
                 onClick={() => setConfirm({ kind: "pause" })}
                 className="sm:flex-none"
               >
-                暂停
+                {t("governance.pause")}
               </ConsoleButton>
-              <InfoTip text={TOOLTIP_PAUSE} aria-label="暂停影响说明" side="bottom" />
+              <InfoTip text={t("governance.pauseTooltip")} aria-label={t("governance.pauseAriaLabel")} side="bottom" />
             </div>
             <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:max-w-[min(100%,320px)]">
               <ConsoleButton
@@ -147,9 +168,9 @@ export function GovernancePanel() {
                 onClick={() => setConfirm({ kind: "emergency" })}
                 className="bg-gradient-to-r from-orange-300 to-amber-300 hover:from-orange-200 hover:to-amber-200 sm:flex-none"
               >
-                开启紧急模式
+                {t("governance.enableEmergency")}
               </ConsoleButton>
-              <InfoTip text={TOOLTIP_EMERGENCY} aria-label="紧急模式影响说明" side="bottom" />
+              <InfoTip text={t("governance.emergencyTooltip")} aria-label={t("governance.emergencyAriaLabel")} side="bottom" />
             </div>
           </div>
           <OperatorNotifyRewardsSection onRefresh={afterTx} />
@@ -158,37 +179,66 @@ export function GovernancePanel() {
 
       {canTimelockPanel ? (
         <>
+          <section className="space-y-3 overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950/80 p-3 sm:p-4">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
+                <h4 className="font-mono text-sm font-semibold text-zinc-100">{t("governance.queueTitle")}</h4>
+                <p className="mt-1 text-xs leading-relaxed text-zinc-500">{t("governance.queueDesc")}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void timelockOps.refetch()}
+                disabled={timelockOps.isFetching}
+                className="min-h-[34px] rounded-lg border border-zinc-700 px-3 py-1.5 text-xs font-semibold text-zinc-300 transition hover:border-amber-400/40 disabled:opacity-50"
+              >
+                {timelockOps.isFetching ? t("governance.refreshingQueue") : t("governance.refreshQueue")}
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+              <QueueSummaryTile label={t("governance.queuePending")} value={queueStats.pending} tone={queueStats.pending > 0 ? "warn" : "muted"} />
+              <QueueSummaryTile label={t("governance.queueReady")} value={queueStats.ready} tone={queueStats.ready > 0 ? "good" : "muted"} />
+              <QueueSummaryTile label={t("governance.queueExecuted")} value={queueStats.executed} tone="muted" />
+              <QueueSummaryTile label={t("governance.queueCancelled")} value={queueStats.cancelled} tone={queueStats.cancelled > 0 ? "warn" : "muted"} />
+            </div>
+            {timelockOps.isError ? (
+              <div className="rounded-xl border border-amber-400/25 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
+                {t("governance.queueIndexError")}
+              </div>
+            ) : null}
+            <TimelockQueue ops={ops} isLoading={timelockOps.isLoading} />
+          </section>
+
           <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-xs text-zinc-400">
-            <div>{UI_COPY.timelock.roleSchedule}</div>
-            <div>{UI_COPY.timelock.roleExecute}</div>
-            <div>{UI_COPY.timelock.roleCancel}</div>
+            <div>{ui.timelock.roleSchedule}</div>
+            <div>{ui.timelock.roleExecute}</div>
+            <div>{ui.timelock.roleCancel}</div>
           </div>
 
-          <div className="rounded-xl border border-sky-500/25 bg-sky-500/5 px-3 py-2.5 text-xs leading-relaxed text-sky-100/95">{GOV_TIMELOCK_HELPER}</div>
+          <div className="rounded-xl border border-sky-500/25 bg-sky-500/5 px-3 py-2.5 text-xs leading-relaxed text-sky-100/95">{t("governance.timelockHelper")}</div>
 
-          <p className="text-xs text-zinc-500">
-            下方为完整 Timelock 配置（23 项），按 Tab 分组展示。若你只看到 6 张卡片且无 Tab 栏，请确认访问的是当前{" "}
-            <span className="font-mono text-zinc-400">yarn dev</span> 终端里打印的 Local 地址（端口被占用时会变成 3001/3002）。
-          </p>
+          <p className="text-xs text-zinc-500">{t("governance.fullConfigHint")}</p>
 
           {chainId === sepolia.id ? (
             <details className="rounded-lg border border-zinc-800 bg-zinc-950/80 text-xs text-zinc-300">
               <summary className="cursor-pointer select-none px-3 py-2 font-medium text-zinc-200 hover:bg-zinc-900/80">
-                Sepolia 部署地址（与默认配置一致时可对照）
+                {t("governance.sepoliaAddressesTitle")}
               </summary>
               <div className="border-t border-zinc-800 px-3 pb-3 pt-2">
                 <p className="mb-2 text-[11px] text-zinc-500">
-                  治理 Timelock minDelay: {minDelayGovernance.toString()}s · 超级 Timelock: {minDelaySuper.toString()}s
+                  {t("governance.sepoliaMinDelay", {
+                    govDelay: minDelayGovernance.toString(),
+                    superDelay: minDelaySuper.toString(),
+                  })}
                 </p>
-                <AddrRow chainId={chainId} label="DualPoolStaking（当前）" addr={contractAddresses.staking} />
-                <AddrRow chainId={chainId} label="TokenA" addr={contractAddresses.tokenA} />
-                <AddrRow chainId={chainId} label="TokenB" addr={contractAddresses.tokenB} />
-                <AddrRow chainId={chainId} label="DualPoolStakingAdmin（门面）" addr={governanceAddresses.adminFacade} />
-                <AddrRow chainId={chainId} label="Timelock（参数 48h）" addr={governanceAddresses.timelock} />
-                <AddrRow chainId={chainId} label="Timelock（超级 72h）" addr={governanceAddresses.timelockSuper} />
-                <AddrRow chainId={chainId} label="DualPoolUserModule" addr={sepoliaAuxAddresses.dualPoolUserModule} />
-                <AddrRow chainId={chainId} label="DualPoolAdminModule" addr={sepoliaAuxAddresses.dualPoolAdminModule} />
-                <AddrRow chainId={chainId} label="OPERATOR_ROLE（参考）" addr={sepoliaAuxAddresses.operatorRoleHolder} />
+                <AddrRow chainId={chainId} label={t("governance.addrDualPoolStaking")} addr={contractAddresses.staking} />
+                <AddrRow chainId={chainId} label={t("governance.addrTokenA")} addr={contractAddresses.tokenA} />
+                <AddrRow chainId={chainId} label={t("governance.addrTokenB")} addr={contractAddresses.tokenB} />
+                <AddrRow chainId={chainId} label={t("governance.addrAdminFacade")} addr={governanceAddresses.adminFacade} />
+                <AddrRow chainId={chainId} label={t("governance.addrTimelock48h")} addr={governanceAddresses.timelock} />
+                <AddrRow chainId={chainId} label={t("governance.addrTimelock72h")} addr={governanceAddresses.timelockSuper} />
+                <AddrRow chainId={chainId} label={t("governance.addrUserModule")} addr={sepoliaAuxAddresses.dualPoolUserModule} />
+                <AddrRow chainId={chainId} label={t("governance.addrAdminModule")} addr={sepoliaAuxAddresses.dualPoolAdminModule} />
+                <AddrRow chainId={chainId} label={t("governance.addrOperatorRole")} addr={sepoliaAuxAddresses.operatorRoleHolder} />
               </div>
             </details>
           ) : null}
@@ -206,19 +256,19 @@ export function GovernancePanel() {
 
       <ConfirmActionModal
         open={confirm.kind === "pause"}
-        title="确认暂停？"
+        title={t("governance.confirmPauseTitle")}
         rows={[
-          { label: "操作", value: "pause()" },
-          { label: "影响", value: "将暂停协议交互，直至治理恢复。" },
+          { label: t("governance.rowAction"), value: t("governance.confirmPauseAction") },
+          { label: t("governance.rowImpact"), value: t("governance.confirmPauseImpact") },
         ]}
-        warning={TOOLTIP_PAUSE}
-        confirmText="确认暂停"
+        warning={t("governance.pauseTooltip")}
+        confirmText={t("governance.confirmPauseBtn")}
         variant="danger"
         busy={govBusy}
         onClose={() => !govBusy && setConfirm({ kind: null })}
         onConfirm={async () => {
           try {
-            await callCore("暂停协议", "pause", []);
+            await callCore(t("governance.confirmPauseTxLabel"), "pause", []);
             setConfirm({ kind: null });
           } catch {
             /* handled */
@@ -227,16 +277,16 @@ export function GovernancePanel() {
       />
       <ConfirmActionModal
         open={confirm.kind === "emergency"}
-        title="确认开启紧急模式？"
-        rows={[{ label: "操作", value: "enableEmergencyMode()" }]}
-        warning={TOOLTIP_EMERGENCY}
-        confirmText="确认开启"
+        title={t("governance.confirmEmergencyTitle")}
+        rows={[{ label: t("governance.rowAction"), value: t("governance.confirmEmergencyAction") }]}
+        warning={t("governance.emergencyTooltip")}
+        confirmText={t("governance.confirmEmergencyBtn")}
         variant="danger"
         busy={govBusy}
         onClose={() => !govBusy && setConfirm({ kind: null })}
         onConfirm={async () => {
           try {
-            await callCore("开启紧急模式", "enableEmergencyMode", []);
+            await callCore(t("governance.confirmEmergencyTxLabel"), "enableEmergencyMode", []);
             setConfirm({ kind: null });
           } catch {
             /* handled */

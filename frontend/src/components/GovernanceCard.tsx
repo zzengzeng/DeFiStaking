@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { keccak256 } from "viem";
 import { useAccount, useReadContract, useWriteContract } from "wagmi";
+import { toast } from "sonner";
 
 import { ConfirmActionModal } from "@/components/ConfirmActionModal";
 import { ConsoleButton } from "@/components/console/ConsoleButton";
@@ -11,9 +12,10 @@ import { timelockControllerAbi } from "@/contracts/abis/timelockController";
 import { governanceAddresses } from "@/contracts/addresses";
 import type { TimelockIndexedOp } from "@/hooks/useTimelockOps";
 import { useWriteWithStatus } from "@/hooks/useWriteWithStatus";
-import { CONSOLE_COPY } from "@/lib/consoleCopy";
+import { useConsoleCopy } from "@/lib/consoleCopy";
+import { useI18n } from "@/lib/i18n";
 import { isTxBusy } from "@/lib/txFlowTypes";
-import { UI_COPY } from "@/lib/uiCopy";
+import { useUiCopy } from "@/lib/uiCopy";
 
 const ZERO_PREDECESSOR = "0x0000000000000000000000000000000000000000000000000000000000000000" as const;
 
@@ -22,6 +24,34 @@ const OZ_UNSET = 0;
 const OZ_WAITING = 1;
 const OZ_READY = 2;
 const OZ_DONE = 3;
+
+function shortHex(value?: string): string {
+  if (!value) return "—";
+  if (value.length <= 18) return value;
+  return `${value.slice(0, 10)}…${value.slice(-8)}`;
+}
+
+function CopyMiniButton({ value, label }: { value?: string; label: string }) {
+  const { t } = useI18n();
+  return (
+    <button
+      type="button"
+      disabled={!value}
+      onClick={async () => {
+        if (!value) return;
+        try {
+          await navigator.clipboard.writeText(value);
+          toast.success(t("governanceCard.copySuccess", { label }));
+        } catch {
+          toast.error(t("governanceCard.copyFailed"));
+        }
+      }}
+      className="rounded-md border border-zinc-700 px-1.5 py-0.5 text-[10px] text-zinc-400 transition hover:border-zinc-500 hover:text-zinc-100 disabled:opacity-40"
+    >
+      {t("governanceCard.copy")}
+    </button>
+  );
+}
 
 type Props = {
   title: string;
@@ -85,6 +115,9 @@ export function GovernanceCard({
   onAfterTx,
   disabledReason,
 }: Props) {
+  const copy = useConsoleCopy();
+  const ui = useUiCopy();
+  const { t } = useI18n();
   const { address } = useAccount();
   const { writeContractAsync } = useWriteContract();
   const flow = useWriteWithStatus();
@@ -155,7 +188,7 @@ export function GovernanceCard({
     try {
       await flow.executeWrite(
         {
-          actionLabel: UI_COPY.timelock.scheduleAction(title),
+          actionLabel: ui.timelock.scheduleAction(title),
           txType: "governance",
           description: "TimelockController.schedule",
           onConfirmed: refresh,
@@ -179,7 +212,7 @@ export function GovernanceCard({
     try {
       await flow.executeWrite(
         {
-          actionLabel: UI_COPY.timelock.executeAction(title),
+          actionLabel: ui.timelock.executeAction(title),
           txType: "governance",
           description: "TimelockController.execute",
           onConfirmed: refresh,
@@ -203,7 +236,7 @@ export function GovernanceCard({
     try {
       await flow.executeWrite(
         {
-          actionLabel: UI_COPY.timelock.cancelAction(title),
+          actionLabel: ui.timelock.cancelAction(title),
           txType: "governance",
           description: "TimelockController.cancel",
           onConfirmed: refresh,
@@ -228,10 +261,10 @@ export function GovernanceCard({
     <div className="min-w-0 rounded-2xl border border-zinc-800 bg-gradient-to-b from-zinc-950 to-zinc-950/60 p-3 text-sm shadow-[0_0_0_1px_rgba(255,255,255,0.02)] transition hover:border-zinc-700 hover:shadow-[0_0_0_1px_rgba(255,255,255,0.05)] sm:p-4">
       <ConfirmActionModal
         open={executeOpen}
-        title={UI_COPY.timelock.executeTitle(title)}
+        title={ui.timelock.executeTitle(title)}
         rows={executeRows?.()}
-        warning={UI_COPY.timelock.executeWarning}
-        confirmText={UI_COPY.timelock.executeConfirm}
+        warning={ui.timelock.executeWarning}
+        confirmText={ui.timelock.executeConfirm}
         busy={busy}
         onClose={() => !busy && setExecuteOpen(false)}
         onConfirm={async () => {
@@ -245,12 +278,28 @@ export function GovernanceCard({
       />
       <div className="mb-1 text-sm font-semibold text-zinc-100">{title}</div>
       <div className="mb-3 text-xs text-zinc-400">{hint}</div>
+      <div className="mb-3 grid gap-2 rounded-xl border border-zinc-800 bg-zinc-950/80 p-2 text-[11px] text-zinc-500 sm:grid-cols-2">
+        <div className="min-w-0">
+          <div className="mb-1 uppercase tracking-wide">{t("governanceCard.operationId")}</div>
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="truncate font-mono text-zinc-300">{shortHex(opId)}</span>
+            <CopyMiniButton value={opId} label={t("governanceCard.operationId")} />
+          </div>
+        </div>
+        <div className="min-w-0">
+          <div className="mb-1 uppercase tracking-wide">{t("governanceCard.calldata")}</div>
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="truncate font-mono text-zinc-300">{shortHex(payload)}</span>
+            <CopyMiniButton value={payload} label={t("governanceCard.calldata")} />
+          </div>
+        </div>
+      </div>
       <fieldset disabled={formLocked} className="mb-3 min-w-0 space-y-2 disabled:opacity-60">
         {children}
       </fieldset>
       {disabledReason ? <p className="mb-3 text-[11px] text-red-300/90">{disabledReason}</p> : null}
       {formLocked ? (
-        <p className="mb-3 text-[11px] text-amber-200/90">该操作已排队或待执行：为避免 operationId 漂移，已暂时锁定表单输入。</p>
+        <p className="mb-3 text-[11px] text-amber-200/90">{t("governanceCard.formLocked")}</p>
       ) : null}
       <div className="grid gap-2">
         <TimelockStatus op={op} />
@@ -261,7 +310,7 @@ export function GovernanceCard({
             disabled={!status.canSchedule || busy}
             onClick={() => void schedule()}
           >
-            {busy ? CONSOLE_COPY.common.pending : UI_COPY.timelock.schedule}
+            {busy ? copy.common.pending : ui.timelock.schedule}
           </ConsoleButton>
           <ConsoleButton
             size="sm"
@@ -271,7 +320,7 @@ export function GovernanceCard({
               setExecuteOpen(true);
             }}
           >
-            {UI_COPY.timelock.execute}
+            {ui.timelock.execute}
           </ConsoleButton>
           <ConsoleButton
             size="sm"
@@ -279,7 +328,7 @@ export function GovernanceCard({
             disabled={!status.canCancel || busy}
             onClick={() => void cancel()}
           >
-            {UI_COPY.timelock.cancel}
+            {ui.timelock.cancel}
           </ConsoleButton>
         </div>
       </div>

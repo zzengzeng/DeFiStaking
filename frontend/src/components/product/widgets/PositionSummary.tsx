@@ -4,7 +4,10 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { ConfirmActionModal } from "@/components/ConfirmActionModal";
+import { TokenIcon } from "@/components/TokenIcon";
+import { UsdSubtext } from "@/components/UsdSubtext";
 import { formatToken, formatTokenDisplay } from "@/lib/format";
+import { useI18n } from "@/lib/i18n";
 
 type PoolPosition = {
   label: string;
@@ -49,6 +52,7 @@ export function PositionSummary({
   compoundBusy,
   manageHref,
 }: Props) {
+  const { t } = useI18n();
   const [compoundOpen, setCompoundOpen] = useState(false);
   const hasRewards = rewardsWei > 0n;
   const hasStake = stakedWei > 0n;
@@ -60,10 +64,10 @@ export function PositionSummary({
 
   return (
     <div className="dp-card p-5 sm:p-6">
-      <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-500">我的质押</h2>
+      <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-500">{t("position.title")}</h2>
       <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
-          <div className="text-xs text-zinc-500">已质押</div>
+          <div className="text-xs text-zinc-500">{t("position.staked")}</div>
           {positions && positions.length > 0 ? (
             <ul className="mt-2 space-y-2">
               {positions.map((p) => (
@@ -80,13 +84,19 @@ export function PositionSummary({
           )}
         </div>
         <div>
-          <div className="text-xs text-zinc-500">待领取奖励</div>
-          <div className="mt-1 text-2xl font-bold text-[var(--dp-accent)]">
-            {formatTokenDisplay(rewardsWei, "TokenB")}
+          <div className="text-xs text-zinc-500">{t("position.rewards")}</div>
+          <div className="mt-1 flex items-center gap-2">
+            <TokenIcon symbol="TokenB" size="md" />
+            <div>
+              <div className="text-2xl font-bold text-[var(--dp-accent)]">
+                {formatTokenDisplay(rewardsWei, "TokenB")}
+              </div>
+              <UsdSubtext amountWei={rewardsWei} symbol="TokenB" className="mt-0.5 block" />
+            </div>
           </div>
           {showCompound ? (
             <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
-              {canCompoundNow ? "可将双池奖励复利再投入锁仓池" : "复利：奖励自动追加到锁仓池本金"}
+              {canCompoundNow ? t("position.compoundHint") : t("position.compoundIdle")}
             </p>
           ) : null}
         </div>
@@ -99,7 +109,7 @@ export function PositionSummary({
             disabled={claimDisabled || busy || !hasRewards}
             className="dp-button min-h-[48px] flex-1 rounded-xl text-sm disabled:opacity-40"
           >
-            {claimBusy ? "处理中…" : "领取奖励"}
+            {claimBusy ? t("position.busy") : t("position.claim")}
           </button>
         ) : null}
         {showCompound ? (
@@ -110,28 +120,28 @@ export function PositionSummary({
             className="flex min-h-[48px] flex-1 items-center justify-center rounded-xl border border-violet-500/40 bg-violet-500/10 text-sm font-medium text-violet-200 transition hover:bg-violet-500/20 disabled:opacity-40"
             title={compoundDisabledReason ?? undefined}
           >
-            {compoundBusy ? "处理中…" : "复利再投"}
+            {compoundBusy ? t("position.busy") : t("position.compound")}
           </button>
         ) : null}
         <Link
           href={manageHref}
           className="flex min-h-[48px] flex-1 items-center justify-center rounded-xl border border-[var(--dp-border)] text-sm font-medium text-zinc-200 transition hover:bg-[var(--dp-surface-raised)]"
         >
-          赎回
+          {t("position.withdraw")}
         </Link>
       </div>
 
       {showCompound && compoundPreview ? (
         <ConfirmActionModal
           open={compoundOpen}
-          title="确认复利再投"
+          title={t("position.confirmCompound")}
           rows={[
-            { label: "灵活池奖励", value: `${formatToken(compoundPreview.rewardAWei)} TokenB` },
-            { label: "锁仓池奖励", value: `${formatToken(compoundPreview.rewardBWei)} TokenB` },
-            { label: "合计再投", value: `${formatToken(compoundPreview.totalWei)} TokenB` },
+            { label: t("position.flexibleReward"), value: `${formatToken(compoundPreview.rewardAWei)} TokenB` },
+            { label: t("position.lockedReward"), value: `${formatToken(compoundPreview.rewardBWei)} TokenB` },
+            { label: t("position.totalCompound"), value: `${formatToken(compoundPreview.totalWei)} TokenB` },
           ]}
-          warning="奖励将自动再投入锁仓池本金，链上结果可能与估算略有差异。"
-          confirmText="确认复利"
+          warning={t("position.compoundWarning")}
+          confirmText={t("position.confirmCompoundBtn")}
           busy={compoundBusy}
           onClose={() => !compoundBusy && setCompoundOpen(false)}
           onConfirm={async () => {

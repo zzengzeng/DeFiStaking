@@ -3,12 +3,18 @@
 import { GovernancePanel } from "@/components/GovernancePanel";
 import { ProductStateCard } from "@/components/product/ProductStateCard";
 import { governanceAddresses } from "@/contracts/addresses";
-import { CONSOLE_COPY } from "@/lib/consoleCopy";
+import { useConsoleCopy } from "@/lib/consoleCopy";
 import { useProtocolRoles } from "@/hooks/useProtocolRoles";
 import { useTimelockGovernanceRoles } from "@/hooks/useTimelockGovernanceRoles";
 
-/** 控制台：治理与 Timelock 运维 */
+/**
+ * 治理页壳层：钱包 / 角色门禁后渲染 `GovernancePanel`。
+ * 无 Timelock 或 OPERATOR 权限时仅展示 ProductStateCard 提示。
+ *
+ * @see views/console/README.md
+ */
 export function ConsoleGovernancePage() {
+  const copy = useConsoleCopy();
   const { address, isAdmin, isOperator, isLoading: coreRolesLoading } = useProtocolRoles();
   const { canAccessTimelockGovernance, isLoading: tlRolesLoading } = useTimelockGovernanceRoles();
   const { canAccessTimelockGovernance: canAccessSuperTimelock, isLoading: superRolesLoading } =
@@ -18,9 +24,9 @@ export function ConsoleGovernancePage() {
   const canEnter = Boolean(address && (isAdmin || isOperator || canAccessTimelockGovernance || canAccessSuperTimelock));
   const header = (
     <section className="rounded-xl border border-zinc-800 bg-zinc-900/70 p-4 sm:p-5">
-      <div className="text-xs font-medium uppercase tracking-wide text-amber-200/80">{CONSOLE_COPY.governance.eyebrow}</div>
-      <h1 className="mt-2 font-mono text-xl font-semibold text-zinc-100 sm:text-2xl">{CONSOLE_COPY.governance.title}</h1>
-      <p className="mt-2 max-w-2xl text-sm leading-relaxed text-zinc-500">{CONSOLE_COPY.governance.desc}</p>
+      <div className="text-xs font-medium uppercase tracking-wide text-amber-200/80">{copy.governance.eyebrow}</div>
+      <h1 className="mt-2 font-mono text-xl font-semibold text-zinc-100 sm:text-2xl">{copy.governance.title}</h1>
+      <p className="mt-2 max-w-2xl text-sm leading-relaxed text-zinc-500">{copy.governance.desc}</p>
     </section>
   );
 
@@ -30,8 +36,8 @@ export function ConsoleGovernancePage() {
         {header}
         <ProductStateCard
           tone="warning"
-          title={CONSOLE_COPY.governance.connectWallet}
-          description={CONSOLE_COPY.governance.connectWalletDesc}
+          title={copy.governance.connectWallet}
+          description={copy.governance.connectWalletDesc}
         />
       </div>
     );
@@ -43,8 +49,8 @@ export function ConsoleGovernancePage() {
         {header}
         <ProductStateCard
           tone="loading"
-          title={CONSOLE_COPY.governance.loadingRoles}
-          description={CONSOLE_COPY.governance.loadingRolesDesc}
+          title={copy.governance.loadingRoles}
+          description={copy.governance.loadingRolesDesc}
         />
       </div>
     );
@@ -56,8 +62,8 @@ export function ConsoleGovernancePage() {
         {header}
         <ProductStateCard
           tone="error"
-          title={CONSOLE_COPY.governance.noPermission}
-          description={CONSOLE_COPY.governance.noPermissionDesc}
+          title={copy.governance.noPermission}
+          description={copy.governance.noPermissionDesc}
         />
       </div>
     );

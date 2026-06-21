@@ -3,6 +3,7 @@
 import { safeNumber } from "@/lib/format";
 import { formatTvlDisplay } from "@/components/product/widgets/ProtocolStats";
 import { estAprPercent, estApyDailyCompoundPercent } from "@/lib/poolMetrics";
+import { useI18n } from "@/lib/i18n";
 
 import { ProductPageTitle } from "@/components/product/ProductPageTitle";
 
@@ -20,25 +21,26 @@ export function ProductPoolMetrics({
   totalStakedWei,
   rewardRateWei,
 }: MetricsProps) {
+  const { t } = useI18n();
   const apr = estAprPercent(rewardRateWei, totalStakedWei);
   const apy = estApyDailyCompoundPercent(apr);
 
   const metrics = [
     {
-      label: "年化 APR",
+      label: t("poolMetrics.apr"),
       value: `${safeNumber(apr).toFixed(2)}%`,
-      sub: apy !== null ? `复利约 ${safeNumber(apy).toFixed(2)}%` : undefined,
+      sub: apy !== null ? t("poolMetrics.apyCompound", { apy: safeNumber(apy).toFixed(2) }) : undefined,
       highlight: true,
     },
     {
-      label: "总锁仓 TVL",
+      label: t("poolMetrics.tvl"),
       value: formatTvlDisplay(totalStakedWei, tokenSymbol),
-      sub: `质押 ${tokenSymbol}`,
+      sub: t("poolMetrics.stakeToken", { token: tokenSymbol }),
     },
     {
-      label: "奖励代币",
+      label: t("poolMetrics.rewardToken"),
       value: rewardToken,
-      sub: "收益计价单位",
+      sub: t("poolMetrics.rewardUnit"),
     },
   ];
 

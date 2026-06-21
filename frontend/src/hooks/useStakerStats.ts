@@ -5,6 +5,7 @@ import { useChainId } from "wagmi";
 
 import type { StakerStats } from "@/lib/stakerLogQuery";
 
+/** 首页「质押人数」：服务端扫描 Staked 事件，经 `/api/stakers` 聚合。 */
 export function useStakerStats(enabled = true) {
   const chainId = useChainId();
 

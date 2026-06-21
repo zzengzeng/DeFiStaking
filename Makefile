@@ -1,6 +1,6 @@
 -include .env
 
-.PHONY: all test clean remove install update build snapshot format static-analysis anvil deploy deploy-production deploy-reuse-tokens deploy-separated-roles verify-last-deploy production-readiness init-governance-wallets validate-governance-env sync-frontend-addresses help
+.PHONY: all test clean remove install update build snapshot format static-analysis anvil deploy deploy-production deploy-reuse-tokens deploy-separated-roles verify-last-deploy production-readiness testnet-demo-env frontend-production-env frontend-contract-sync post-deploy-verify preprod-rehearsal init-governance-wallets validate-governance-env sync-frontend-addresses mint-tokenb-to-operator help
 
 DEFAULT_ANVIL_KEY := 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
 SLITHER_ACCEPTED_EXCLUDES := arbitrary-send-erc20,uninitialized-state,unused-return,timestamp,assembly,low-level-calls,naming-convention,constable-states,immutable-states
@@ -67,6 +67,21 @@ deploy:
 production-readiness:
 	@bash script/check-production-readiness.sh
 
+frontend-production-env:
+	@bash script/check-frontend-production-env.sh
+
+testnet-demo-env:
+	@bash script/check-testnet-demo-env.sh
+
+frontend-contract-sync:
+	@bash script/check-frontend-contract-sync.sh
+
+post-deploy-verify:
+	@bash script/post-deploy-verify.sh
+
+preprod-rehearsal:
+	@bash script/preprod-rehearsal.sh
+
 # 分角色治理彩排：生成 6 钱包 → 校验隔离 → 复用 Token 部署 Staking 栈
 init-governance-wallets:
 	@bash script/init-separated-governance-env.sh
@@ -76,6 +91,22 @@ validate-governance-env:
 
 sync-frontend-addresses:
 	@bash script/sync-frontend-from-broadcast.sh
+
+# 部署者将 TokenB mint 给 Operator（新版 MockERC20 仅 owner 可 mint）
+MINT_TOKENB_AMOUNT ?= 80000
+mint-tokenb-to-operator:
+	@if [ -z "$(strip $(OPERATOR))" ]; then echo "用法: make mint-tokenb-to-operator OPERATOR=0x… [AMOUNT=80000]"; exit 1; fi
+	@if [ -z "$(strip $(SEPOLIA_RPC_URL))" ]; then echo "需要 .env 中的 SEPOLIA_RPC_URL"; exit 1; fi
+	@TOKEN_B_ADDR=$${TOKEN_B:-$(SEPOLIA_TOKEN_B)}; \
+	if [ -n "$(strip $(DEPLOYER_ACCOUNT))" ]; then \
+	  cast send "$$TOKEN_B_ADDR" "mint(address,uint256)" "$(OPERATOR)" "$$(cast to-wei $(MINT_TOKENB_AMOUNT))" \
+	    --rpc-url "$(SEPOLIA_RPC_URL)" --account "$(DEPLOYER_ACCOUNT)"; \
+	elif [ -n "$(strip $(PRIVATE_KEY))" ]; then \
+	  cast send "$$TOKEN_B_ADDR" "mint(address,uint256)" "$(OPERATOR)" "$$(cast to-wei $(MINT_TOKENB_AMOUNT))" \
+	    --rpc-url "$(SEPOLIA_RPC_URL)" --private-key "$(PRIVATE_KEY)"; \
+	else \
+	  echo "需要 DEPLOYER_ACCOUNT 或 PRIVATE_KEY（须为 TokenB owner）"; exit 1; \
+	fi
 
 deploy-separated-roles: validate-governance-env
 	@$(MAKE) deploy-reuse-tokens NETWORK=sepolia
@@ -108,11 +139,17 @@ help:
 	@echo "  make static-analysis     # Slither（排除已登记 accepted findings 的 detector）"
 	@echo "  make deploy NETWORK=sepolia   # Sepolia（推荐；.env: SEPOLIA_RPC_URL DEPLOYER_ACCOUNT ETHERSCAN_API_KEY）"
 	@echo "  make production-readiness      # 主网上线前安全闸门"
+	@echo "  make testnet-demo-env          # Sepolia 公开演示环境检查（宽松）"
+	@echo "  make frontend-production-env   # 前端生产环境变量闸门"
+	@echo "  make frontend-contract-sync    # broadcast / 前端 env / 前端 ABI 漂移检查"
+	@echo "  make post-deploy-verify        # 部署后链上角色、模块、Timelock 校验"
+	@echo "  make preprod-rehearsal         # 测试 + 静态分析 + 生产闸门 + 前端构建"
 	@echo "  make deploy-production NETWORK=sepolia   # 生产保护部署（需治理 env；自动 PRODUCTION=true）"
 	@echo "  make init-governance-wallets             # 生成 6 个分离角色钱包并写入 .env"
 	@echo "  make validate-governance-env             # 校验治理地址互不相同"
 	@echo "  make deploy-separated-roles NETWORK=sepolia  # 分角色彩排部署（复用 Token）"
 	@echo "  make sync-frontend-addresses             # broadcast → frontend/.env.local"
+	@echo "  make mint-tokenb-to-operator OPERATOR=0x…  # 部署者 mint TokenB 给 Operator"
 	@echo "  make deploy-fresh-tokens NETWORK=sepolia   # 新部署 ZZTKA/ZZTKB（不读 TOKEN_A/B）"
 	@echo "  make deploy-reuse-tokens NETWORK=sepolia   # 复用 Sepolia 已有 TOKEN_A/B，只部署 Staking 栈"
 	@echo "  make verify-last-deploy NETWORK=sepolia   # 补验上次部署（不重新广播；verify 超时时用）"

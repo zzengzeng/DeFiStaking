@@ -4,7 +4,7 @@ import clsx from "clsx";
 
 type LayoutMode = "stack" | "split";
 
-/** 质押页布局：默认上下结构（操作区居中在上，详情在下） */
+/** 质押页布局：默认上下结构（仓位在上，操作区在下） */
 export function ProductStakePageLayout({
   hero,
   sidebar,
@@ -37,13 +37,13 @@ export function ProductStakePageLayout({
       <div className="min-w-0 space-y-6 sm:space-y-8">
         {hero}
 
-        <div className={clsx("mx-auto w-full min-w-0", actionMaxWidth)}>
-          <div className="dp-sticky space-y-4">{action}</div>
-        </div>
-
         {hasSidebar ? (
-          <div className={clsx("mx-auto w-full min-w-0 space-y-4", detailsMaxWidth)}>{sidebar}</div>
+          <div className={clsx("w-full min-w-0 space-y-4", detailsMaxWidth)}>{sidebar}</div>
         ) : null}
+
+        <div className={clsx("w-full min-w-0", actionMaxWidth)}>
+          <div className="space-y-4">{action}</div>
+        </div>
 
         {below ? <div className="min-w-0">{below}</div> : null}
       </div>

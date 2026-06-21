@@ -2,6 +2,7 @@
 
 import { OperatorNotifyPanel } from "@/components/OperatorNotifyPanel";
 import { OperatorNotifyRewardHistory } from "@/components/OperatorNotifyRewardHistory";
+import { useI18n } from "@/lib/i18n";
 
 type Props = {
   onRefresh: () => Promise<void>;
@@ -9,15 +10,16 @@ type Props = {
 
 /** 治理页运营区：A/B 双池奖励注入（0h，OPERATOR_ROLE，不经 Timelock）。 */
 export function OperatorNotifyRewardsSection({ onRefresh }: Props) {
+  const { t } = useI18n();
+
   return (
     <div className="space-y-3 border-t border-amber-500/20 pt-3">
       <div>
-        <h5 className="text-sm font-semibold text-amber-100/95">注入奖励（notifyRewardAmountA / B）</h5>
+        <h5 className="text-sm font-semibold text-amber-100/95">{t("governance.notifyTitle")}</h5>
         <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
-          部署后<strong className="font-medium text-zinc-400">必做</strong>：向池子预算注入 TokenB。需钱包持有{" "}
-          <span className="font-mono text-zinc-400">OPERATOR_ROLE</span>，先{" "}
-          <span className="font-mono text-zinc-300">mint</span> 足够 TokenB 再 approve → notify。不经 Timelock（0h 生效）。
-          Pool A/B 页面仍保留相同入口，便于按池操作。
+          {t("governance.notifyDescPrefix")}
+          <strong className="font-medium text-zinc-400">{t("governance.notifyDescMust")}</strong>
+          {t("governance.notifyDescRest")}
         </p>
       </div>
       <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">

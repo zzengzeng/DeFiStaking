@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import clsx from "clsx";
 
 import { counterpartPath, modeFromPath } from "@/lib/appMode";
+import { useI18n } from "@/lib/i18n";
 
 type Props = {
   className?: string;
@@ -16,8 +17,9 @@ export function ModeSwitcher({ className, compact = false }: Props) {
   const pathname = usePathname();
   const mode = modeFromPath(pathname);
   const otherHref = counterpartPath(pathname);
-  const productLabel = compact ? "产品" : "产品界面";
-  const consoleLabel = compact ? "控制台" : "合约控制台";
+  const { t } = useI18n();
+  const productLabel = compact ? t("mode.productShort") : t("mode.product");
+  const consoleLabel = compact ? t("mode.consoleShort") : t("mode.console");
 
   return (
     <div
@@ -26,7 +28,7 @@ export function ModeSwitcher({ className, compact = false }: Props) {
         className,
       )}
       role="group"
-      aria-label="界面模式"
+      aria-label={t("mode.aria")}
     >
       {mode === "product" ? (
         <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-[11px] font-medium text-black sm:px-3 sm:text-xs">
@@ -48,7 +50,7 @@ export function ModeSwitcher({ className, compact = false }: Props) {
         <Link
           href={otherHref}
           className="rounded-full px-2.5 py-1 text-[11px] font-medium text-zinc-500 transition hover:text-amber-200 sm:px-3 sm:text-xs"
-          title="运维、治理与合约调试"
+          title={t("mode.consoleHint")}
         >
           {consoleLabel}
         </Link>

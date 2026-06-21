@@ -11,6 +11,7 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 
 import {Pool, PoolInfo, UserInfo} from "./StakeTypes.sol";
 import {StakingExecutionErrors} from "./StakingExecutionErrors.sol";
+import {PoolAccrualViewLib} from "./libraries/PoolAccrualViewLib.sol";
 
 /// @notice Minimal view into the canonical ERC-1820 registry for ERC777 deployment checks.
 /// @dev Registry address is fixed at `0x1820a4B7618BdE71Dce8cdc73aAB6C95905faD24` on Ethereum mainnet and many L2s; if bytecode is absent the core skips hook checks.
@@ -33,6 +34,7 @@ contract DualPoolStaking is Ownable, AccessControl, ReentrancyGuard, Pausable {
 
     uint256 public constant PRECISION = 1e18; // Used for fixed-point calculations to maintain precision in reward calculations
     uint256 public constant MAX_DELTA_TIME = 30 days; // Maximum time delta for reward calculations to prevent overflow and ensure accurate reward distribution
+    uint256 public constant MAX_CATCHUP_ITERATIONS = 50; // Max `updateGlobal` steps per catch-up loop (matches delegate modules)
     uint256 public constant DUST_TOLERANCE = 10 wei; //  Threshold for accumulating dust rewards that are too small to distribute, allowing them to be added back to the available rewards once they reach this threshold
     uint256 public constant BASIS_POINTS = 10_000; // Basis points used for fee calculations, where 1 basis point is equal to 0.01%
     uint256 public constant MAX_EARLY_EXIT_PENALTY_BP = 2000; // Maximum early exit penalty in basis points (20%), applied when a user withdraws from Pool B before the lock duration has passed
@@ -497,5 +499,32 @@ contract DualPoolStaking is Ownable, AccessControl, ReentrancyGuard, Pausable {
     /// @return Memory copy of `poolBState` (TokenB pool accounting).
     function poolB() external view returns (PoolInfo memory) {
         return poolBState;
+    }
+
+    /// @notice Live Pool A pending rewards for `user` (settled + accrued since last `settleUser`).
+    /// @dev Matches `userInfoA(user).rewards` after the next Pool A write that settles this user.
+    function pendingRewardA(address user) external view returns (uint256) {
+        return _pendingReward(poolAState, userInfoA[user]);
+    }
+
+    /// @notice Live Pool B pending rewards for `user` (settled + accrued since last `settleUser`).
+    /// @dev Matches `userInfoB(user).rewards` after the next Pool B write that settles this user.
+    function pendingRewardB(address user) external view returns (uint256) {
+        return _pendingReward(poolBState, userInfoB[user]);
+    }
+
+    /// @dev Simulates `_catchUpExpiredGlobal` + `settleUser` without mutating storage.
+    function _pendingReward(PoolInfo storage pool, UserInfo storage user) private view returns (uint256) {
+        PoolInfo memory poolMem = pool;
+        UserInfo memory userMem = user;
+        return PoolAccrualViewLib.preview(
+            poolMem,
+            userMem,
+            MAX_DELTA_TIME,
+            PRECISION,
+            DUST_TOLERANCE,
+            MAX_CATCHUP_ITERATIONS,
+            block.timestamp
+        );
     }
 }

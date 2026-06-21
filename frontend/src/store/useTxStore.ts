@@ -1,3 +1,7 @@
+/**
+ * Tx Center 全局队列（Zustand + localStorage）。
+ * 与 useTransactionFlow / runTransactionPipeline 配合；合约或 chain 变更时由 TxActivityScopeSync 清理。
+ */
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 

@@ -2,17 +2,16 @@
 
 import clsx from "clsx";
 
+import { useI18n } from "@/lib/i18n";
 import type { TxState } from "@/lib/txFlowTypes";
 import { transactionButtonLabel } from "@/lib/txFlowTypes";
-
-type IdlePrimary = "Stake" | "Approve" | "Submit" | "Confirm" | "质押" | "授权" | "提交" | "确认";
 
 type Props = {
   /** 当前状态机状态（可与 `needsApproval` 组合显示 Approve） */
   flowState: TxState;
   needsApproval?: boolean;
-  idlePrimary?: IdlePrimary;
-  /** product：翠绿；console：琥珀（与控制台主色一致） */
+  idlePrimary?: "stake" | "submit" | "confirm";
+  /** product：品牌蓝；console：琥珀（与控制台主色一致） */
   accent?: "product" | "console";
   disabled?: boolean;
   onClick: () => void;
@@ -24,7 +23,7 @@ type Props = {
 export function TransactionButton({
   flowState,
   needsApproval = false,
-  idlePrimary = "提交",
+  idlePrimary = "submit",
   accent = "product",
   disabled,
   onClick,
@@ -32,7 +31,8 @@ export function TransactionButton({
   type = "button",
   children,
 }: Props) {
-  const label = children ?? transactionButtonLabel(flowState, { needsApproval, idlePrimary });
+  const { t } = useI18n();
+  const label = children ?? transactionButtonLabel(flowState, t, { needsApproval, idlePrimary });
   const showSpinner =
     flowState === "approving" ||
     flowState === "approval_pending" ||
@@ -43,7 +43,7 @@ export function TransactionButton({
   const idleClass =
     accent === "console"
       ? "bg-amber-400 text-black hover:bg-amber-300"
-      : "bg-emerald-500 text-black";
+      : "bg-[var(--dp-accent)] text-black hover:bg-[var(--dp-accent-hover)]";
 
   return (
     <button
@@ -53,7 +53,7 @@ export function TransactionButton({
       className={clsx(
         "inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-40",
         !className?.includes("dp-button") && flowState === "failed" && "bg-red-500/90 text-white",
-        !className?.includes("dp-button") && flowState === "confirmed" && "bg-emerald-400 text-black",
+        !className?.includes("dp-button") && flowState === "confirmed" && "bg-[var(--dp-accent-hover)] text-black",
         !className?.includes("dp-button") && flowState !== "failed" && flowState !== "confirmed" && idleClass,
         className,
       )}

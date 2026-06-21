@@ -1,20 +1,8 @@
-const STEPS = [
-  {
-    step: "1",
-    title: "质押代币",
-    desc: "选择灵活池或锁仓池，将 TokenA / TokenB 存入协议。",
-  },
-  {
-    step: "2",
-    title: "赚取奖励",
-    desc: "按池内份额自动累积 TokenB 奖励，APR 随池状态动态更新。",
-  },
-  {
-    step: "3",
-    title: "领取、复利或赎回",
-    desc: "领取 TokenB 奖励，或一键复利到锁仓池；灵活池随存随取，锁仓池满期费率更优。",
-  },
-] as const;
+"use client";
+
+import { useMemo } from "react";
+
+import { useI18n } from "@/lib/i18n";
 
 type Layout = "grid" | "stack";
 
@@ -26,17 +14,28 @@ export function HowItWorks({
   align?: "center" | "left";
   layout?: Layout;
 }) {
+  const { t } = useI18n();
   const centered = align === "center";
+
+  const steps = useMemo(
+    () =>
+      [
+        { step: "1", title: t("howItWorks.step1Title"), desc: t("howItWorks.step1Desc") },
+        { step: "2", title: t("howItWorks.step2Title"), desc: t("howItWorks.step2Desc") },
+        { step: "3", title: t("howItWorks.step3Title"), desc: t("howItWorks.step3Desc") },
+      ] as const,
+    [t],
+  );
 
   if (layout === "stack") {
     return (
       <section className="dp-card overflow-hidden">
         <div className="border-b border-[var(--dp-border)] px-5 py-4 sm:px-6">
-          <h2 className="text-lg font-semibold text-zinc-100">如何运作</h2>
-          <p className="mt-1 text-sm text-zinc-500">存入 → 赚奖励 → 取出，无需直接接触合约细节。</p>
+          <h2 className="text-lg font-semibold text-zinc-100">{t("howItWorks.title")}</h2>
+          <p className="mt-1 text-sm text-zinc-500">{t("howItWorks.subtitle")}</p>
         </div>
         <ol className="divide-y divide-[var(--dp-border)]">
-          {STEPS.map((s) => (
+          {steps.map((s) => (
             <li key={s.step} className="flex gap-4 px-5 py-5 sm:px-6">
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--dp-accent-muted)] text-sm font-bold text-dp-accent">
                 {s.step}
@@ -55,15 +54,15 @@ export function HowItWorks({
   return (
     <section>
       <h2 className={`text-lg font-semibold text-zinc-200 sm:text-xl ${centered ? "text-center" : ""}`}>
-        如何运作
+        {t("howItWorks.title")}
       </h2>
       <p
         className={`mt-2 text-sm text-zinc-500 ${centered ? "mx-auto max-w-lg text-center" : "max-w-2xl"}`}
       >
-        存入 → 赚奖励 → 取出，无需直接接触合约细节。
+        {t("howItWorks.subtitle")}
       </p>
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        {STEPS.map((s) => (
+        {steps.map((s) => (
           <div key={s.step} className={`dp-card p-5 ${centered ? "text-center sm:text-left" : ""}`}>
             <div
               className={`flex h-10 w-10 items-center justify-center rounded-full bg-[var(--dp-accent-muted)] text-sm font-bold text-dp-accent ${centered ? "mx-auto sm:mx-0" : ""}`}

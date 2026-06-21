@@ -11,6 +11,7 @@ import { TxExplorerLink } from "@/components/TxExplorerLink";
 import { useApproveIfNeeded } from "@/hooks/useApproveIfNeeded";
 import { useStakeApprovalTransaction } from "@/hooks/useTransactionFlow";
 import { formatToken, safeNumber } from "@/lib/format";
+import { useI18n } from "@/lib/i18n";
 import { estAprPercent } from "@/lib/poolMetrics";
 import type { TxState } from "@/lib/txFlowTypes";
 
@@ -64,6 +65,7 @@ export function StakeCard({
   rewardRateWei,
   dailyRewardSymbol = "TokenB",
 }: Props) {
+  const { t } = useI18n();
   const [amount, setAmount] = useState("");
   const [legacyPending, setLegacyPending] = useState(false);
 
@@ -85,11 +87,13 @@ export function StakeCard({
 
   const inputError = useMemo(() => {
     if (!amount.trim()) return null;
-    if (parsedWei === null) return "数量格式无效";
-    if (parsedWei <= 0n) return "请输入大于 0 的数量";
-    if (balanceWei !== undefined && parsedWei > balanceWei) return "超过钱包余额";
+    if (parsedWei === null) return t("stakeCard.invalidFormat");
+    if (parsedWei <= 0n) return t("stakeCard.amountPositive");
+    if (balanceWei !== undefined && parsedWei > balanceWei) {
+      return t("stakeCard.exceedsBalance");
+    }
     return null;
-  }, [amount, parsedWei, balanceWei]);
+  }, [amount, parsedWei, balanceWei, t]);
 
   const needsApproval = Boolean(tx && parsedWei && parsedWei > 0n && allowance.needsApproval(parsedWei));
 
@@ -158,7 +162,7 @@ export function StakeCard({
         <div className="mt-3 space-y-2 rounded-lg border border-zinc-800 bg-zinc-950/80 px-3 py-2.5 text-xs">
           {variant === "console" ? (
             <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-between">
-              <span className="text-zinc-500">当前 rewardRate</span>
+              <span className="text-zinc-500">{t("stakeCard.rewardRate")}</span>
               <span className="break-all font-mono text-zinc-200">{formatToken(rewardRateWei, 18, 8)}</span>
             </div>
           ) : null}
@@ -169,13 +173,20 @@ export function StakeCard({
                 : "flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-between"
             }
           >
-            <span className="text-zinc-500">{variant === "product" ? "预估年化收益" : "预估 APR（线性）"}</span>
+            <span className="text-zinc-500">
+              {variant === "console" ? t("stakeCard.estAprLinear") : t("stakeCard.estAprProduct")}
+            </span>
             <span className="font-semibold text-emerald-300">{aprPercent === null ? "—" : `${safeNumber(aprPercent).toFixed(2)}%`}</span>
           </div>
           <div className="flex flex-col gap-0.5 border-t border-zinc-800 pt-2 sm:flex-row sm:items-baseline sm:justify-between">
-            <span className="text-zinc-500">{variant === "product" ? "此金额预估日收益" : "此金额预估日收益"}</span>
+            <span className="text-zinc-500">{t("stakeCard.estDailyReward")}</span>
             <span className="text-right font-mono font-semibold text-emerald-300/95 sm:text-left">
-              {estDailyRewardsWei === null ? "—" : `${formatToken(estDailyRewardsWei, 18, 6)} ${dailyRewardSymbol}/天`}
+              {estDailyRewardsWei === null
+                ? "—"
+                : t("stakeCard.perDay", {
+                    amount: formatToken(estDailyRewardsWei, 18, 6),
+                    symbol: dailyRewardSymbol,
+                  })}
             </span>
           </div>
         </div>
@@ -183,7 +194,7 @@ export function StakeCard({
 
       {showBalance && (
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-zinc-800 bg-zinc-950/80 px-3 py-2 text-xs">
-          <span className="text-zinc-500">钱包余额</span>
+          <span className="text-zinc-500">{t("stakeCard.walletBalance")}</span>
           <span className="font-mono font-semibold text-zinc-100">
             {formatToken(balanceWei, tokenDecimals, 6)} {balanceSymbol}
           </span>
@@ -218,7 +229,7 @@ export function StakeCard({
               disabled={disabled || balanceWei <= 0n || Boolean(tx && txBusy)}
               className="min-h-[44px] w-full shrink-0 rounded-lg border border-zinc-600 px-3 py-2 text-xs font-semibold text-zinc-200 transition hover:border-zinc-500 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto sm:min-w-[4.5rem]"
             >
-              最大
+              {t("stakeCard.max")}
             </button>
           )}
           {tx ? (
@@ -226,7 +237,7 @@ export function StakeCard({
               flowState={displayState}
               needsApproval={needsApproval}
               accent={variant === "console" ? "console" : "product"}
-              idlePrimary="质押"
+              idlePrimary="stake"
               disabled={disabled || Boolean(inputError) || !amount.trim()}
               onClick={() => void submitTx()}
               className="w-full sm:min-w-[7rem] sm:flex-1"
@@ -238,7 +249,7 @@ export function StakeCard({
               onClick={() => void submitLegacy()}
               className="sm:min-w-[7rem] sm:flex-1"
             >
-              {legacyPending ? "处理中…" : "质押"}
+              {legacyPending ? t("stakeCard.pending") : t("stakeCard.stake")}
             </ConsoleButton>
           ) : (
             <button
@@ -247,7 +258,7 @@ export function StakeCard({
               disabled={disabled || legacyPending || Boolean(inputError) || !amount.trim()}
               className="min-h-[44px] w-full rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-black disabled:cursor-not-allowed disabled:opacity-40 sm:min-w-[7rem] sm:w-auto sm:flex-1"
             >
-              {legacyPending ? "处理中…" : "质押"}
+              {legacyPending ? t("stakeCard.pending") : t("stakeCard.stake")}
             </button>
           )}
         </div>
@@ -255,11 +266,14 @@ export function StakeCard({
 
       {tx && stakeFlow.hash ? (
         <div className="mt-2 text-xs text-zinc-400">
-          最近交易: <TxExplorerLink hash={stakeFlow.hash} className="text-sky-400 hover:underline" label="区块浏览器" />
+          {t("stakeCard.recentTx")}{" "}
+          <TxExplorerLink hash={stakeFlow.hash} className="text-sky-400 hover:underline" label={t("txCenter.explorer")} />
         </div>
       ) : null}
       {tx && stakeFlow.error && stakeFlow.state === "failed" ? <p className="mt-2 text-xs text-red-300">{stakeFlow.error}</p> : null}
-      {tx && displayState === "confirmed" ? <p className="mt-2 text-xs text-emerald-300">交易已确认。</p> : null}
+      {tx && displayState === "confirmed" ? (
+        <p className="mt-2 text-xs text-emerald-300">{t("stakeCard.txConfirmed")}</p>
+      ) : null}
 
       {inputError && <p className="mt-2 text-xs text-red-300">{inputError}</p>}
     </div>

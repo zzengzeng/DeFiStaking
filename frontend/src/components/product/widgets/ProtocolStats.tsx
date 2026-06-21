@@ -1,6 +1,7 @@
 "use client";
 
 import { formatToken, safeNumber } from "@/lib/format";
+import { useI18n } from "@/lib/i18n";
 
 type Stat = {
   label: string;
@@ -11,9 +12,11 @@ type Stat = {
 
 /** 协议级横向统计条 */
 export function ProtocolStats({ stats, loading }: { stats: Stat[]; loading?: boolean }) {
+  const { t } = useI18n();
+
   if (loading) {
     return (
-      <div className="dp-card grid grid-cols-2 gap-px overflow-hidden sm:grid-cols-4" aria-busy="true" aria-label="加载协议数据">
+      <div className="dp-card grid grid-cols-2 gap-px overflow-hidden sm:grid-cols-4" aria-busy="true" aria-label={t("async.loadingProtocol")}>
         {Array.from({ length: 4 }).map((_, i) => (
           <div key={i} className="bg-[var(--dp-surface-raised)] px-4 py-4 sm:px-5 sm:py-5">
             <div className="h-3 w-16 animate-pulse rounded bg-zinc-800" />
