@@ -39,6 +39,7 @@ export function ProductLockedPoolPage() {
   const rrB = pool.poolB?.rewardRate ?? 0n;
   const yourRewards = pool.pendingRewardB + pool.pendingRewardA;
   const busy = flow.state !== "idle";
+  const catchUpIncomplete = !pool.poolACatchUpComplete || !pool.poolBCatchUpComplete;
 
   const compoundDisabledReason = useMemo(
     () =>
@@ -141,6 +142,8 @@ export function ProductLockedPoolPage() {
                 compoundDisabled={!pool.canCompound || busy}
                 compoundDisabledReason={compoundDisabledReason}
                 compoundBusy={busy}
+                compoundBusyState={flow.state}
+                compoundCatchUpNeeded={catchUpIncomplete}
                 manageHref={copy.withdrawHref}
               />
             ) : null}

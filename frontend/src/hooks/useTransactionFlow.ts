@@ -103,11 +103,12 @@ export function useTransactionFlow(_options: UseTransactionFlowOptions = {}) {
     async (opts: ExecuteTxOpts, send: () => Promise<Hash>): Promise<Hash> => {
       setError(undefined);
       setTxHash(undefined);
-      setState("awaiting_signature");
       try {
         if (opts.catchUpPools?.length) {
+          setState("catch_up");
           await ensureCatchUp(opts.catchUpPools);
         }
+        setState("awaiting_signature");
         const h = await startTransaction({
           type: opts.txType ?? "write",
           title: opts.actionLabel,

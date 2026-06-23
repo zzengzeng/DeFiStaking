@@ -44,6 +44,7 @@ export function ProductFlexiblePoolPage() {
   const yourRewards = pool.pendingRewardA + pool.pendingRewardB;
   const { data: stakeSinceTs } = usePoolAStakeSince(userStakeA);
   const busy = flow.state !== "idle";
+  const catchUpIncomplete = !pool.poolACatchUpComplete || !pool.poolBCatchUpComplete;
 
   const compoundDisabledReason = useMemo(
     () =>
@@ -155,6 +156,8 @@ export function ProductFlexiblePoolPage() {
                 compoundDisabled={!poolB.canCompound || busy}
                 compoundDisabledReason={compoundDisabledReason}
                 compoundBusy={busy}
+                compoundBusyState={flow.state}
+                compoundCatchUpNeeded={catchUpIncomplete}
                 manageHref={copy.withdrawHref}
               />
             ) : null}

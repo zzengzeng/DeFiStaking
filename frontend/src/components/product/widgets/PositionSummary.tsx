@@ -8,6 +8,7 @@ import { TokenIcon } from "@/components/TokenIcon";
 import { UsdSubtext } from "@/components/UsdSubtext";
 import { formatToken, formatTokenDisplay } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
+import { txStateMessage, type TxState } from "@/lib/txFlowTypes";
 
 type PoolPosition = {
   label: string;
@@ -33,6 +34,8 @@ type Props = {
   compoundDisabled?: boolean;
   compoundDisabledReason?: string | null;
   compoundBusy?: boolean;
+  compoundBusyState?: TxState;
+  compoundCatchUpNeeded?: boolean;
   manageHref: string;
 };
 
@@ -50,6 +53,8 @@ export function PositionSummary({
   compoundDisabled,
   compoundDisabledReason,
   compoundBusy,
+  compoundBusyState,
+  compoundCatchUpNeeded,
   manageHref,
 }: Props) {
   const { t } = useI18n();
@@ -59,6 +64,11 @@ export function PositionSummary({
   const showCompound = Boolean(onCompound);
   const canCompoundNow = Boolean(compoundPreview && compoundPreview.totalWei > 0n && !compoundDisabled);
   const busy = Boolean(claimBusy || compoundBusy);
+
+  const compoundBusyLabel =
+    compoundBusy && compoundBusyState && compoundBusyState !== "idle"
+      ? txStateMessage(compoundBusyState, t)
+      : undefined;
 
   if (!hasStake && !hasRewards && !positions?.length) return null;
 
@@ -140,14 +150,19 @@ export function PositionSummary({
             { label: t("position.lockedReward"), value: `${formatToken(compoundPreview.rewardBWei)} TokenB` },
             { label: t("position.totalCompound"), value: `${formatToken(compoundPreview.totalWei)} TokenB` },
           ]}
-          warning={t("position.compoundWarning")}
+          warning={
+            compoundCatchUpNeeded
+              ? `${t("position.compoundWarning")} ${t("position.compoundCatchUpWarning")}`
+              : t("position.compoundWarning")
+          }
           confirmText={t("position.confirmCompoundBtn")}
           busy={compoundBusy}
+          busyLabel={compoundBusyLabel}
           onClose={() => !compoundBusy && setCompoundOpen(false)}
           onConfirm={async () => {
             if (!onCompound) return;
-            await onCompound();
             setCompoundOpen(false);
+            await onCompound();
           }}
         />
       ) : null}

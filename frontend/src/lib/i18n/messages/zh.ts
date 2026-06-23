@@ -194,6 +194,7 @@ export const zh: MessageTree = {
     approving: "授权中…",
     approvalPending: "授权确认中…",
     approved: "已授权",
+    catchUp: "同步计息…",
     awaitingSignature: "请在钱包确认",
     submitting: "提交中…",
     pending: "确认中…",
@@ -209,6 +210,7 @@ export const zh: MessageTree = {
     approving: "正在准备授权交易…",
     approvalPending: "授权交易已提交，等待链上确认…",
     approvalConfirmed: "授权已确认。",
+    catchUp: "正在同步全局计息，请在钱包中确认追账交易…",
     awaitingSignature: "请在钱包中确认交易。",
     submitting: "正在提交到网络…",
     pending: "等待链上确认…",
@@ -474,6 +476,8 @@ export const zh: MessageTree = {
     confirmCompound: "确认复利再投",
     confirmCompoundBtn: "确认复利",
     compoundWarning: "奖励将自动再投入锁仓池本金，链上结果可能与估算略有差异。",
+    compoundCatchUpWarning:
+      "计息账本尚未追平：确认后需先在钱包中确认 1～2 笔「同步计息」交易，再确认复利。也可在页顶横幅提前完成同步。",
     flexibleReward: "灵活池奖励",
     lockedReward: "锁仓池奖励",
     totalCompound: "合计再投",
@@ -507,6 +511,8 @@ export const zh: MessageTree = {
     catchUpTitle: "奖励账本需同步",
     catchUpDesc:
       "协议长时间未交互，全局计息尚未追平。赎回、领取或复投前将自动发送一笔或多笔「追账」交易（crankCatchUpPool）；请按钱包提示依次确认。",
+    catchUpAction: "立即同步",
+    catchUpSyncing: "同步中…",
   },
   deployment: {
     tokenMismatch:

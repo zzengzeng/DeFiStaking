@@ -204,6 +204,7 @@ export function ProductHomePage() {
 
   const loading = staking.isLoading || isConnecting;
   const busy = flow.state !== "idle";
+  const catchUpIncomplete = !staking.poolACatchUpComplete || !staking.poolBCatchUpComplete;
 
   const tvlA = staking.poolA?.totalStaked ?? 0n;
   const tvlB = staking.poolB?.totalStaked ?? 0n;
@@ -445,6 +446,8 @@ export function ProductHomePage() {
               compoundDisabled={!poolB.canCompound || busy}
               compoundDisabledReason={compoundDisabledReason}
               compoundBusy={busy}
+              compoundBusyState={flow.state}
+              compoundCatchUpNeeded={catchUpIncomplete}
               manageHref={
                 userA.staked > 0n
                   ? POOL_COPY.flexible.withdrawHref

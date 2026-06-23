@@ -9,6 +9,7 @@ export type TxState =
   | "approving"
   | "approval_pending"
   | "approval_confirmed"
+  | "catch_up"
   | "awaiting_signature"
   | "submitting"
   | "pending"
@@ -28,6 +29,7 @@ export function isTxBusy(s: TxState): boolean {
     s === "approving" ||
     s === "approval_pending" ||
     s === "approval_confirmed" ||
+    s === "catch_up" ||
     s === "awaiting_signature" ||
     s === "submitting" ||
     s === "pending"
@@ -47,6 +49,8 @@ export function txStateMessage(state: TxState, t: TranslateFn): string {
       return t("txState.approvalPending");
     case "approval_confirmed":
       return t("txState.approvalConfirmed");
+    case "catch_up":
+      return t("txState.catchUp");
     case "awaiting_signature":
       return t("txState.awaitingSignature");
     case "submitting":
@@ -82,6 +86,8 @@ export function transactionButtonLabel(
       return t("txButton.approvalPending");
     case "approval_confirmed":
       return t("txButton.approved");
+    case "catch_up":
+      return t("txButton.catchUp");
     case "awaiting_signature":
       return t("txButton.awaitingSignature");
     case "submitting":

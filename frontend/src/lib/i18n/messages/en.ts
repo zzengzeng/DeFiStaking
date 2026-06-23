@@ -186,6 +186,7 @@ export const en: MessageTree = {
     approving: "Approving…",
     approvalPending: "Confirming approval…",
     approved: "Approved",
+    catchUp: "Syncing accrual…",
     awaitingSignature: "Confirm in wallet",
     submitting: "Submitting…",
     pending: "Confirming…",
@@ -201,6 +202,7 @@ export const en: MessageTree = {
     approving: "Preparing approval transaction…",
     approvalPending: "Approval submitted — waiting for confirmation…",
     approvalConfirmed: "Approval confirmed.",
+    catchUp: "Syncing global accrual — confirm catch-up tx(s) in your wallet…",
     awaitingSignature: "Confirm the transaction in your wallet.",
     submitting: "Submitting to network…",
     pending: "Waiting for on-chain confirmation…",
@@ -469,6 +471,8 @@ export const en: MessageTree = {
     confirmCompound: "Confirm compound",
     confirmCompoundBtn: "Confirm",
     compoundWarning: "Rewards reinvest into locked pool principal; on-chain result may differ slightly.",
+    compoundCatchUpWarning:
+      "Accrual ledger is behind: after confirm you may need 1–2 catch-up txs in your wallet before compound. You can also sync early from the banner above.",
     flexibleReward: "Flexible pool rewards",
     lockedReward: "Locked pool rewards",
     totalCompound: "Total compound",
@@ -502,6 +506,8 @@ export const en: MessageTree = {
     catchUpTitle: "Reward ledger sync required",
     catchUpDesc:
       "The protocol was idle for a long time and global accrual is behind. Withdraw, claim, or compound will auto-send one or more crankCatchUpPool txs first—confirm each in your wallet.",
+    catchUpAction: "Sync now",
+    catchUpSyncing: "Syncing…",
   },
   deployment: {
     tokenMismatch:

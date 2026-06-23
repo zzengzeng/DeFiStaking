@@ -15,6 +15,7 @@ type Props = {
   cancelText?: string;
   variant?: "default" | "danger";
   busy?: boolean;
+  busyLabel?: string;
   onConfirm: () => void | Promise<void>;
   onClose: () => void;
 };
@@ -28,6 +29,7 @@ export function ConfirmActionModal({
   cancelText,
   variant = "default",
   busy,
+  busyLabel,
   onConfirm,
   onClose,
 }: Props) {
@@ -79,7 +81,7 @@ export function ConfirmActionModal({
               danger ? "bg-red-400 text-black hover:bg-red-300" : "bg-emerald-400 text-black hover:bg-emerald-300",
             )}
           >
-            {busy ? t("common.busy") : resolvedConfirm}
+            {busy ? (busyLabel ?? t("common.busy")) : resolvedConfirm}
           </button>
         </div>
       </div>
