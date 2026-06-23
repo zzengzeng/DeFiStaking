@@ -27,6 +27,8 @@ export type TxItem = {
     amount?: string;
     token?: string;
     pool?: "A" | "B";
+    /** Batch crank: e.g. "A,B" */
+    pools?: string;
     /** notifyRewardAmount* 的 emission duration（秒），可选 */
     durationSec?: string;
   };
