@@ -9,6 +9,15 @@ import { contractAddresses } from "@/contracts/addresses";
 import { type ProtocolStatus } from "@/store/useUiStore";
 import { parseUserInfoTuple } from "@/lib/userInfo";
 
+const ZERO = "0x0000000000000000000000000000000000000000" as const;
+
+function parseAddressEnv(raw: string | undefined, label: string): `0x${string}` | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  const s = String(raw).trim();
+  if (!/^0x[a-fA-F0-9]{40}$/.test(s) || s.toLowerCase() === ZERO) return undefined;
+  return s as `0x${string}`;
+}
+
 type PoolInfo = {
   stakingToken: `0x${string}`;
   totalStaked: bigint;
@@ -85,6 +94,8 @@ export function useStaking() {
       { address: STAKING, abi: ABI, functionName: "paused" },
       { address: STAKING, abi: ABI, functionName: "emergencyMode" },
       { address: STAKING, abi: ABI, functionName: "shutdown" },
+      { address: STAKING, abi: ABI, functionName: "poolACatchUpComplete" },
+      { address: STAKING, abi: ABI, functionName: "poolBCatchUpComplete" },
       { address: STAKING, abi: ABI, functionName: "lockDuration" },
       { address: STAKING, abi: ABI, functionName: "claimCooldown" },
       { address: STAKING, abi: ABI, functionName: "minClaimAmount" },
@@ -93,6 +104,8 @@ export function useStaking() {
       { address: STAKING, abi: ABI, functionName: "penaltyfeeBP" },
       { address: STAKING, abi: ABI, functionName: "unclaimedFeesB" },
       { address: STAKING, abi: ABI, functionName: "maxTransferFeeBP" },
+      { address: STAKING, abi: ABI, functionName: "userModule" },
+      { address: STAKING, abi: ABI, functionName: "adminModule" },
     ];
     if (!address) return base;
     return [
@@ -123,14 +136,18 @@ export function useStaking() {
     const paused = pick<boolean>(d, 2, false);
     const emergencyMode = pick<boolean>(d, 3, false);
     const shutdown = pick<boolean>(d, 4, false);
-    const lockDuration = pick<bigint>(d, 5, 0n);
-    const claimCooldown = pick<bigint>(d, 6, 0n);
-    const minClaimAmount = pick<bigint>(d, 7, 0n);
-    const withdrawFeeBP = pick<bigint>(d, 8, 0n);
-    const midTermFeeBP = pick<bigint>(d, 9, 0n);
-    const penaltyfeeBP = pick<bigint>(d, 10, 0n);
-    const unclaimedFeesB = pick<bigint>(d, 11, 0n);
-    const maxTransferFeeBP = pick<bigint>(d, 12, 0n);
+    const poolACatchUpComplete = pick<boolean>(d, 5, true);
+    const poolBCatchUpComplete = pick<boolean>(d, 6, true);
+    const lockDuration = pick<bigint>(d, 7, 0n);
+    const claimCooldown = pick<bigint>(d, 8, 0n);
+    const minClaimAmount = pick<bigint>(d, 9, 0n);
+    const withdrawFeeBP = pick<bigint>(d, 10, 0n);
+    const midTermFeeBP = pick<bigint>(d, 11, 0n);
+    const penaltyfeeBP = pick<bigint>(d, 12, 0n);
+    const unclaimedFeesB = pick<bigint>(d, 13, 0n);
+    const maxTransferFeeBP = pick<bigint>(d, 14, 0n);
+    const onChainUserModule = parseAddressEnv(pick(d, 15, undefined) as string | undefined, "userModule");
+    const onChainAdminModule = parseAddressEnv(pick(d, 16, undefined) as string | undefined, "adminModule");
 
     const status: ProtocolStatus = shutdown ? "SHUTDOWN" : emergencyMode ? "EMERGENCY" : paused ? "PAUSED" : "NORMAL";
     const globalRequired =
@@ -144,18 +161,20 @@ export function useStaking() {
       (poolB?.dust ?? 0n);
     const globalBadDebt = (poolA?.badDebt ?? 0n) + (poolB?.badDebt ?? 0n);
 
-    const userA = address ? pick(d, 13, undefined) : undefined;
-    const userB = address ? pick(d, 14, undefined) : undefined;
-    const unlockTimeB = address ? pick<bigint>(d, 15, 0n) : 0n;
-    const stakeTimestampB = address ? pick<bigint>(d, 16, 0n) : 0n;
-    const lastClaimTime = address ? pick<bigint>(d, 17, 0n) : 0n;
-    const pendingRewardA = address ? pickPendingReward(d, 18, userA) : 0n;
-    const pendingRewardB = address ? pickPendingReward(d, 19, userB) : 0n;
+    const userA = address ? pick(d, 17, undefined) : undefined;
+    const userB = address ? pick(d, 18, undefined) : undefined;
+    const unlockTimeB = address ? pick<bigint>(d, 19, 0n) : 0n;
+    const stakeTimestampB = address ? pick<bigint>(d, 20, 0n) : 0n;
+    const lastClaimTime = address ? pick<bigint>(d, 21, 0n) : 0n;
+    const pendingRewardA = address ? pickPendingReward(d, 22, userA) : 0n;
+    const pendingRewardB = address ? pickPendingReward(d, 23, userB) : 0n;
 
     return {
       status,
       poolA,
       poolB,
+      poolACatchUpComplete,
+      poolBCatchUpComplete,
       globalRequired,
       globalBadDebt,
       lockDuration,
@@ -166,6 +185,8 @@ export function useStaking() {
       penaltyfeeBP,
       unclaimedFeesB,
       maxTransferFeeBP,
+      onChainUserModule,
+      onChainAdminModule,
       userA,
       userB,
       pendingRewardA,

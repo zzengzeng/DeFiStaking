@@ -12,6 +12,7 @@ import { ModeSwitcher } from "@/components/ModeSwitcher";
 import { NetworkGuard } from "@/components/NetworkGuard";
 import { ProductFooter } from "@/components/product/ProductFooter";
 import { StatusBanner } from "@/components/StatusBanner";
+import { CatchUpBanner } from "@/components/CatchUpBanner";
 import { TestnetDemoBanner } from "@/components/TestnetDemoBanner";
 import { TxCenterHeaderButton } from "@/components/TxCenterPanel";
 import { useStaking } from "@/hooks/useStaking";
@@ -104,6 +105,7 @@ export function ProductShell({ children }: { children: React.ReactNode }) {
       </header>
       <main className="mx-auto w-full min-w-0 max-w-6xl flex-1 overflow-x-clip px-4 pb-6 sm:pb-8">
         <TestnetDemoBanner />
+        <CatchUpBanner />
         {staking.status !== "NORMAL" ? <StatusBanner status={staking.status} showEscapeAnchor /> : null}
         <NetworkGuard />
         {children}

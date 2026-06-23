@@ -28,6 +28,10 @@ library StakingAdminLib {
         address to;
         /// @notice Requested sweep amount (must be `<=` computed excess).
         uint256 amount;
+        /// @notice FOT outbound tax ceiling (`0` = no transfer loss allowed; same rule as inbound).
+        uint256 maxTransferFeeBP;
+        /// @notice Basis-point denominator (`10_000`).
+        uint256 basisPoints;
     }
 
     /// @notice Parameters for terminal shutdown finalization.
@@ -50,6 +54,10 @@ library StakingAdminLib {
         uint256 bookedUserRewardsA;
         /// @notice Aggregate of all Pool B `userInfo.rewards` at call time.
         uint256 bookedUserRewardsB;
+        /// @notice FOT outbound tax ceiling for residual TokenB sweep (`0` = no transfer loss allowed).
+        uint256 maxTransferFeeBP;
+        /// @notice Basis-point denominator (`10_000`).
+        uint256 basisPoints;
     }
 
     /// @notice Parameters for Pool A emergency principal exit.
@@ -60,7 +68,7 @@ library StakingAdminLib {
         bool shutdown;
         /// @notice User receiving principal and partial rewards per liquidity rules.
         address user;
-        /// @notice FOT outbound tax ceiling for TokenA (`0` = standard ERC20).
+        /// @notice FOT outbound tax ceiling for TokenA (`0` = no transfer loss allowed; same rule as inbound).
         uint256 maxTransferFeeBP;
         /// @notice Basis-point denominator (`10_000`).
         uint256 basisPoints;
@@ -74,7 +82,7 @@ library StakingAdminLib {
         bool shutdown;
         /// @notice User receiving principal and partial rewards per liquidity rules.
         address user;
-        /// @notice FOT outbound tax ceiling for TokenB (`0` = standard ERC20).
+        /// @notice FOT outbound tax ceiling for TokenB (`0` = no transfer loss allowed; same rule as inbound).
         uint256 maxTransferFeeBP;
         /// @notice Basis-point denominator (`10_000`).
         uint256 basisPoints;
@@ -86,8 +94,12 @@ library StakingAdminLib {
         IERC20 rewardToken;
         /// @notice Payer supplying reward tokens.
         address from;
-        /// @notice Upper bound on tokens requested from payer.
+        /// @notice Upper bound on tokens requested from payer (`transferFrom` amount).
         uint256 amount;
+        /// @notice FOT inbound tax ceiling (`0` = no transfer loss allowed; same rule as `stakeB` / `notifyReward*`).
+        uint256 maxTransferFeeBP;
+        /// @notice Basis-point denominator (`10_000`).
+        uint256 basisPoints;
     }
 
     /// @dev Minimum TokenB balance required to cover principal, pending rewards, fees, and dust (used in recovery checks).
@@ -165,6 +177,7 @@ library StakingAdminLib {
     }
 
     /// @notice Sweeps `p.token` to `p.to` if the amount is provably non-liability "excess" per pool accounting rules.
+    /// @dev Only Pool A staking token, Pool B / reward token (TokenB) are recoverable; any other ERC20 reverts `TokenRecoveryRestricted`.
     /// @param poolA Pool A storage (TokenA principal liability).
     /// @param poolB Pool B storage.
     /// @param p Recovery parameters (`RecoverTokenParams`).
@@ -196,9 +209,11 @@ library StakingAdminLib {
             if (p.amount > excessB) {
                 revert StakingExecutionErrors.TokenRecoveryRestricted();
             }
+        } else {
+            revert StakingExecutionErrors.TokenRecoveryRestricted();
         }
 
-        p.token.safeTransfer(p.to, p.amount);
+        FOTTransferLib.transferGross(p.token, p.to, p.amount, p.maxTransferFeeBP, p.basisPoints);
     }
 
     /// @notice Terminal shutdown step: sweeps **non-user** reward token residue to `feeRecipient` and retains per-pool `totalPending` equal to booked user rewards.
@@ -252,7 +267,7 @@ library StakingAdminLib {
         poolB.dust = 0;
 
         if (residual > 0) {
-            p.rewardToken.safeTransfer(p.feeRecipient, residual);
+            FOTTransferLib.transferGross(p.rewardToken, p.feeRecipient, residual, p.maxTransferFeeBP, p.basisPoints);
         }
     }
 
@@ -366,6 +381,7 @@ library StakingAdminLib {
     }
 
     /// @notice Pulls reward tokens from `p.from` and applies them against `badDebt` buckets, refunding surplus to Pool B `availableRewards`.
+    /// @dev Inbound pull uses balance delta; reverts `ExcessiveTransferFee` when implied tax exceeds `maxTransferFeeBP` (same as `notifyReward*`).
     /// @param poolA Pool A storage.
     /// @param poolB Pool B storage.
     /// @param p Pull parameters (`ResolveBadDebtParams`).
@@ -386,6 +402,9 @@ library StakingAdminLib {
         uint256 balBefore = p.rewardToken.balanceOf(address(this));
         p.rewardToken.safeTransferFrom(p.from, address(this), p.amount);
         uint256 rem = p.rewardToken.balanceOf(address(this)) - balBefore;
+        if (rem * p.basisPoints < p.amount * (p.basisPoints - p.maxTransferFeeBP)) {
+            revert StakingExecutionErrors.ExcessiveTransferFee();
+        }
 
         if (rem > 0 && poolA.badDebt > 0) {
             r.repayA = Math.min(rem, poolA.badDebt);

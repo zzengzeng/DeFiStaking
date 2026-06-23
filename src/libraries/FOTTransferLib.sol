@@ -27,7 +27,8 @@ library FOTTransferLib {
     }
 
     /// @notice Transfers `grossAmount` to `to`; FOT tax is borne by the recipient (not subsidized by the pool).
-    /// @dev When `maxTransferFeeBP > 0`, reverts `ExcessiveTransferFee` if implied tax exceeds the configured ceiling.
+    /// @dev Uses the same implied-fee bound as inbound stake/notify: `maxTransferFeeBP == 0` requires `received == grossAmount`
+    ///      (no FOT loss); `maxTransferFeeBP > 0` tolerates tax up to that ceiling.
     function transferGross(IERC20 token, address to, uint256 grossAmount, uint256 maxTransferFeeBP, uint256 basisPoints)
         internal
         returns (uint256 received)
@@ -43,7 +44,7 @@ library FOTTransferLib {
         token.safeTransfer(to, grossAmount);
         received = token.balanceOf(to) - recipientBefore;
 
-        if (maxTransferFeeBP > 0 && received * basisPoints < grossAmount * (basisPoints - maxTransferFeeBP)) {
+        if (received * basisPoints < grossAmount * (basisPoints - maxTransferFeeBP)) {
             revert StakingExecutionErrors.ExcessiveTransferFee();
         }
         emit OutboundTransfer(address(token), to, grossAmount, received);

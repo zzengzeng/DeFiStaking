@@ -11,6 +11,7 @@
     "prestart": "node scripts/ensure-build.mjs",
     "start": "next start",
     "lint": "next lint",
+    "test:unit": "vitest run",
     "test:e2e": "playwright test",
     "sync:addresses": "python3 ../script/sync_frontend_addresses.py"
   },
@@ -37,6 +38,7 @@
     "eslint": "^8.57.1",
     "eslint-config-next": "14.2.35",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^3.2.4"
   }
 }

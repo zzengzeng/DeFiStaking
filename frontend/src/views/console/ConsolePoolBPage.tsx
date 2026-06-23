@@ -21,6 +21,7 @@ import { useConsoleCopy } from "@/lib/consoleCopy";
 import { formatToken, formatTokenDisplay } from "@/lib/format";
 import { formatCountdownHms } from "@/lib/timelockCountdown";
 import { parseUserInfoTuple } from "@/lib/userInfo";
+import { CATCH_UP_B, CATCH_UP_BOTH } from "@/lib/poolCatchUp";
 
 /**
  * 锁仓池（Pool B）控制台：unlockTime、费率预览、compound、Smart Suggestions 赎回。
@@ -54,6 +55,7 @@ export function ConsolePoolBPage() {
         txType: "withdraw",
         metadata: { pool: "B", token: "TokenB", amount: amt },
         onConfirmed: () => pool.refetchWalletAndPool(),
+        catchUpPools: CATCH_UP_B,
       },
       () => pool.writeWithdrawB(amt),
     );
@@ -67,6 +69,7 @@ export function ConsolePoolBPage() {
         txType: "claim",
         metadata: { pool: "B", token: "TokenB" },
         onConfirmed: () => pool.refetchWalletAndPool(),
+        catchUpPools: CATCH_UP_B,
       },
       () => pool.writeClaimB(),
     );
@@ -80,6 +83,7 @@ export function ConsolePoolBPage() {
         txType: "compound",
         metadata: { pool: "B", token: "TokenB" },
         onConfirmed: () => pool.refetchWalletAndPool(),
+        catchUpPools: CATCH_UP_BOTH,
       },
       () => pool.writeCompoundB(),
     );
@@ -93,6 +97,7 @@ export function ConsolePoolBPage() {
         txType: "emergency",
         metadata: { pool: "B", token: "TokenB" },
         onConfirmed: () => pool.refetchWalletAndPool(),
+        catchUpPools: CATCH_UP_B,
       },
       () => pool.writeEmergencyWithdrawB(),
     );

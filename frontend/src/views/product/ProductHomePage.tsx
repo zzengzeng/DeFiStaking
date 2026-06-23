@@ -34,6 +34,7 @@ import { estAprPercent } from "@/lib/poolMetrics";
 import { showsUsdEstimates } from "@/lib/tokenPrices";
 import { parseUserInfoTuple } from "@/lib/userInfo";
 import { useI18n } from "@/lib/i18n";
+import { CATCH_UP_A, CATCH_UP_B, CATCH_UP_BOTH } from "@/lib/poolCatchUp";
 
 type PoolId = "flexible" | "locked";
 
@@ -236,6 +237,7 @@ export function ProductHomePage() {
             txType: "claim",
             metadata: { pool: "A", token: "TokenB" },
             onConfirmed: () => staking.refetchAll(),
+            catchUpPools: CATCH_UP_A,
           },
           () => poolA.writeClaimA(),
         );
@@ -247,6 +249,7 @@ export function ProductHomePage() {
             txType: "claim",
             metadata: { pool: "B", token: "TokenB" },
             onConfirmed: () => staking.refetchAll(),
+            catchUpPools: CATCH_UP_B,
           },
           () => poolB.writeClaimB(),
         );
@@ -263,6 +266,7 @@ export function ProductHomePage() {
         txType: "compound",
         metadata: { pool: "B", token: "TokenB" },
         onConfirmed: () => staking.refetchAll(),
+        catchUpPools: CATCH_UP_BOTH,
       },
       () => poolB.writeCompoundB(),
     );

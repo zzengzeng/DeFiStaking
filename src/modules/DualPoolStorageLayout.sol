@@ -12,7 +12,7 @@ import {PoolInfo, UserInfo} from "../StakeTypes.sol";
 /// @title DualPoolStorageLayout
 /// @notice Abstract base holding **exact** storage field order shared by `DualPoolStaking` and delegatecall modules.
 /// @dev `DualPoolUserModule` / `DualPoolAdminModule` inherit this so `delegatecall` reads/writes the core’s slots. **Do not reorder, rename, or insert** fields without updating `DualPoolStaking` and migration notes.
-/// @custom:layout The core contract duplicates this ordering for its own bytecode; any drift breaks `delegatecall` until both sides are migrated together.
+/// @custom:layout `DualPoolStaking` inherits this contract so slot order has a single source of truth for `delegatecall`.
 abstract contract DualPoolStorageLayout is Ownable, AccessControl, ReentrancyGuard, Pausable {
     /// @notice Reward token (TokenB, 18 decimals): same asset used to pay Pool A rewards and as Pool B stake/reward unit.
     IERC20 public rewardToken;

@@ -17,6 +17,7 @@ import {DualPoolAdminModule} from "../src/modules/DualPoolAdminModule.sol";
 import {Pool, PoolInfo} from "../src/StakeTypes.sol";
 import {StakingExecutionErrors} from "../src/StakingExecutionErrors.sol";
 import {RewardReanchorLib} from "../src/libraries/RewardReanchorLib.sol";
+import {ForceClaimAllLib} from "../src/libraries/ForceClaimAllLib.sol";
 
 contract ReanchorHarness {
     PoolInfo internal pool;
@@ -3698,6 +3699,94 @@ contract DualPoolStakingTest is Test {
         vm.stopPrank();
     }
 
+    /// @notice `maxTransferFeeBP == 0` rejects any outbound FOT (symmetric with inbound); prevents silent wallet shortfall if TokenB later enables tax.
+    function testClaimBRevertsWhenMaxTransferFeeBPZeroAndTokenBEnablesFOT() public {
+        MockERC20 tokenA = new MockERC20("TKA8", "TKA8");
+        MockFOTERC20 tokenB = new MockFOTERC20("TKBF4", "TKBF4", 0);
+        DualPoolStaking s = _deployWiredDualPool(address(tokenA), address(tokenB));
+        s.setMaxTransferFeeBP(0);
+
+        tokenB.mint(address(this), 10_000 ether);
+        tokenB.approve(address(s), type(uint256).max);
+        s.notifyRewardAmountB(SAFE_REWARD_AMOUNT, SAFE_DURATION);
+        vm.warp(block.timestamp + SAFE_DURATION + 1);
+        s.notifyRewardAmountB(SAFE_REWARD_AMOUNT, SAFE_DURATION);
+
+        vm.startPrank(user);
+        tokenB.mint(user, 1000 ether);
+        tokenB.approve(address(s), type(uint256).max);
+        s.stakeB(DEFAULT_STAKE);
+        vm.warp(block.timestamp + SAFE_DURATION);
+        tokenB.setFeeBps(500);
+        vm.expectRevert(StakingExecutionErrors.ExcessiveTransferFee.selector);
+        s.claimB();
+        vm.stopPrank();
+    }
+
+    /// @notice `recoverToken` for TokenB uses `transferGross` and reverts when outbound FOT exceeds `maxTransferFeeBP`.
+    function testRecoverTokenBRevertsWhenOutboundFOTBeyondCap() public {
+        MockERC20 tokenA = new MockERC20("TRA", "TRA");
+        MockFOTERC20 tokenB = new MockFOTERC20("TRB", "TRB", 0);
+        DualPoolStaking s = _deployWiredDualPool(address(tokenA), address(tokenB));
+
+        tokenB.mint(address(this), 1000 ether);
+        tokenB.approve(address(s), type(uint256).max);
+        s.notifyRewardAmountB(10 ether, SAFE_DURATION);
+        tokenB.mint(address(s), 100 ether);
+
+        tokenB.setFeeBps(2000);
+        vm.expectRevert(StakingExecutionErrors.ExcessiveTransferFee.selector);
+        s.recoverToken(address(tokenB), address(0xCAFE), 50 ether);
+    }
+
+    /// @notice `forceShutdownFinalize` residual sweep uses `transferGross` and reverts when outbound FOT exceeds cap.
+    function testForceShutdownFinalizeRevertsWhenResidualFOTBeyondCap() public {
+        MockERC20 tokenA = new MockERC20("TSA", "TSA");
+        MockFOTERC20 tokenB = new MockFOTERC20("TSB", "TSB", 0);
+        DualPoolStaking s = _deployWiredDualPool(address(tokenA), address(tokenB));
+
+        tokenB.mint(address(this), 1000 ether);
+        tokenB.approve(address(s), type(uint256).max);
+        s.notifyRewardAmountA(SAFE_REWARD_AMOUNT, SAFE_DURATION);
+
+        s.enableEmergencyMode();
+        s.activateShutdown();
+        vm.warp(s.shutdownAt() + 365 days + 1);
+
+        tokenB.setFeeBps(2000);
+        vm.expectRevert(StakingExecutionErrors.ExcessiveTransferFee.selector);
+        s.forceShutdownFinalize();
+    }
+
+    /// @notice `resolveBadDebt` inbound pull enforces the same `maxTransferFeeBP` check as `notifyReward*`.
+    function testResolveBadDebtRevertsWhenInboundFOTBeyondCap() public {
+        MockERC20 tokenA = new MockERC20("RDA", "RDA");
+        MockFOTERC20 tokenB = new MockFOTERC20("RDB", "RDB", 0);
+        DualPoolStaking s = _deployWiredDualPool(address(tokenA), address(tokenB));
+        DualPoolStakingAdmin admin = new DualPoolStakingAdmin(address(s), address(this), address(this));
+        s.grantRole(s.ADMIN_ROLE(), address(admin));
+
+        tokenB.mint(address(this), 1000 ether);
+        tokenB.approve(address(s), type(uint256).max);
+        s.notifyRewardAmountA(10 ether, SAFE_DURATION);
+
+        bytes32 badDebtSlot = bytes32(uint256(24));
+        vm.store(address(s), badDebtSlot, bytes32(uint256(1 ether)));
+
+        tokenB.setFeeBps(2000);
+        vm.expectRevert(StakingExecutionErrors.ExcessiveTransferFee.selector);
+        admin.resolveBadDebt(10 ether);
+    }
+
+    /// @notice `recoverToken` rejects ERC20 that is not Pool A / Pool B / reward token.
+    function testRecoverTokenUnknownTokenReverts() public {
+        MockERC20 stray = new MockERC20("STRAY", "STRAY");
+        stray.mint(address(dualPoolStaking), 100 ether);
+
+        vm.expectRevert(StakingExecutionErrors.TokenRecoveryRestricted.selector);
+        stakingAdmin.recoverToken(address(stray), address(0xCAFE), 1 ether);
+    }
+
     /// @notice When accumulated rounding dust reaches `DUST_TOLERANCE`, it is swept into `availableRewards`.
     function testDustRecyclesAtTolerance() public {
         rewardToken.approve(address(dualPoolStaking), type(uint256).max);
@@ -3712,5 +3801,239 @@ contract DualPoolStakingTest is Test {
         }
         vm.stopPrank();
         assertLt(dualPoolStaking.poolA().dust, 10, "dust recycled or below tolerance");
+    }
+
+    /// @notice Direct calls to module `execute*` revert (`DelegatecallGuard`).
+    function testDirectModuleCallReverts() public {
+        DualPoolUserModule userModule = DualPoolUserModule(payable(dualPoolStaking.userModule()));
+        vm.expectRevert(StakingExecutionErrors.DirectModuleCall.selector);
+        userModule.executeStakeA(user, 1 ether);
+    }
+
+    /// @notice `pause()` is forbidden after shutdown activation.
+    function testPauseForbiddenDuringShutdown() public {
+        _activateShutdownForTests();
+        vm.expectRevert(StakingExecutionErrors.PauseForbiddenDuringShutdown.selector);
+        dualPoolStaking.pause();
+    }
+
+    /// @notice Operational pause must block permissionless crank so accrual cannot advance past `pausedAt` (M-1).
+    function testCrankCatchUpPoolRevertsWhilePaused() public {
+        uint256 rewardAmount = SAFE_REWARD_AMOUNT;
+        uint256 duration = SAFE_DURATION;
+        rewardToken.approve(address(dualPoolStaking), type(uint256).max);
+        dualPoolStaking.notifyRewardAmountA(rewardAmount, duration);
+
+        vm.startPrank(user);
+        stakingToken.approve(address(dualPoolStaking), DEFAULT_STAKE);
+        dualPoolStaking.stakeA(DEFAULT_STAKE);
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + duration / 2);
+        dualPoolStaking.pause();
+
+        PoolInfo memory poolAtPause = dualPoolStaking.poolA();
+        assertEq(poolAtPause.lastUpdateTime, dualPoolStaking.pausedAt());
+
+        vm.warp(block.timestamp + 1 days);
+
+        vm.expectRevert();
+        dualPoolStaking.crankCatchUpPool(Pool.A);
+
+        PoolInfo memory poolAfter = dualPoolStaking.poolA();
+        assertEq(poolAfter.lastUpdateTime, poolAtPause.lastUpdateTime);
+        assertEq(poolAfter.totalPending, poolAtPause.totalPending);
+        assertEq(poolAfter.availableRewards, poolAtPause.availableRewards);
+    }
+
+    /// @notice Invalid `poolRaw` reverts instead of defaulting to Pool B.
+    function testCrankCatchUpPoolInvalidPoolRawReverts() public {
+        bytes memory callData = abi.encodeWithSelector(dualPoolStaking.crankCatchUpPool.selector, uint8(2));
+        vm.expectRevert(abi.encodeWithSelector(StakingExecutionErrors.InvalidPool.selector, uint8(2)));
+        (bool ok,) = address(dualPoolStaking).call(callData);
+        ok;
+    }
+
+    /// @notice `pendingReward*` and `pool*CatchUpComplete` freeze at `pausedAt` during operational pause (L-1).
+    function testPauseViewAccrualCapUsesPausedAt() public {
+        uint256 rewardAmount = SAFE_REWARD_AMOUNT;
+        uint256 duration = SAFE_DURATION;
+        rewardToken.approve(address(dualPoolStaking), type(uint256).max);
+        dualPoolStaking.notifyRewardAmountA(rewardAmount, duration);
+
+        vm.startPrank(user);
+        stakingToken.approve(address(dualPoolStaking), DEFAULT_STAKE);
+        dualPoolStaking.stakeA(DEFAULT_STAKE);
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + duration / 2);
+        dualPoolStaking.pause();
+
+        uint256 pendingAtPause = dualPoolStaking.pendingRewardA(user);
+        assertTrue(dualPoolStaking.poolACatchUpComplete(), "catch-up complete at pause boundary");
+
+        vm.warp(block.timestamp + 5 days);
+
+        assertEq(dualPoolStaking.pendingRewardA(user), pendingAtPause, "pendingReward must not grow while paused");
+        assertTrue(dualPoolStaking.poolACatchUpComplete(), "catch-up view must stay complete while paused");
+    }
+
+    /// @notice Crank during shutdown+pause does not advance accrual past `pausedAt` (L-2).
+    function testCrankCatchUpPoolAllowedWhenShutdownAndPaused() public {
+        rewardToken.approve(address(dualPoolStaking), type(uint256).max);
+        dualPoolStaking.notifyRewardAmountA(SAFE_REWARD_AMOUNT, SAFE_DURATION);
+        vm.warp(block.timestamp + SAFE_DURATION / 2);
+
+        dualPoolStaking.pause();
+        _activateShutdownForTests();
+        assertTrue(dualPoolStaking.paused());
+        assertTrue(dualPoolStaking.shutdown());
+
+        uint256 pausedAt = dualPoolStaking.pausedAt();
+        vm.warp(block.timestamp + 1 days);
+        dualPoolStaking.crankCatchUpPool(Pool.A);
+        assertEq(dualPoolStaking.poolA().lastUpdateTime, pausedAt);
+        assertTrue(dualPoolStaking.poolACatchUpComplete());
+    }
+
+    /// @notice `forceClaimAll` during shutdown+pause must not accrue past `pausedAt` (L-2).
+    function testShutdownPauseForceClaimAccrualFrozenAtPausedAt() public {
+        uint256 rewardAmount = SAFE_REWARD_AMOUNT;
+        uint256 duration = SAFE_DURATION;
+        rewardToken.approve(address(dualPoolStaking), type(uint256).max);
+        dualPoolStaking.notifyRewardAmountA(rewardAmount, duration);
+        dualPoolStaking.notifyRewardAmountB(rewardAmount, duration);
+
+        vm.startPrank(user);
+        stakingToken.approve(address(dualPoolStaking), DEFAULT_STAKE);
+        rewardToken.approve(address(dualPoolStaking), DEFAULT_STAKE);
+        dualPoolStaking.stakeA(DEFAULT_STAKE);
+        dualPoolStaking.stakeB(DEFAULT_STAKE);
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + duration / 2);
+        dualPoolStaking.pause();
+
+        uint256 pendingAAtPause = dualPoolStaking.pendingRewardA(user);
+        uint256 pendingBAtPause = dualPoolStaking.pendingRewardB(user);
+        uint256 rewardBalBefore = rewardToken.balanceOf(user);
+
+        _activateShutdownForTests();
+        vm.warp(block.timestamp + 3 days);
+
+        assertEq(dualPoolStaking.pendingRewardA(user), pendingAAtPause);
+        assertEq(dualPoolStaking.pendingRewardB(user), pendingBAtPause);
+
+        vm.prank(user);
+        dualPoolStaking.forceClaimAll();
+
+        assertEq(
+            rewardToken.balanceOf(user) - rewardBalBefore,
+            pendingAAtPause + pendingBAtPause,
+            "payout must match pause-time pending, not pause-window accrual"
+        );
+        assertEq(dualPoolStaking.pendingRewardA(user), 0);
+        assertEq(dualPoolStaking.pendingRewardB(user), 0);
+    }
+
+    /// @notice Permissionless crank unblocks pause after >1500d idle (H-1).
+    function testCrankCatchUpPoolAfterLongIdleAllowsPause() public {
+        rewardToken.approve(address(dualPoolStaking), type(uint256).max);
+        dualPoolStaking.notifyRewardAmountA(SAFE_REWARD_AMOUNT, SAFE_DURATION);
+        vm.warp(block.timestamp + 1600 days);
+        assertFalse(dualPoolStaking.poolACatchUpComplete());
+        while (!dualPoolStaking.poolACatchUpComplete()) {
+            dualPoolStaking.crankCatchUpPool(Pool.A);
+        }
+        dualPoolStaking.pause();
+        assertTrue(dualPoolStaking.paused());
+    }
+
+    /// @notice Settlement exits work during shutdown even if contract was paused before shutdown (M-1).
+    function testForceClaimAllWorksWhenShutdownAndPaused() public {
+        vm.startPrank(user);
+        stakingToken.approve(address(dualPoolStaking), type(uint256).max);
+        rewardToken.approve(address(dualPoolStaking), type(uint256).max);
+        dualPoolStaking.stakeA(DEFAULT_STAKE);
+        dualPoolStaking.stakeB(DEFAULT_STAKE);
+        vm.stopPrank();
+
+        rewardToken.approve(address(dualPoolStaking), type(uint256).max);
+        dualPoolStaking.notifyRewardAmountA(SAFE_REWARD_AMOUNT, SAFE_DURATION);
+        dualPoolStaking.notifyRewardAmountB(SAFE_REWARD_AMOUNT, SAFE_DURATION);
+        vm.warp(block.timestamp + SAFE_DURATION / 2);
+
+        dualPoolStaking.pause();
+        _activateShutdownForTests();
+
+        vm.startPrank(user);
+        dualPoolStaking.forceClaimAll();
+        vm.stopPrank();
+    }
+
+    /// @notice `forceClaimAll` allocates scarce liquidity pro-rata across pools (L-3).
+    function testForceClaimAllProportionalPaySplitsLiquidityFairly() public pure {
+        (uint256 payA, uint256 payB) = ForceClaimAllLib.computeProportionalPay(100, 300, 200);
+        assertEq(payA, 50, "A-first would pay 100");
+        assertEq(payB, 150, "A-first would pay 100");
+
+        (payA, payB) = ForceClaimAllLib.computeProportionalPay(100, 300, 500);
+        assertEq(payA, 100);
+        assertEq(payB, 300);
+
+        (payA, payB) = ForceClaimAllLib.computeProportionalPay(100, 300, 0);
+        assertEq(payA, 0);
+        assertEq(payB, 0);
+    }
+
+    /// @notice `compoundB` enforces per-pool `minClaimAmount` like `claimA`/`claimB` (L-4).
+    function testCompoundBRevertsWhenPerPoolBelowMinButSumAbove() public {
+        stakingAdmin.setMinClaimAmount(1e17);
+        uint256 amt = 2e17;
+        uint256 duration = 1 days;
+        rewardToken.approve(address(dualPoolStaking), type(uint256).max);
+        dualPoolStaking.notifyRewardAmountA(amt, duration);
+        dualPoolStaking.notifyRewardAmountB(amt, duration);
+
+        vm.startPrank(user);
+        stakingToken.approve(address(dualPoolStaking), DEFAULT_STAKE);
+        rewardToken.approve(address(dualPoolStaking), DEFAULT_STAKE);
+        dualPoolStaking.stakeA(DEFAULT_STAKE);
+        dualPoolStaking.stakeB(DEFAULT_STAKE);
+        vm.warp(block.timestamp + 10 hours);
+
+        vm.expectRevert();
+        dualPoolStaking.compoundB();
+        vm.stopPrank();
+
+        stakingAdmin.setMinClaimAmount(0);
+    }
+
+    /// @notice `bookedUserRewards*` never exceeds `totalPending*` on user paths (L-5).
+    function testBookedRewardsWithinPendingAfterCompound() public {
+        uint256 rewardAmount = SAFE_REWARD_AMOUNT;
+        uint256 duration = SAFE_DURATION;
+        rewardToken.approve(address(dualPoolStaking), type(uint256).max);
+        _queueAndExecuteNotifyRewardAmountA(rewardAmount, duration);
+        dualPoolStaking.notifyRewardAmountB(rewardAmount, duration);
+
+        vm.startPrank(user);
+        stakingToken.approve(address(dualPoolStaking), DEFAULT_STAKE);
+        rewardToken.approve(address(dualPoolStaking), DEFAULT_STAKE);
+        dualPoolStaking.stakeA(DEFAULT_STAKE);
+        dualPoolStaking.stakeB(DEFAULT_STAKE);
+        vm.warp(block.timestamp + SHORT_WARP);
+        dualPoolStaking.compoundB();
+        vm.stopPrank();
+
+        assertLe(dualPoolStaking.bookedUserRewardsA(), dualPoolStaking.poolA().totalPending);
+        assertLe(dualPoolStaking.bookedUserRewardsB(), dualPoolStaking.poolB().totalPending);
+    }
+
+    /// @notice Governance can update `maxTotalSupplyBForRewardRateCap` post-deploy.
+    function testSetMaxTotalSupplyBForRewardRateCap() public {
+        uint256 newCap = 20_000_000 * 1e18;
+        stakingAdmin.setMaxTotalSupplyBForRewardRateCap(newCap);
+        assertEq(dualPoolStaking.maxTotalSupplyBForRewardRateCap(), newCap);
     }
 }

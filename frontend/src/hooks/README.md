@@ -45,7 +45,10 @@ useWriteWithStatus ──► useTransactionFlow.executeWrite（控制台常用�
 | Hook | 作用 |
 |------|------|
 | `useApproveIfNeeded` | ERC20 allowance；`needsApproval(amountWei)` + `refetchAllowance` |
-| `useTransactionFlow` | 本地 `TxState` + 入队 Tx Center；`executeApprove` / `executeWrite` / `runStakeFlow` |
+| `useTransactionFlow` | 本地 `TxState` + 入队 Tx Center；`executeApprove` / `executeWrite`（可选 `catchUpPools` 自动 crank）/ `runStakeFlow` |
+| `usePoolCatchUpEnsurer` | M-2：长空闲时循环 `crankCatchUpPool` 直至 `pool*CatchUpComplete` |
+
+单测：`pnpm run test:unit`（`src/lib/poolCatchUp.test.ts`）。E2E 场景见 `tests/e2e/README.md`。
 | `useWriteWithStatus` | 薄封装，控制台治理卡、OperatorNotify、池页写操作常用 |
 | `useTxCenter` | 读写在 store 上的队列 UI：`startTransaction`、筛选、清空 |
 

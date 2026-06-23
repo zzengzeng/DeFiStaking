@@ -10,15 +10,17 @@ import {PoolBStakeLib} from "../libraries/PoolBStakeLib.sol";
 import {PoolBWithdrawLib} from "../libraries/PoolBWithdrawLib.sol";
 import {PoolSingleClaimLib} from "../libraries/PoolSingleClaimLib.sol";
 import {RewardReanchorLib} from "../libraries/RewardReanchorLib.sol";
+import {PoolCatchUpLib} from "../libraries/PoolCatchUpLib.sol";
 import {StakingAdminLib} from "../libraries/StakingAdminLib.sol";
 import {StakingExecutionErrors} from "../StakingExecutionErrors.sol";
+import {DelegatecallGuard} from "./DelegatecallGuard.sol";
 import {DualPoolStorageLayout} from "./DualPoolStorageLayout.sol";
 
 /// @title DualPoolUserModule
 /// @notice Delegate **user** execution module (stake/withdraw/claim/compound/emergency); storage is the core’s via `delegatecall`.
 /// @dev Only valid when invoked through `DualPoolStaking._delegateTo(userModule, ...)`; never call `execute*` directly on-chain unless you intend to run against this contract’s own (wrong) storage.
 /// @custom:delegatecall All mutating paths assume `address(this)` is the core; `msg.sender` in libraries is the **user** passed through calldata, not the EOA tx.origin.
-contract DualPoolUserModule is DualPoolStorageLayout {
+contract DualPoolUserModule is DualPoolStorageLayout, DelegatecallGuard {
     /// @notice Stake / compound / certain withdraw paths are blocked while emergency mode is active (see each `execute*` guard).
     error EmergencyModeActive();
     /// @notice TokenB balance + `badDebt` no longer covers recorded liabilities within `DUST_TOLERANCE`.
@@ -41,11 +43,22 @@ contract DualPoolUserModule is DualPoolStorageLayout {
     event Staked(address indexed user, uint256 amount, uint256 unlockTime, Pool indexed pool);
     event Withdrawn(address indexed user, uint256 amount, uint256 feeOrPenalty, bool early, Pool indexed pool);
     event Claimed(address indexed user, uint256 amountA, uint256 amountB, uint256 timestamp);
+    event PoolCatchUpCranked(Pool indexed pool, uint256 lastUpdateTime, uint256 catchUpCap, bool complete);
+
+    /// @notice Permissionless catch-up crank: advances global accrual up to `MAX_CATCHUP_ITERATIONS` steps without reverting.
+    /// @param poolRaw `0` = Pool A, `1` = Pool B.
+    function executeCrankCatchUpPool(uint8 poolRaw) external onlyDelegatecall {
+        if (poolRaw > uint8(Pool.B)) revert StakingExecutionErrors.InvalidPool(poolRaw);
+        Pool p = Pool(poolRaw);
+        PoolInfo storage pool = p == Pool.A ? poolAState : poolBState;
+        bool complete = _advanceCatchUp(pool, p, false);
+        emit PoolCatchUpCranked(p, pool.lastUpdateTime, PoolCatchUpLib.accrualCatchUpCap(pool, pausedAt, paused()), complete);
+    }
 
     /// @notice Pool A stake entrypoint for delegatecall from the core.
     /// @param user Beneficiary passed from the core (expected `msg.sender` of the user tx).
     /// @param amount Requested `transferFrom` amount on TokenA (credited amount uses balance delta).
-    function executeStakeA(address user, uint256 amount) external {
+    function executeStakeA(address user, uint256 amount) external onlyDelegatecall {
         if (emergencyMode) revert EmergencyModeActive();
         if (shutdown) revert StakingExecutionErrors.ShutdownModeActive();
         if (amount == 0) revert StakingExecutionErrors.ZeroAmount();
@@ -73,7 +86,7 @@ contract DualPoolUserModule is DualPoolStorageLayout {
     /// @notice Pool B stake entrypoint for delegatecall from the core.
     /// @param user Beneficiary passed from the core.
     /// @param amount Requested `transferFrom` amount on TokenB.
-    function executeStakeB(address user, uint256 amount) external {
+    function executeStakeB(address user, uint256 amount) external onlyDelegatecall {
         if (emergencyMode) revert EmergencyModeActive();
         if (shutdown) revert StakingExecutionErrors.ShutdownModeActive();
         if (amount == 0) revert StakingExecutionErrors.ZeroAmount();
@@ -102,7 +115,7 @@ contract DualPoolUserModule is DualPoolStorageLayout {
     /// @notice Pool B withdraw entrypoint for delegatecall from the core.
     /// @param user Account whose principal is reduced.
     /// @param amount Principal to withdraw before fees/penalties.
-    function executeWithdrawB(address user, uint256 amount) external {
+    function executeWithdrawB(address user, uint256 amount) external onlyDelegatecall {
         if (emergencyMode && !shutdown) revert EmergencyModeActive();
         _catchUpExpiredGlobalB();
         _settleUserB(user);
@@ -130,7 +143,7 @@ contract DualPoolUserModule is DualPoolStorageLayout {
     /// @notice Pool A withdraw entrypoint for delegatecall from the core.
     /// @param user Account whose TokenA stake is reduced.
     /// @param amount Principal to return to `user`.
-    function executeWithdrawA(address user, uint256 amount) external {
+    function executeWithdrawA(address user, uint256 amount) external onlyDelegatecall {
         if (emergencyMode && !shutdown) revert EmergencyModeActive();
         _catchUpExpiredGlobalA();
         _settleUserA(user);
@@ -141,7 +154,7 @@ contract DualPoolUserModule is DualPoolStorageLayout {
 
     /// @notice Pool A reward claim entrypoint for delegatecall from the core.
     /// @param user Claimant receiving TokenB payout for Pool A accrued rewards.
-    function executeClaimA(address user) external {
+    function executeClaimA(address user) external onlyDelegatecall {
         if (emergencyMode && !shutdown) revert EmergencyModeActive();
         // M-2: cooldown applies only after the first successful claim/compound path that set `lastClaimTime` (non-zero).
         if (lastClaimTime[user] != 0 && block.timestamp < lastClaimTime[user] + claimCooldown) {
@@ -155,6 +168,8 @@ contract DualPoolUserModule is DualPoolStorageLayout {
             minClaimAmount: minClaimAmount,
             badDebtPoolA: poolAState.badDebt,
             badDebtPoolB: poolBState.badDebt,
+            poolBTotalStaked: poolBState.totalStaked,
+            unclaimedFeesB: unclaimedFeesB,
             maxTransferFeeBP: maxTransferFeeBP,
             basisPoints: BASIS_POINTS
         });
@@ -166,7 +181,7 @@ contract DualPoolUserModule is DualPoolStorageLayout {
 
     /// @notice Pool B reward claim entrypoint for delegatecall from the core.
     /// @param user Claimant receiving TokenB payout for Pool B accrued rewards.
-    function executeClaimB(address user) external {
+    function executeClaimB(address user) external onlyDelegatecall {
         if (emergencyMode && !shutdown) revert EmergencyModeActive();
         // M-2: first claim exempt — same `lastClaimTime != 0` guard as `executeClaimA`.
         if (lastClaimTime[user] != 0 && block.timestamp < lastClaimTime[user] + claimCooldown) {
@@ -180,6 +195,8 @@ contract DualPoolUserModule is DualPoolStorageLayout {
             minClaimAmount: minClaimAmount,
             badDebtPoolA: poolAState.badDebt,
             badDebtPoolB: poolBState.badDebt,
+            poolBTotalStaked: poolBState.totalStaked,
+            unclaimedFeesB: unclaimedFeesB,
             maxTransferFeeBP: maxTransferFeeBP,
             basisPoints: BASIS_POINTS
         });
@@ -192,7 +209,7 @@ contract DualPoolUserModule is DualPoolStorageLayout {
     /// @notice Force-claim-all entrypoint for delegatecall from the core (partial pay when liquidity is insufficient).
     /// @param user Claimant whose Pool A + B rewards are settled; only during `shutdown` or when either pool has `badDebt`.
     ///      Per-pool `minClaimAmount` applies when not shutdown and no bad debt (see `ForceClaimAllLib`).
-    function executeForceClaimAll(address user) external {
+    function executeForceClaimAll(address user) external onlyDelegatecall {
         if (emergencyMode && !shutdown) revert EmergencyModeActive();
         if (!shutdown && poolAState.badDebt == 0 && poolBState.badDebt == 0) {
             revert StakingExecutionErrors.ForceClaimAllNotAvailable();
@@ -228,7 +245,7 @@ contract DualPoolUserModule is DualPoolStorageLayout {
 
     /// @notice Compound-to-Pool-B entrypoint for delegatecall from the core.
     /// @param user Beneficiary whose accrued rewards in both pools become Pool B principal.
-    function executeCompoundB(address user) external {
+    function executeCompoundB(address user) external onlyDelegatecall {
         if (emergencyMode) revert EmergencyModeActive();
         if (shutdown) revert StakingExecutionErrors.ShutdownModeActive();
         _catchUpExpiredGlobalA();
@@ -242,6 +259,15 @@ contract DualPoolUserModule is DualPoolStorageLayout {
         }
         _settleUserA(user);
         _settleUserB(user);
+
+        uint256 rewardA = userInfoA[user].rewards;
+        uint256 rewardB = userInfoB[user].rewards;
+        if (rewardA > 0 && rewardA < minClaimAmount) {
+            revert StakingExecutionErrors.BelowMinClaim(rewardA, minClaimAmount);
+        }
+        if (rewardB > 0 && rewardB < minClaimAmount) {
+            revert StakingExecutionErrors.BelowMinClaim(rewardB, minClaimAmount);
+        }
 
         PoolBCompoundLib.CompoundBParams memory params = PoolBCompoundLib.CompoundBParams({
             user: user,
@@ -265,7 +291,7 @@ contract DualPoolUserModule is DualPoolStorageLayout {
 
     /// @notice Emergency Pool A principal exit for delegatecall from the core.
     /// @param user Account whose Pool A position is force-closed to zero.
-    function executeEmergencyWithdrawA(address user) external {
+    function executeEmergencyWithdrawA(address user) external onlyDelegatecall {
         if (!emergencyMode) revert StakingExecutionErrors.NotInEmergency();
         if (shutdown) revert StakingExecutionErrors.ShutdownModeActive();
         // Accrue through `now` and settle so `userInfoA.rewards` / `totalPending` match the index (avoids ghost pending).
@@ -290,7 +316,7 @@ contract DualPoolUserModule is DualPoolStorageLayout {
 
     /// @notice Emergency Pool B principal exit for delegatecall from the core.
     /// @param user Account whose Pool B position is force-closed to zero.
-    function executeEmergencyWithdrawB(address user) external {
+    function executeEmergencyWithdrawB(address user) external onlyDelegatecall {
         if (!emergencyMode) revert StakingExecutionErrors.NotInEmergency();
         if (shutdown) revert StakingExecutionErrors.ShutdownModeActive();
         _catchUpExpiredGlobalA();
@@ -328,7 +354,7 @@ contract DualPoolUserModule is DualPoolStorageLayout {
     /// @dev Advances Pool A global reward index; emits `InsufficientBudget` / `DustAccumulated` when the library reports signals.
     function _updateGlobalA() internal {
         PoolAccrualLib.GlobalEmit memory ge =
-            PoolAccrualLib.updateGlobal(poolAState, MAX_DELTA_TIME, PRECISION, DUST_TOLERANCE);
+            PoolAccrualLib.updateGlobal(poolAState, MAX_DELTA_TIME, PRECISION, DUST_TOLERANCE, pausedAt, paused());
         if (ge.insufficient) emit InsufficientBudget(Pool.A, ge.shortfall, block.timestamp);
         if (ge.dust) emit DustAccumulated(Pool.A, ge.dustWei, block.timestamp);
     }
@@ -336,7 +362,7 @@ contract DualPoolUserModule is DualPoolStorageLayout {
     /// @dev Advances Pool B global reward index.
     function _updateGlobalB() internal {
         PoolAccrualLib.GlobalEmit memory ge =
-            PoolAccrualLib.updateGlobal(poolBState, MAX_DELTA_TIME, PRECISION, DUST_TOLERANCE);
+            PoolAccrualLib.updateGlobal(poolBState, MAX_DELTA_TIME, PRECISION, DUST_TOLERANCE, pausedAt, paused());
         if (ge.insufficient) emit InsufficientBudget(Pool.B, ge.shortfall, block.timestamp);
         if (ge.dust) emit DustAccumulated(Pool.B, ge.dustWei, block.timestamp);
     }
@@ -354,7 +380,13 @@ contract DualPoolUserModule is DualPoolStorageLayout {
     }
 
     function _catchUpExpiredGlobal(PoolInfo storage pool, Pool p) private {
-        uint256 cap = block.timestamp < pool.periodFinish ? block.timestamp : pool.periodFinish;
+        _advanceCatchUp(pool, p, true);
+    }
+
+    /// @dev Advances `pool.lastUpdateTime` toward `accrualCatchUpCap` by up to `MAX_CATCHUP_ITERATIONS` steps.
+    /// @return complete Whether `lastUpdateTime` reached the cap after this call.
+    function _advanceCatchUp(PoolInfo storage pool, Pool p, bool requireComplete) private returns (bool complete) {
+        uint256 cap = PoolCatchUpLib.accrualCatchUpCap(pool, pausedAt, paused());
         uint256 iterations;
         while (pool.lastUpdateTime < cap && iterations < MAX_CATCHUP_ITERATIONS) {
             uint256 prev = pool.lastUpdateTime;
@@ -366,7 +398,8 @@ contract DualPoolUserModule is DualPoolStorageLayout {
             if (pool.lastUpdateTime == prev) break;
             iterations++;
         }
-        if (pool.lastUpdateTime < cap) {
+        complete = pool.lastUpdateTime >= cap;
+        if (requireComplete && !complete) {
             revert StakingExecutionErrors.PauseCatchUpIncomplete(cap, pool.lastUpdateTime);
         }
     }
@@ -406,8 +439,16 @@ contract DualPoolUserModule is DualPoolStorageLayout {
         required = _invariantRequiredPart1() + _invariantRequiredPart2();
     }
 
+    /// @dev Reverts if `bookedUserRewards*` exceeds `totalPending*` (L-5 runtime guard).
+    function _assertBookedWithinPending() internal view {
+        if (bookedUserRewardsA > poolAState.totalPending || bookedUserRewardsB > poolBState.totalPending) {
+            revert StakingExecutionErrors.BookedRewardsExceedPending();
+        }
+    }
+
     /// @dev Reverts if TokenB invariant is violated (emits diagnostic event first).
     function _assertInvariantB() internal {
+        _assertBookedWithinPending();
         (uint256 actual, uint256 required) = _invariantBActualRequired();
         if (actual + DUST_TOLERANCE < required) {
             emit InvariantViolated(actual, required, block.timestamp);
@@ -415,8 +456,9 @@ contract DualPoolUserModule is DualPoolStorageLayout {
         }
     }
 
-    /// @dev Same invariant check as `_assertInvariantB` but never reverts (emergency paths).
+    /// @dev Same invariant check as `_assertInvariantB` but never reverts on TokenB shortfall (emergency paths).
     function _checkInvariantBNoRevert() internal {
+        _assertBookedWithinPending();
         (uint256 actual, uint256 required) = _invariantBActualRequired();
         if (actual + DUST_TOLERANCE < required) {
             emit InvariantViolated(actual, required, block.timestamp);

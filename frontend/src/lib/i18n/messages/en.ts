@@ -359,6 +359,17 @@ export const en: MessageTree = {
     emergencyFirst: "In emergency (not shutdown): emergencyWithdraw first, then forceClaimAll after shutdown",
     claimCooldown: "Claim cooldown active",
     noRewards: "No rewards to claim",
+    zeroLiquidity: "Spendable liquidity is 0 — tx clears your reward ledger with no TokenB paid",
+    liquidityUnknown: "Loading contract liquidity…",
+    liquidityPartialWarn:
+      "Est. payout {pay} TokenB (pending {pending}); shortfall goes to bad debt/dust and ledger is cleared",
+    liquidityZeroWarn:
+      "Spendable liquidity is 0. Proceeding clears your reward ledger with no TokenB received",
+    confirmForceClaimPartial: "Confirm partial payout",
+    confirmForceClaimPartialWarning:
+      "When liquidity is short, pay is pro-rata A:B; unpaid amounts cannot be claimed again and cooldown starts",
+    estPayout: "Est. payout",
+    spendableRemain: "Spendable remain",
   },
   action: {
     claimFlexible: "Claim flexible pool rewards",
@@ -409,7 +420,10 @@ export const en: MessageTree = {
     typeGovernance: "Governance",
     typeNotify: "Notify reward",
     typeWrite: "Contract call",
+    typeCrankCatchUp: "Catch-up",
     approveStakeToken: "Approve stake token",
+    crankCatchUp: "Sync {pool} accrual",
+    crankCatchUpDesc: "After long idle, global rewards must catch up before claim/withdraw.",
     remove: "Remove",
     removeStale: "Remove stale",
   },
@@ -485,10 +499,15 @@ export const en: MessageTree = {
     pausedDesc: "All actions are temporarily unavailable until ops unpause. Emergency exit and claims are disabled while paused.",
     shutdownTitle: "Protocol shutdown",
     shutdownDesc: "You can still withdraw principal and claim rewards; use cross-pool claim for pending TokenB.",
+    catchUpTitle: "Reward ledger sync required",
+    catchUpDesc:
+      "The protocol was idle for a long time and global accrual is behind. Withdraw, claim, or compound will auto-send one or more crankCatchUpPool txs first—confirm each in your wallet.",
   },
   deployment: {
     tokenMismatch:
       "Configured token addresses do not match the current Staking contract. Verify NEXT_PUBLIC_DUAL_STAKING_ADDRESS and TOKEN_A/TOKEN_B, or redeploy with TOKEN_A/TOKEN_B env vars and sync addresses per README.",
+    moduleMismatch:
+      "On-chain userModule/adminModule do not match frontend config. Run make sync-frontend-addresses and update NEXT_PUBLIC_DUAL_POOL_*_MODULE_ADDRESS on Vercel, then Redeploy. See docs/deployment-sync.md.",
   },
   approvalGate: {
     allowance: "Allowance",
@@ -519,6 +538,10 @@ export const en: MessageTree = {
     noRewardsToClaim: "No rewards to claim.",
     noRewardsToCompound: "No rewards to compound.",
     claimCooldown: "Claim cooldown active — try again later.",
+    catchUpBlockedByPause: "Protocol is paused—catch-up is disabled. Unpause before claim/withdraw.",
+    catchUpIncomplete: "Global accrual is still behind. Retry or ask ops for help.",
+    pauseCatchUpIncomplete: "Global accrual incomplete (PauseCatchUpIncomplete). Complete catch-up cranks first.",
+    walletNotConnected: "Connect your wallet first.",
     genericFailed: "Transaction failed — check parameters and on-chain state, then retry.",
   },
   demo: {
@@ -864,7 +887,7 @@ export const en: MessageTree = {
     },
     forceClaim: {
       title: "Cross-pool claim (forceClaimAll)",
-      desc: "Settle TokenB rewards from flexible and locked pools in one tx. Only when shutdown or bad debt; partial payout in A-then-B order.",
+      desc: "Settle TokenB rewards from both pools in one tx when shutdown or bad debt is active; pro-rata partial pay if liquidity is short.",
       totalPending: "Total pending",
       cooldown: "Claim cooldown",
       submit: "Force cross-pool claim",
@@ -873,6 +896,14 @@ export const en: MessageTree = {
       disabledEmergency: "Emergency mode (not shutdown): emergencyWithdraw first, then forceClaimAll after shutdown",
       disabledCooldown: "Claim cooldown active",
       disabledNoRewards: "No rewards to claim",
+      disabledZeroLiquidity: "Spendable liquidity is 0 — cannot claim safely",
+      disabledLiquidityUnknown: "Loading liquidity",
+      liquidityPartialWarn: "Est. payout {pay} TokenB (pending {pending}); shortfall → bad debt/dust",
+      liquidityZeroWarn: "Spendable liquidity is 0 — ledger clears with no TokenB paid",
+      confirmPartialTitle: "Confirm partial payout",
+      confirmPartialWarning: "Unpaid amounts cannot be reclaimed; claim cooldown will start",
+      estPayout: "Est. payout",
+      spendableRemain: "Spendable remain",
     },
     hubRoles: {
       operator: "OPERATOR_ROLE",

@@ -10,7 +10,7 @@ TokenB may be fee-on-transfer within a configured cap. If the protocol attempted
 
 ## Decision
 
-Use balance-delta accounting for inbound transfers. For outbound transfers, debit the gross protocol liability and transfer that gross amount. Any outbound FOT tax is borne by the recipient, bounded by `maxTransferFeeBP`, and must be disclosed by the frontend.
+Use balance-delta accounting for inbound transfers (`stake*`, `notifyReward*`, `resolveBadDebt`). For outbound transfers, debit the gross protocol liability and transfer via `FOTTransferLib.transferGross`. `maxTransferFeeBP == 0` requires lossless transfer on both directions; `maxTransferFeeBP > 0` tolerates tax up to that ceiling on inbound and outbound.
 
 ## Consequences
 

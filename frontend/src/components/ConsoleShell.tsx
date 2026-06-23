@@ -11,6 +11,7 @@ import { ConsoleStatusBadge } from "@/components/console/ConsoleStatusBadge";
 import { LocaleSwitcher } from "@/components/LocaleSwitcher";
 import { ModeSwitcher } from "@/components/ModeSwitcher";
 import { StatusBanner } from "@/components/StatusBanner";
+import { CatchUpBanner } from "@/components/CatchUpBanner";
 import { TxCenterHeaderButton } from "@/components/TxCenterPanel";
 import { POOL_COPY } from "@/lib/appMode";
 import { useConsoleCopy } from "@/lib/consoleCopy";
@@ -107,6 +108,7 @@ export function ConsoleShell({ children }: { children: React.ReactNode }) {
         </div>
       </header>
       <main className="mx-auto w-full min-w-0 max-w-6xl flex-1 overflow-x-clip px-3 py-4 sm:px-4 sm:py-6">
+        <CatchUpBanner />
         <StatusBanner status={staking.status} />
         {children}
       </main>

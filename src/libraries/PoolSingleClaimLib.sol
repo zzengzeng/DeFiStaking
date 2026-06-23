@@ -24,7 +24,11 @@ library PoolSingleClaimLib {
         uint256 badDebtPoolA;
         /// @notice Pool B `badDebt` snapshot; both must be zero to allow claim.
         uint256 badDebtPoolB;
-        /// @notice FOT outbound tax ceiling (`0` = standard ERC20, no post-transfer check).
+        /// @notice Pool B `totalStaked` reserved when computing TokenB spendable liquidity.
+        uint256 poolBTotalStaked;
+        /// @notice Pool B fees reserved on-contract (`unclaimedFeesB`).
+        uint256 unclaimedFeesB;
+        /// @notice FOT outbound tax ceiling (`0` = no transfer loss allowed; symmetric with inbound).
         uint256 maxTransferFeeBP;
         /// @notice Basis-point denominator (`10_000`).
         uint256 basisPoints;
@@ -54,8 +58,10 @@ library PoolSingleClaimLib {
         }
 
         uint256 balance = p.rewardToken.balanceOf(address(this));
-        if (balance < reward) {
-            revert StakingExecutionErrors.InsufficientPending(reward, balance);
+        uint256 lockedB = p.poolBTotalStaked + p.unclaimedFeesB;
+        uint256 spendable = balance > lockedB ? balance - lockedB : 0;
+        if (spendable < reward) {
+            revert StakingExecutionErrors.InsufficientBalance(reward, spendable);
         }
 
         pool.totalPending -= reward;

@@ -40,7 +40,7 @@ library PoolBWithdrawLib {
         uint256 basisPoints;
         /// @notice Schedule caps for post-forfeiture `rewardRate` re-anchor.
         RewardReanchorLib.ReanchorCaps reanchorCaps;
-        /// @notice FOT outbound tax ceiling (`0` = standard ERC20).
+        /// @notice FOT outbound tax ceiling (`0` = no transfer loss allowed; symmetric with inbound).
         uint256 maxTransferFeeBP;
     }
 

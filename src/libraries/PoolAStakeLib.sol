@@ -43,7 +43,7 @@ library PoolAStakeLib {
     /// @param userInfoA Pool A per-user mapping.
     /// @param user Account whose stake is reduced.
     /// @param amount Principal amount to withdraw (must be `> 0` and `<= user.staked`).
-    /// @param maxTransferFeeBP FOT outbound tax ceiling for TokenA (`0` = standard ERC20).
+    /// @param maxTransferFeeBP FOT outbound tax ceiling for TokenA (`0` = no transfer loss allowed; symmetric with inbound).
     /// @param basisPoints Basis-point denominator (`10_000`).
     function executeWithdrawA(
         PoolInfo storage poolA,

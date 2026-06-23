@@ -127,8 +127,8 @@ fi
 actual_user_module="$(cast_addr "$CORE" 'userModule()(address)')"
 actual_admin_module="$(cast_addr "$CORE" 'adminModule()(address)')"
 actual_owner="$(cast_addr "$CORE" 'owner()(address)')"
-delay_48="$(cast_call "$TIMELOCK_48" 'getMinDelay()(uint256)' | tr -d '[:space:]')"
-delay_72="$(cast_call "$TIMELOCK_72" 'getMinDelay()(uint256)' | tr -d '[:space:]')"
+delay_48="$(cast_call "$TIMELOCK_48" 'getMinDelay()(uint256)' | awk '{print $1}' | tr -d '[:space:]')"
+delay_72="$(cast_call "$TIMELOCK_72" 'getMinDelay()(uint256)' | awk '{print $1}' | tr -d '[:space:]')"
 
 [[ "$(lower "$actual_user_module")" == "$(lower "$USER_MODULE")" ]] || fail "userModule mismatch: $actual_user_module != $USER_MODULE"
 [[ "$(lower "$actual_admin_module")" == "$(lower "$ADMIN_MODULE")" ]] || fail "adminModule mismatch: $actual_admin_module != $ADMIN_MODULE"

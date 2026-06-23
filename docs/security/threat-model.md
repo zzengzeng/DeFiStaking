@@ -53,3 +53,13 @@ High-risk changes should add or update tests for:
 - `availableRewards`, `totalPending`, `bookedUserRewards`, and `badDebt` transitions.
 - Governance role and timelock restrictions.
 - FOT inbound and outbound behavior.
+
+## Operational runbook: long-idle catch-up (M-2)
+
+When `poolACatchUpComplete()` or `poolBCatchUpComplete()` returns `false`, user paths that settle rewards (`claim*`, `withdraw*`, `compoundB`, `forceClaimAll`, `stake*`) may revert with `PauseCatchUpIncomplete` until global accrual catches up.
+
+1. **Monitor**: alert when either `pool*CatchUpComplete` is false for >24h while users still have stake.
+2. **Self-serve**: product/console UI auto-sends one or more permissionless `crankCatchUpPool` txs before the user action (each crank advances up to `MAX_CATCHUP_ITERATIONS × MAX_DELTA_TIME` ≈ 1500 days).
+3. **Manual**: call `crankCatchUpPool(0|1)` repeatedly until both pools report complete, then retry the user tx.
+4. **Pause**: operational `pause()` blocks crank (M-1); catch up **before** pause, or after `shutdown` when pause+shutdown coexist.
+5. **Do not** relax `requireComplete` on settlement paths without an explicit partial-accrual design—users would be underpaid.

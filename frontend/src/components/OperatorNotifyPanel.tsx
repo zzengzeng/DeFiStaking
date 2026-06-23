@@ -17,6 +17,7 @@ import { useWriteWithStatus } from "@/hooks/useWriteWithStatus";
 import { ConsoleButton } from "@/components/console/ConsoleButton";
 import { OperatorNotifyRewardHistory } from "@/components/OperatorNotifyRewardHistory";
 import { useConsoleCopy } from "@/lib/consoleCopy";
+import { CATCH_UP_A, CATCH_UP_B } from "@/lib/poolCatchUp";
 import { useUiCopy } from "@/lib/uiCopy";
 
 const MIN_DURATION = 86_400n;
@@ -140,6 +141,7 @@ export function OperatorNotifyPanel({ pool, invalidate, hideEmergency = false, c
           actionLabel: ui.operator.notify(pool),
           txType: "notify",
           metadata: { pool, token: "TokenB", amount: amount.trim(), durationSec: durationSec.trim() },
+          catchUpPools: pool === "A" ? CATCH_UP_A : CATCH_UP_B,
           onConfirmed: () => {
             void invalidate();
             void queryClient.invalidateQueries({ queryKey: ["notify-reward-logs"] });

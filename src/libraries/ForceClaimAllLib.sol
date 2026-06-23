@@ -11,8 +11,9 @@ import {StakingExecutionErrors} from "../StakingExecutionErrors.sol";
 /// @title ForceClaimAllLib
 /// @notice Linked library: `forceClaimAll` settlement across pools with partial pay, debt, and dust handling.
 /// @dev Liquidation policy: spendable TokenB is `balance - (poolB.totalStaked + unclaimedFeesB)`, then allocated
-///      sequentially to Pool A then Pool B rewards. It intentionally does not reserve `availableRewards` because this
-///      path is available only during shutdown or bad debt, where unpaid user rewards take priority over future budgets.
+///      pro-rata across Pool A and Pool B reward legs when liquidity is short (L-3). It intentionally does not reserve
+///      `availableRewards` because this path is available only during shutdown or bad debt, where unpaid user rewards
+///      take priority over future budgets.
 library ForceClaimAllLib {
     /// @notice Inputs for `executeForceClaimAll`.
     struct ForceClaimParams {
@@ -26,7 +27,7 @@ library ForceClaimAllLib {
         uint256 unclaimedFeesB;
         /// @notice When true, bypasses `BelowMinClaim` for small totals if bad debt is also zero (see revert tree).
         bool shutdown;
-        /// @notice FOT outbound tax ceiling (`0` = standard ERC20).
+        /// @notice FOT outbound tax ceiling (`0` = no transfer loss allowed; symmetric with inbound).
         uint256 maxTransferFeeBP;
         /// @notice Basis-point denominator (`10_000`).
         uint256 basisPoints;
@@ -42,6 +43,25 @@ library ForceClaimAllLib {
         uint256 unpaidA;
         /// @notice Pool B reward shortfall vs full `userB.rewards` before settlement.
         uint256 unpaidB;
+    }
+
+    /// @dev Pro-rata split of `remain` across `rA`/`rB` (floor on A, remainder on B; cap each leg).
+    function computeProportionalPay(uint256 rA, uint256 rB, uint256 remain)
+        public
+        pure
+        returns (uint256 payA, uint256 payB)
+    {
+        uint256 totalReward = rA + rB;
+        if (totalReward == 0 || remain == 0) return (0, 0);
+        uint256 paidTotal = Math.min(totalReward, remain);
+        if (paidTotal == totalReward) return (rA, rB);
+
+        payA = Math.min(rA, paidTotal * rA / totalReward);
+        payB = paidTotal - payA;
+        if (payB > rB) {
+            payB = rB;
+            payA = paidTotal - payB;
+        }
     }
 
     /// @dev Applies unpaid amounts first against `badDebt` (per pool), then remainder into `dust` buckets.
@@ -107,9 +127,7 @@ library ForceClaimAllLib {
         uint256 lockedB = poolB.totalStaked + p.unclaimedFeesB;
         uint256 remain = balanceB > lockedB ? balanceB - lockedB : 0;
 
-        r.payA = Math.min(rA, remain);
-        remain -= r.payA;
-        r.payB = Math.min(rB, remain);
+        (r.payA, r.payB) = computeProportionalPay(rA, rB, remain);
 
         r.unpaidA = rA - r.payA;
         r.unpaidB = rB - r.payB;

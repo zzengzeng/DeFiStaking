@@ -19,6 +19,7 @@ import { useWriteWithStatus } from "@/hooks/useWriteWithStatus";
 import { POOL_COPY } from "@/lib/appMode";
 import { formatTokenDisplay } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
+import { CATCH_UP_B } from "@/lib/poolCatchUp";
 import { parseUserInfoTuple } from "@/lib/userInfo";
 
 const copy = POOL_COPY.locked;
@@ -42,6 +43,7 @@ export function ProductLockedWithdrawPage() {
         txType: "withdraw",
         metadata: { pool: "B", token: "TokenB", amount: amt },
         onConfirmed: () => pool.refetchWalletAndPool(),
+        catchUpPools: CATCH_UP_B,
       },
       () => pool.writeWithdrawB(amt),
     );
@@ -55,6 +57,7 @@ export function ProductLockedWithdrawPage() {
         txType: "claim",
         metadata: { pool: "B", token: "TokenB" },
         onConfirmed: () => pool.refetchWalletAndPool(),
+        catchUpPools: CATCH_UP_B,
       },
       () => pool.writeClaimB(),
     );

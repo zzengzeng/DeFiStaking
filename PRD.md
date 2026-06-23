@@ -480,8 +480,8 @@ $$
 
 | 方向 | 行为 | 账本语义 |
 | --- | --- | --- |
-| **入账**（`stakeA` / `stakeB` / `notifyRewardAmount*`） | `balanceOf` 前后差得到 `received`；若隐含税率超过 `maxTransferFeeBP` 则 `ExcessiveTransferFee` | `user.staked`、`availableRewards` 等按 **实收 net** 记账 |
-| **出账**（`claimA` / `claimB` / `withdrawA` / `withdrawB` / `forceClaimAll` / `emergencyWithdraw*` / `claimFees`） | 按账面 **gross** 调用 `transfer`；**不 gross-up**；转出后校验收款方 implied fee ≤ `maxTransferFeeBP` | `user.rewards`、提现 `netAmount` 等为合约转出额；钱包实收可能更低 |
+| **入账**（`stakeA` / `stakeB` / `notifyRewardAmount*` / `resolveBadDebt`） | `balanceOf` 前后差得到 `received`；若隐含税率超过 `maxTransferFeeBP` 则 `ExcessiveTransferFee` | `user.staked`、`availableRewards`、坏账清偿等按 **实收 net** 记账 |
+| **出账**（`claimA` / `claimB` / `withdrawA` / `withdrawB` / `forceClaimAll` / `emergencyWithdraw*` / `claimFees` / `recoverToken` / `forceShutdownFinalize`） | 按账面 **gross** 调用 `FOTTransferLib.transferGross`；**不 gross-up**；转出后校验收款方 implied fee ≤ `maxTransferFeeBP` | `user.rewards`、提现 `netAmount`、治理 sweep 等为合约转出额；钱包实收可能更低 |
 
 **链上辅助**：`FOTTransferLib.walletReceiveAfterFee(gross, maxTransferFeeBP, BASIS_POINTS)` 与 `transferGross` 供库内及链下预览共用同一公式。
 
@@ -490,7 +490,8 @@ $$
 * 当 `maxTransferFeeBP > 0` 时，Claim / Withdraw 预览须区分：
   * **合约转出额**（链上 `rewards` 或扣费后本金净额）；
   * **预计钱包到手**（按 `maxTransferFeeBP` 上限估算，非保证值；实际以 Token 合约税率为准）。
-* 标准 ERC20 生产部署应将 `maxTransferFeeBP` 设为 **0**（跳过出账税后校验，行为等同普通 `safeTransfer`）。
+* 标准 ERC20 生产部署可将 `maxTransferFeeBP` 设为 **0**（出入账均要求无损转账，`received == gross`；若 Token 事后加税则相关路径 `ExcessiveTransferFee` 回滚）。
+* 若 TokenB 可能为 FOT，应部署非零 cap（如默认 `1000` = 10%）并配合前端 FOT 提示。
 
 **合理性说明（设计取舍）**
 
@@ -1022,7 +1023,7 @@ function forceShutdownFinalize() external onlyAdmin {
     unclaimedFeesB = 0;
     dustA = 0; dustB = 0;
 
-    if (residual > 0) rewardTokenB.safeTransfer(feeRecipient, residual);
+    if (residual > 0) FOTTransferLib.transferGross(rewardTokenB, feeRecipient, residual, maxTransferFeeBP, BASIS_POINTS);
     emit ProtocolShutdownComplete(block.timestamp);
 }
 ```
@@ -1042,6 +1043,7 @@ function resolveBadDebt(uint256 amount) external onlyAdmin nonReentrant {
     uint256 balBefore = rewardTokenB.balanceOf(address(this));
     rewardTokenB.safeTransferFrom(msg.sender, address(this), amount);
     uint256 rem = rewardTokenB.balanceOf(address(this)) - balBefore;
+    require(rem * BASIS_POINTS >= amount * (BASIS_POINTS - maxTransferFeeBP), "EXCESSIVE_TRANSFER_FEE");
 
     uint256 totalRepaid = 0;
 
@@ -1071,14 +1073,15 @@ function resolveBadDebt(uint256 amount) external onlyAdmin nonReentrant {
 
 ### 7.6 recoverToken（防窃取修正）
 
+仅允许回收 **Pool A 质押代币（TokenA）** 或 **Pool B / 奖励代币（TokenB）**；其他 ERC20 一律 `TokenRecoveryRestricted`。
+
 ```solidity
 // TokenA 的已知限制
 if (token == address(stakingTokenA)) {
     uint256 excess = stakingTokenA.balanceOf(address(this)) - totalStakedA;
     require(amount <= excess, "CANNOT_RECOVER_STAKED_TOKEN_A");
 }
-
-if (token == address(rewardTokenB)) {
+else if (token == address(rewardTokenB)) {
     require(badDebtA == 0 && badDebtB == 0, "BAD_DEBT_EXISTS");
     // 必须保护本金、待付负债、预算、手续费与粉尘桶（与 _assertInvariantB required 一致）
     uint256 required = totalStakedB + totalPendingA + totalPendingB
@@ -1086,12 +1089,15 @@ if (token == address(rewardTokenB)) {
     uint256 balance = rewardTokenB.balanceOf(address(this));
     require(balance > required, "NO_EXCESS_TOKEN_B");
     require(amount <= balance - required, "EXCEEDS_EXCESS");
+} else {
+    revert TokenRecoveryRestricted();
 }
 
-IERC20(token).safeTransfer(msg.sender, amount);
-emit TokenRecovered(token, amount, msg.sender);
-
+FOTTransferLib.transferGross(IERC20(token), to, amount, maxTransferFeeBP, BASIS_POINTS);
+emit TokenRecovered(token, amount, to);
 ```
+
+> **`forceShutdownFinalize`** 清扫 residual 同样经 `FOTTransferLib.transferGross` 转至 `feeRecipient`（见 §7.4 伪代码应使用 `transferGross` 而非裸 `safeTransfer`）。
 
 ---
 

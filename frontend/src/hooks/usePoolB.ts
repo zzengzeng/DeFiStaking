@@ -75,7 +75,9 @@ export function usePoolB() {
     staking.status === "NORMAL" &&
     staking.globalBadDebt === 0n &&
     claimCooldownRemainingSec === 0n &&
-    compoundPreview.totalWei > 0n;
+    compoundPreview.totalWei > 0n &&
+    (pendingRewardsA === 0n || pendingRewardsA >= staking.minClaimAmount) &&
+    (pendingRewardsB === 0n || pendingRewardsB >= staking.minClaimAmount);
 
   const toAmount = (value: string) => parseUnits(value || "0", 18);
 

@@ -49,6 +49,7 @@ export function mapContractError(error: unknown, t: TranslateFn): string {
   if (text.includes("NoRewardsToClaim") || text.includes("no rewards to claim")) return t("errors.noRewardsToClaim");
   if (text.includes("NoRewardsToCompound") || text.includes("nothing to compound")) return t("errors.noRewardsToCompound");
   if (text.includes("ClaimCooldown") || text.includes("claim cooldown")) return t("errors.claimCooldown");
+  if (text.includes("PauseCatchUpIncomplete")) return t("errors.pauseCatchUpIncomplete");
 
   return text.length > 0 ? text : t("errors.genericFailed");
 }

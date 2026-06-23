@@ -332,6 +332,15 @@ export function useConsoleCopy() {
         disabledEmergency: t("console.forceClaim.disabledEmergency"),
         disabledCooldown: t("console.forceClaim.disabledCooldown"),
         disabledNoRewards: t("console.forceClaim.disabledNoRewards"),
+        disabledZeroLiquidity: t("console.forceClaim.disabledZeroLiquidity"),
+        disabledLiquidityUnknown: t("console.forceClaim.disabledLiquidityUnknown"),
+        liquidityPartialWarn: (pay: string, pending: string) =>
+          t("console.forceClaim.liquidityPartialWarn", { pay, pending }),
+        liquidityZeroWarn: t("console.forceClaim.liquidityZeroWarn"),
+        confirmPartialTitle: t("console.forceClaim.confirmPartialTitle"),
+        confirmPartialWarning: t("console.forceClaim.confirmPartialWarning"),
+        estPayout: t("console.forceClaim.estPayout"),
+        spendableRemain: t("console.forceClaim.spendableRemain"),
       },
       hubRoles: {
         operator: t("console.hubRoles.operator"),

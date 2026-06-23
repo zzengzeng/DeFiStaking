@@ -364,6 +364,17 @@ export const zh: MessageTree = {
     emergencyFirst: "紧急模式（未 shutdown）请先 emergencyWithdraw，shutdown 后再 forceClaimAll",
     claimCooldown: "领取冷却中",
     noRewards: "暂无可领取奖励",
+    zeroLiquidity: "合约可兑付流动性为 0：执行将清零账本但无法收到 TokenB",
+    liquidityUnknown: "正在读取合约流动性，请稍候",
+    liquidityPartialWarn:
+      "预估可兑付 {pay} TokenB（待领 {pending}），不足部分将记入坏账/粉尘且账本清零",
+    liquidityZeroWarn:
+      "当前可兑付流动性为 0。若继续，链上将清零你的奖励账本且无法收到 TokenB",
+    confirmForceClaimPartial: "确认部分兑付",
+    confirmForceClaimPartialWarning:
+      "流动性不足时将按 A:B 比例部分支付；未付部分无法再次领取，并会启动领取冷却",
+    estPayout: "预估到账",
+    spendableRemain: "可兑付余额",
   },
   action: {
     claimFlexible: "领取灵活池奖励",
@@ -414,7 +425,10 @@ export const zh: MessageTree = {
     typeGovernance: "治理",
     typeNotify: "注入奖励",
     typeWrite: "合约调用",
+    typeCrankCatchUp: "追账",
     approveStakeToken: "授权质押代币",
+    crankCatchUp: "同步 {pool} 计息",
+    crankCatchUpDesc: "长空闲后需先追齐全局奖励账本，再执行领取/赎回。",
     remove: "移除",
     removeStale: "移除过期",
   },
@@ -490,10 +504,15 @@ export const zh: MessageTree = {
     pausedDesc: "所有操作暂时不可用，请等待运营解除暂停。暂停期间无法紧急退出或领取奖励。",
     shutdownTitle: "协议已关停",
     shutdownDesc: "可照常赎回本金、领取奖励；若有待领 TokenB，可使用跨池领取。",
+    catchUpTitle: "奖励账本需同步",
+    catchUpDesc:
+      "协议长时间未交互，全局计息尚未追平。赎回、领取或复投前将自动发送一笔或多笔「追账」交易（crankCatchUpPool）；请按钱包提示依次确认。",
   },
   deployment: {
     tokenMismatch:
       "前端配置的 Token 地址与当前 Staking 合约不一致。请核对 NEXT_PUBLIC_DUAL_STAKING_ADDRESS 与 TOKEN_A/TOKEN_B，或按 README 用 TOKEN_A/TOKEN_B 环境变量重新部署后再同步地址。",
+    moduleMismatch:
+      "链上 userModule/adminModule 与前端配置不一致。请执行 make sync-frontend-addresses，并在 Vercel 更新 NEXT_PUBLIC_DUAL_POOL_*_MODULE_ADDRESS 后 Redeploy。详见 docs/deployment-sync.md。",
   },
   approvalGate: {
     allowance: "授权额度",
@@ -524,6 +543,10 @@ export const zh: MessageTree = {
     noRewardsToClaim: "当前没有可领取的奖励。",
     noRewardsToCompound: "当前没有可复投的奖励。",
     claimCooldown: "Claim 冷却尚未结束，请稍后再试。",
+    catchUpBlockedByPause: "协议已暂停，无法追账；请等待解除暂停后再试领取/赎回。",
+    catchUpIncomplete: "全局计息仍未追平，请重试或联系运营协助。",
+    pauseCatchUpIncomplete: "全局计息未追平（PauseCatchUpIncomplete），请先完成追账交易。",
+    walletNotConnected: "请先连接钱包。",
     genericFailed: "交易失败，请检查参数和链上状态后重试。",
   },
   demo: {
@@ -869,7 +892,7 @@ export const zh: MessageTree = {
     },
     forceClaim: {
       title: "跨池领取（forceClaimAll）",
-      desc: "一次性结算灵活池与锁仓池的 TokenB 奖励。仅在关停或存在坏账时开放；按链上残值部分兑付，顺序为先 A 后 B。",
+      desc: "一次性结算灵活池与锁仓池的 TokenB 奖励。仅在关停或存在坏账时开放；流动性不足时按 A:B 比例部分兑付。",
       totalPending: "合计待领",
       cooldown: "领取冷却",
       submit: "强制跨池领取",
@@ -878,6 +901,15 @@ export const zh: MessageTree = {
       disabledEmergency: "紧急模式（未 shutdown）请先 emergencyWithdraw，shutdown 后再 forceClaimAll",
       disabledCooldown: "领取冷却中",
       disabledNoRewards: "暂无可领取奖励",
+      disabledZeroLiquidity: "可兑付流动性为 0，无法安全领取",
+      disabledLiquidityUnknown: "正在读取流动性",
+      liquidityPartialWarn:
+        "预估可兑付 {pay} TokenB（待领 {pending}），不足部分将记入坏账/粉尘",
+      liquidityZeroWarn: "可兑付流动性为 0：执行将清零账本但无法收到 TokenB",
+      confirmPartialTitle: "确认部分兑付",
+      confirmPartialWarning: "未付部分无法再次领取，并会启动领取冷却",
+      estPayout: "预估到账",
+      spendableRemain: "可兑付余额",
     },
     hubRoles: {
       operator: "OPERATOR_ROLE",

@@ -126,6 +126,10 @@ contract DualPoolStakingAdmin {
         core.forceShutdownFinalize();
     }
 
+    function setMaxTotalSupplyBForRewardRateCap(uint256 newCap) external onlyGovernanceTimelock {
+        core.setMaxTotalSupplyBForRewardRateCap(newCap);
+    }
+
     function setUserModule(address newModule) external onlySuperTimelock {
         core.setUserModule(newModule);
     }

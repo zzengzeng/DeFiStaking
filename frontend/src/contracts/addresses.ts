@@ -9,19 +9,19 @@ export const sepoliaDeploymentMeta = {
   tokenA: "0xba2f8128e5f0a47f820010eedd3f96e0b6e0e67b" as const,
   tokenB: "0x2a082fec5f9b75c27f85617d90a7d3ace62743c4" as const,
   /** DualPoolStaking（含 pendingRewardA/B 视图） */
-  staking: "0xe088ffd3d50ea8b2a86abae175f24f92c027a844" as const,
-  dualPoolUserModule: "0x57b3d496320c6cc745cfaaa1d6cd80267b4e3031" as const,
-  dualPoolAdminModule: "0xe93692a8b3e44ac619c4253ebdc88bff56b2723f" as const,
-  dualPoolStakingAdmin: "0xaffa78fd52115f5964dbd7bfdf3910c58a532c88" as const,
+  staking: "0x1b96a75e34fde5cf7db1c3172500ac5854b3b502" as const,
+  dualPoolUserModule: "0xc15ce16967e095e486a9be0ae8c12f0d6ad14796" as const,
+  dualPoolAdminModule: "0xf93049db13fc75f060c279803823c69e7bc40820" as const,
+  dualPoolStakingAdmin: "0x2eec687cabe8b72e22fce5923583ab83ae91056a" as const,
   /** 参数类治理 Timelock（48h） */
-  timelockController: "0x0f6ff98fc9279cb0ceeba3c1e77c8d62b2729920" as const,
+  timelockController: "0x2d0c5c08fd98b019f1e67067d9823ccbb7a93c33" as const,
   /** 超级路径 Timelock（72h） */
-  timelockSuperController: "0x90b28b77fb1865ef58c7608f760c2511e549df46" as const,
+  timelockSuperController: "0xab19c84bbb4b5b34fd8cba7d09bb2d21fdce9325" as const,
   timelockMinDelaySeconds: 172800 as const,
   timelockSuperMinDelaySeconds: 259200 as const,
   operatorRoleHolder: "0xb65214b2F45892399b2E4724d34996552534F94f" as const,
   tokenAFaucet: "0xd8834d4e101581f356f2d19ee65131b144cfd601" as const,
-  stakingDeployBlock: 11_109_413 as const,
+  stakingDeployBlock: 11_123_121 as const,
 } as const;
 
 /** 防止 .env 中误加引号/空格导致打包进客户端的地址字面量语法错误。 */

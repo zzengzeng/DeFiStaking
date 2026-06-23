@@ -65,7 +65,7 @@ TOKEN_A="${TOKEN_A:-${BROADCAST_TOKEN_A:-0xbd1ea15E7F4774Df55b99d4Bae731dD0B4E60
 TOKEN_B="${TOKEN_B:-${BROADCAST_TOKEN_B:-0x65E926f4B96D9f29082Fc6B3758132EcCC73bbf1}}"
 OPERATOR="${OPERATOR:-}"
 
-for v in STAKING ADMIN_FACADE TL_48 TL_72; do
+for v in STAKING USER_MOD ADMIN_MOD ADMIN_FACADE TL_48 TL_72; do
   if [[ -z "${!v}" || "${!v}" == "null" ]]; then
     echo "ERROR: 无法从 broadcast 解析 ${v}" >&2
     exit 1
@@ -100,6 +100,8 @@ EOF
 
 echo "✓ Updated $FRONTEND_ENV"
 echo "  Staking:      $STAKING"
+echo "  UserModule:   $USER_MOD"
+echo "  AdminModule:  $ADMIN_MOD"
 echo "  TokenA:       $TOKEN_A"
 echo "  TokenB:       $TOKEN_B"
 echo "  Timelock 48h: $TL_48"
@@ -108,3 +110,12 @@ echo "  Operator ref: ${OPERATOR:-（未设置 OPERATOR env）}"
 if [[ -n "$TOKEN_A_FAUCET" && "$TOKEN_A_FAUCET" != "null" ]]; then
   echo "  TokenA Faucet: $TOKEN_A_FAUCET"
 fi
+
+node "$ROOT_DIR/script/patch-frontend-addresses-ts.mjs" "$FRONTEND_ENV"
+
+echo ""
+echo "下一步:"
+echo "  1. make frontend-contract-sync    # 校验 .env.local 与 broadcast 一致"
+echo "  2. make post-deploy-verify        # 链上模块指针 / 角色校验（需 RPC）"
+echo "  3. cd frontend && pnpm dev        # 本地验证"
+echo "  4. Vercel: 更新环境变量后 Redeploy（非仅 Rebuild）"

@@ -20,6 +20,7 @@ import { useWriteWithStatus } from "@/hooks/useWriteWithStatus";
 import { useConsoleCopy } from "@/lib/consoleCopy";
 import { formatToken } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
+import { CATCH_UP_A } from "@/lib/poolCatchUp";
 import type { TranslateFn } from "@/lib/i18n";
 import { formatCountdownHms } from "@/lib/timelockCountdown";
 
@@ -74,6 +75,7 @@ export function ConsolePoolAPage() {
           txType: "withdraw",
           metadata: { pool: "A", token: "TokenA", amount: amt },
           onConfirmed: () => pool.refetchWalletAndPool(),
+          catchUpPools: CATCH_UP_A,
         },
         () => pool.writeWithdrawA(amt),
       );
@@ -89,6 +91,7 @@ export function ConsolePoolAPage() {
         txType: "claim",
         metadata: { pool: "A", token: "TokenB" },
         onConfirmed: () => pool.refetchWalletAndPool(),
+        catchUpPools: CATCH_UP_A,
       },
       () => pool.writeClaimA(),
     );
@@ -102,6 +105,7 @@ export function ConsolePoolAPage() {
         txType: "emergency",
         metadata: { pool: "A", token: "TokenA" },
         onConfirmed: () => pool.refetchWalletAndPool(),
+        catchUpPools: CATCH_UP_A,
       },
       () => pool.writeEmergencyWithdrawA(),
     );

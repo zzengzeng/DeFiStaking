@@ -21,6 +21,7 @@ import { getCompoundDisabledReason } from "@/lib/compoundHints";
 import { formatTokenDisplay } from "@/lib/format";
 import { formatCountdownHms } from "@/lib/timelockCountdown";
 import { useI18n } from "@/lib/i18n";
+import { CATCH_UP_B, CATCH_UP_BOTH } from "@/lib/poolCatchUp";
 import { parseUserInfoTuple } from "@/lib/userInfo";
 
 const copy = POOL_COPY.locked;
@@ -64,6 +65,7 @@ export function ProductLockedPoolPage() {
         txType: "claim",
         metadata: { pool: "B", token: "TokenB" },
         onConfirmed: () => pool.refetchWalletAndPool(),
+        catchUpPools: CATCH_UP_B,
       },
       () => pool.writeClaimB(),
     );
@@ -77,6 +79,7 @@ export function ProductLockedPoolPage() {
         txType: "compound",
         metadata: { pool: "B", token: "TokenB" },
         onConfirmed: () => pool.refetchWalletAndPool(),
+        catchUpPools: CATCH_UP_BOTH,
       },
       () => pool.writeCompoundB(),
     );

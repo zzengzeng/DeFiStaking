@@ -1,12 +1,12 @@
 -include .env
 
-.PHONY: all test clean remove install update build snapshot format static-analysis anvil deploy deploy-production deploy-reuse-tokens deploy-separated-roles verify-last-deploy production-readiness testnet-demo-env frontend-production-env frontend-contract-sync post-deploy-verify preprod-rehearsal init-governance-wallets validate-governance-env sync-frontend-addresses mint-tokenb-to-operator help
+.PHONY: all test clean remove install update build snapshot format static-analysis anvil deploy deploy-production deploy-reuse-tokens deploy-reuse-tokens-sync deploy-separated-roles verify-last-deploy production-readiness testnet-demo-env frontend-production-env frontend-contract-sync post-deploy-verify preprod-rehearsal init-governance-wallets validate-governance-env sync-frontend-addresses mint-tokenb-to-operator help
 
 DEFAULT_ANVIL_KEY := 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
 SLITHER_ACCEPTED_EXCLUDES := arbitrary-send-erc20,uninitialized-state,unused-return,timestamp,assembly,low-level-calls,naming-convention,constable-states,immutable-states
-# Sepolia 已部署 MockERC20；可用 TOKEN_A=/TOKEN_B= 覆盖
-SEPOLIA_TOKEN_A ?= 0xbd1ea15E7F4774Df55b99d4Bae731dD0B4E602DE
-SEPOLIA_TOKEN_B ?= 0x65E926f4B96D9f29082Fc6B3758132EcCC73bbf1
+# Sepolia 已部署 MockERC20（与 frontend/.env.local 一致）；可用 TOKEN_A=/TOKEN_B= 覆盖
+SEPOLIA_TOKEN_A ?= 0xba2f8128e5f0a47f820010eedd3f96e0b6e0e67b
+SEPOLIA_TOKEN_B ?= 0x2a082fec5f9b75c27f85617d90a7d3ace62743c4
 
 # 本地 Anvil 默认；Sepolia：`make deploy NETWORK=sepolia`（需 .env 中 RPC / signer / 浏览器 API）
 all: clean install update build
@@ -128,6 +128,18 @@ deploy-fresh-tokens:
 deploy-reuse-tokens:
 	@TOKEN_A=$(if $(strip $(TOKEN_A)),$(TOKEN_A),$(SEPOLIA_TOKEN_A)) TOKEN_B=$(if $(strip $(TOKEN_B)),$(TOKEN_B),$(SEPOLIA_TOKEN_B)) forge script script/DualPoolStaking.s.sol:DeployDualPoolStaking $(NETWORK_ARGS)
 
+# 部署后自动同步前端地址并校验（Sepolia 复用 Token）
+# 若 .env 同时有 DEPLOYER_ACCOUNT 与 PRIVATE_KEY，用 env -u 避免 keystore 交互卡住
+deploy-reuse-tokens-sync:
+ifneq ($(strip $(PRIVATE_KEY)),)
+	@env -u DEPLOYER_ACCOUNT $(MAKE) deploy-reuse-tokens NETWORK=$(if $(strip $(NETWORK)),$(NETWORK),sepolia)
+else
+	@$(MAKE) deploy-reuse-tokens NETWORK=$(if $(strip $(NETWORK)),$(NETWORK),sepolia)
+endif
+	@$(MAKE) sync-frontend-addresses
+	@$(MAKE) frontend-contract-sync
+	@$(MAKE) post-deploy-verify
+
 # 补验最近一次 Sepolia 部署（--resume，不重新广播）；用于 verify 队列超时等场景
 verify-last-deploy:
 	@if [ "$(SEPOLIA_ON)" != "1" ]; then echo "补验需要 NETWORK=sepolia（读取 broadcast/DualPoolStaking.s.sol/11155111/run-latest.json）"; exit 1; fi
@@ -152,5 +164,6 @@ help:
 	@echo "  make mint-tokenb-to-operator OPERATOR=0x…  # 部署者 mint TokenB 给 Operator"
 	@echo "  make deploy-fresh-tokens NETWORK=sepolia   # 新部署 ZZTKA/ZZTKB（不读 TOKEN_A/B）"
 	@echo "  make deploy-reuse-tokens NETWORK=sepolia   # 复用 Sepolia 已有 TOKEN_A/B，只部署 Staking 栈"
+	@echo "  make deploy-reuse-tokens-sync NETWORK=sepolia  # 部署 + sync-frontend-addresses + 校验"
 	@echo "  make verify-last-deploy NETWORK=sepolia   # 补验上次部署（不重新广播；verify 超时时用）"
 	@echo "  make deploy ARGS=\"--network sepolia\"   # 同上（ARGS 必须整段加引号，否则 sepolia 会被当成另一个目标）"

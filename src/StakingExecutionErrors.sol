@@ -2,9 +2,9 @@
 pragma solidity ^0.8.20;
 
 /// @title StakingExecutionErrors
-/// @notice Shared custom errors for `DualPoolStaking`, `DualPoolStakingOld`, delegate modules, and linked libraries (stable selectors across deploys).
-/// @dev Implemented as an `abstract contract` (not `interface`) so tooling below Solidity 0.8.19 still surfaces `error` members reliably when inherited.
-abstract contract StakingExecutionErrors {
+/// @notice Shared custom errors for `DualPoolStaking`, delegate modules, and linked libraries (stable selectors across deploys).
+/// @dev Declared as an `interface` (errors only) so `StakingExecutionErrors.ErrorName` resolves in solc and IDE language servers without inheritance.
+interface StakingExecutionErrors {
     /// @notice A zero amount was passed where a positive amount is required.
     error ZeroAmount();
     /// @notice Token balance is below the requested transfer or operation amount.
@@ -83,6 +83,10 @@ abstract contract StakingExecutionErrors {
     /// @notice Module pointer must reference an address with deployed bytecode (EOA / empty / destroyed).
     /// @param module Address that failed `extcodesize` check.
     error NotAContract(address module);
+    /// @notice Delegate module `execute*` was invoked on the module contract itself instead of via core `delegatecall`.
+    error DirectModuleCall();
+    /// @notice `pause()` is forbidden while shutdown is active (would block settlement exits).
+    error PauseForbiddenDuringShutdown();
     /// @notice Operation requires shutdown but protocol is not in shutdown.
     error NotShutdown();
     /// @notice Shutdown finalization attempted before grace / time rules allow.
@@ -97,4 +101,8 @@ abstract contract StakingExecutionErrors {
     /// @param requiredLastUpdate Earliest `lastUpdateTime` that must be reached (`min(pausedAt, periodFinish)`).
     /// @param actualLastUpdate `lastUpdateTime` after bounded catch-up attempts.
     error PauseCatchUpIncomplete(uint256 requiredLastUpdate, uint256 actualLastUpdate);
+
+    /// @notice `crankCatchUpPool` received an out-of-range pool id (only `0` = A, `1` = B).
+    error InvalidPool(uint8 poolRaw);
 }
+

@@ -3,15 +3,13 @@ pragma solidity ^0.8.20;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
-import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 
 import {Pool, PoolInfo, UserInfo} from "./StakeTypes.sol";
 import {StakingExecutionErrors} from "./StakingExecutionErrors.sol";
 import {PoolAccrualViewLib} from "./libraries/PoolAccrualViewLib.sol";
+import {PoolCatchUpLib} from "./libraries/PoolCatchUpLib.sol";
+import {DualPoolStorageLayout} from "./modules/DualPoolStorageLayout.sol";
 
 /// @notice Minimal view into the canonical ERC-1820 registry for ERC777 deployment checks.
 /// @dev Registry address is fixed at `0x1820a4B7618BdE71Dce8cdc73aAB6C95905faD24` on Ethereum mainnet and many L2s; if bytecode is absent the core skips hook checks.
@@ -25,55 +23,9 @@ interface IERC1820Registry {
 
 /// @title DualPoolStaking
 /// @notice Dual-pool staking and rewards **core**: user and admin **execution** is delegated to external modules via `delegatecall`.
-/// @dev Wire `userModule` / `adminModule` immediately after deploy. Storage layout must match `DualPoolStorageLayout` and module bytecode expectations.
-contract DualPoolStaking is Ownable, AccessControl, ReentrancyGuard, Pausable {
+/// @dev Wire `userModule` / `adminModule` immediately after deploy. Storage is inherited from `DualPoolStorageLayout` (single source of truth for delegatecall slot order).
+contract DualPoolStaking is DualPoolStorageLayout {
     using SafeERC20 for IERC20;
-
-    /// @notice Reward token (TokenB, 18 decimals), also Pool B’s staking asset.
-    IERC20 public rewardToken;
-
-    uint256 public constant PRECISION = 1e18; // Used for fixed-point calculations to maintain precision in reward calculations
-    uint256 public constant MAX_DELTA_TIME = 30 days; // Maximum time delta for reward calculations to prevent overflow and ensure accurate reward distribution
-    uint256 public constant MAX_CATCHUP_ITERATIONS = 50; // Max `updateGlobal` steps per catch-up loop (matches delegate modules)
-    uint256 public constant DUST_TOLERANCE = 10 wei; //  Threshold for accumulating dust rewards that are too small to distribute, allowing them to be added back to the available rewards once they reach this threshold
-    uint256 public constant BASIS_POINTS = 10_000; // Basis points used for fee calculations, where 1 basis point is equal to 0.01%
-    uint256 public constant MAX_EARLY_EXIT_PENALTY_BP = 2000; // Maximum early exit penalty in basis points (20%), applied when a user withdraws from Pool B before the lock duration has passed
-    uint256 public constant MAX_WITHDRAW_BP = 500; // Maximum withdrawal fee in basis points (5%), applied to withdrawals from Pool B regardless of lock status
-    uint256 public constant MAX_MIDTERM_BP = 500; // Maximum mid-term fee in basis points (5%), applied to withdrawals from Pool B that occur after the lock duration but before a specified mid-term period has passed
-    uint256 public constant MAX_LOCK_DURATION = 90 days; // Maximum lock duration for staked tokens in Pool B, which affects when users can withdraw without penalties
-    uint256 public constant MAX_DURATION = 365 days; // Maximum notify reward duration
-    uint256 public constant MIN_REWARD_RATE_DURATION = 1 days; // Minimum notify reward duration
-    uint256 public constant SECONDS_PER_YEAR = 31_536_000; // Seconds in one year
-    uint256 public constant MAX_APR_BP = 20_000; // 200% APR cap for max reward rate derivation
-    uint256 public constant UNPAUSE_COOLDOWN = 1 days; // Cooldown period after unpausing the contract before certain actions can be taken, used to prevent abuse of the pause/unpause functionality and allow users time to react to changes in the contract's state
-    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE"); // Role identifier for admin role, which can be granted to addresses that are allowed to perform administrative actions such as updating contract parameters or managing emergency mode
-    bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE"); // Role identifier for operator role, which can be granted to addresses that are allowed to perform operational actions such as executing time-locked operations or managing reward distributions
-
-    uint256 public lockDuration = 7 days; // Duration for which staked tokens in Pool B are locked, during which early exit penalties apply if withdrawn
-    uint256 public claimCooldown = 1 days; // Cooldown period between claims to prevent abuse of the claim function and ensure fair distribution of rewards
-    uint256 public constant SHUTDOWN_DEADLOCK_BYPASS = 1095 days; // 3-year bypass for still-staked deadlock
-    uint256 public maxTransferFeeBP = 1000; // Max allowed transfer fee for FOT tokens (10%)
-    uint256 public penaltyfeeBP = 1000; // Early exit penalty in basis points (10%), applied to withdrawals from Pool B that occur before the lock duration has passed
-    uint256 public withdrawFeeBP = 100; // Withdrawal fee in basis points (1%), applied to all withdrawals from Pool B regardless of lock status
-    uint256 public midTermFeeBP = 50; // Mid-term fee in basis points (0.5%), applied to withdrawals from Pool B that occur after the lock duration but before a specified mid-term period has passed
-    uint256 public minEarlyExitAmountB = 10; // Minimum amount allowed for early exit in Pool B (kept >= ceil(BASIS_POINTS / penaltyfeeBP))
-    uint256 public unclaimedFeesB; // Accumulated fees from withdrawals in Pool B that have not yet been claimed by the fee recipient
-    uint256 public emergencyActivatedAt; // Timestamp of when emergency mode was activated, used to track the duration of emergency mode and potentially implement time-based restrictions or conditions for exiting emergency mode
-
-    uint256 public minClaimAmount; // Minimum amount of rewards that a user must have accrued before they can claim their rewards, which can be used to encourage users to accumulate more rewards before claiming and reduce transaction costs associated with small claims
-    uint256 public constant MAX_MIN_CLAIM_AMOUNT = 1e17 wei; // Maximum minimum claim amount (0.1 reward tokens), used to prevent setting an excessively high minimum claim amount that could prevent users from claiming their rewards
-
-    uint256 public shutdownAt; // Timestamp when shutdown mode is activated
-    uint256 public pausedAt; // Timestamp of when the contract was paused, used to enforce cooldown periods for unpausing and to track the duration of the pause state
-    uint256 public unpauseAt; // Timestamp of when the contract can be unpaused, calculated based on the pausedAt timestamp and the UNPAUSE_COOLDOWN duration, used to enforce a cooldown period for unpausing the contract to prevent abuse of the pause/unpause functionality and allow users time to react to changes in the contract's state
-    address public feeRecipient; // Address that receives Pool B withdrawal fees swept via claimFees (unclaimedFeesB)
-    address private constant ERC1820_REGISTRY_ADDR = 0x1820a4B7618BdE71Dce8cdc73aAB6C95905faD24;
-    bytes32 private constant ERC777_RECIPIENT_HASH = keccak256("ERC777TokensRecipient");
-    bytes32 private constant ERC777_SENDER_HASH = keccak256("ERC777TokensSender");
-
-    bool public emergencyMode; // Flag to indicate whether the contract is in emergency mode, which may allow for certain actions to be taken that are not normally permitted, such as allowing users to withdraw without penalties or claim rewards without restrictions
-
-    bool public shutdown; // Flag to indicate whether the contract is in shutdown mode, which may restrict certain actions or allow for emergency withdrawals without penalties in response to critical issues or vulnerabilities
 
     /// @notice Pool A and Pool B staking tokens must differ.
     error SameStakingTokens();
@@ -135,29 +87,22 @@ contract DualPoolStaking is Ownable, AccessControl, ReentrancyGuard, Pausable {
     event RewardNotified(Pool indexed pool, uint256 amount, uint256 duration, uint256 rate);
     event UserModuleUpdated(address indexed oldModule, address indexed newModule, uint256 timestamp);
     event AdminModuleUpdated(address indexed oldModule, address indexed newModule, uint256 timestamp);
+    event MaxTotalSupplyBForRewardRateCapUpdated(uint256 oldValue, uint256 newValue, uint256 timestamp);
+    event PoolCatchUpCranked(Pool indexed pool, uint256 lastUpdateTime, uint256 catchUpCap, bool complete);
 
-    PoolInfo internal poolAState;
-    PoolInfo internal poolBState;
-
-    mapping(address => UserInfo) public userInfoA; // Mapping of user address to their staking info for Pool A
-    mapping(address => UserInfo) public userInfoB; // Mapping of user address to their staking info for Pool B
-    mapping(address => uint256) public unlockTimeB; // Mapping of user address to the timestamp when their staked tokens in Pool B can be withdrawn without penalty
-    mapping(address => uint256) public stakeTimestampB; // Mapping of user address to the timestamp when they last staked in Pool B, used for calculating mid-term fees
-    mapping(address => uint256) public lastClaimTime; // Mapping of user address to the timestamp when they last claimed rewards, used for enforcing claim cooldown
-    address public userModule;
-    address public adminModule;
-    /// @dev Deploy-time TokenB supply ceiling for reward-rate cap (see PRD `MAX_REWARD_RATE_*`).
-    uint256 public maxTotalSupplyBForRewardRateCap;
-    /// @notice Running sum of all `userInfoA[*].rewards` (must match `DualPoolStorageLayout` slot order).
-    uint256 public bookedUserRewardsA;
-    /// @notice Running sum of all `userInfoB[*].rewards`.
-    uint256 public bookedUserRewardsB;
+    /// @dev User settlement paths remain available during `shutdown` even if the contract is also `pause()`d.
+    modifier whenNotPausedUnlessShutdown() {
+        if (!shutdown && paused()) {
+            _requireNotPaused();
+        }
+        _;
+    }
 
     /// @notice Initializes pools, reward token, role admins, fee recipients, and ERC777 safety checks.
     /// @param tokenA Pool A staking token (must differ from `tokenB`).
     /// @param tokenB Pool B staking + reward token (must be 18 decimals).
     /// @param maxTotalSupplyBForRewardRateCap_ Non-zero supply ceiling for APR / max-rate math.
-    constructor(address tokenA, address tokenB, uint256 maxTotalSupplyBForRewardRateCap_) Ownable(msg.sender) {
+    constructor(address tokenA, address tokenB, uint256 maxTotalSupplyBForRewardRateCap_) {
         if (tokenA == tokenB) {
             revert SameStakingTokens();
         }
@@ -198,13 +143,13 @@ contract DualPoolStaking is Ownable, AccessControl, ReentrancyGuard, Pausable {
 
     /// @notice Withdraws TokenA principal from Pool A for `msg.sender` via `userModule.executeWithdrawA`.
     /// @param _amount Principal to withdraw (must be `> 0` and `<=` user stake).
-    function withdrawA(uint256 _amount) external nonReentrant whenNotPaused {
+    function withdrawA(uint256 _amount) external nonReentrant whenNotPausedUnlessShutdown {
         _delegateTo(userModule, abi.encodeWithSignature("executeWithdrawA(address,uint256)", msg.sender, _amount));
     }
 
     /// @notice Claims accrued Pool A rewards (paid in TokenB) for `msg.sender` via `userModule.executeClaimA`.
     /// @dev Enforces `claimCooldown`, `minClaimAmount`, and blocks claims while either pool has `badDebt` (see `PoolSingleClaimLib`).
-    function claimA() external nonReentrant whenNotPaused {
+    function claimA() external nonReentrant whenNotPausedUnlessShutdown {
         _delegateTo(userModule, abi.encodeWithSignature("executeClaimA(address)", msg.sender));
     }
 
@@ -233,20 +178,20 @@ contract DualPoolStaking is Ownable, AccessControl, ReentrancyGuard, Pausable {
     /// @notice Withdraws Pool B principal for `msg.sender`; may charge penalties or fees per lock state.
     /// @dev Delegates to `userModule.executeWithdrawB`.
     /// @param _amount Principal to withdraw.
-    function withdrawB(uint256 _amount) external nonReentrant whenNotPaused {
+    function withdrawB(uint256 _amount) external nonReentrant whenNotPausedUnlessShutdown {
         _delegateTo(userModule, abi.encodeWithSignature("executeWithdrawB(address,uint256)", msg.sender, _amount));
     }
 
     /// @notice Claims accrued Pool B rewards (TokenB) for `msg.sender` via `userModule.executeClaimB`.
     /// @dev Same cooldown, min-claim, bad-debt, and liquidity rules as `claimA`, but settles against Pool B pending.
-    function claimB() external nonReentrant whenNotPaused {
+    function claimB() external nonReentrant whenNotPausedUnlessShutdown {
         _delegateTo(userModule, abi.encodeWithSignature("executeClaimB(address)", msg.sender));
     }
 
     /// @notice Cross-pool emergency claim: only during `shutdown` or when either pool has `badDebt`.
     /// @dev Shares cooldown with `claimA`/`claimB`. May partially pay if TokenB liquidity is short. When `shutdown` or any
     ///      `badDebt`, per-pool `minClaimAmount` is relaxed (see `ForceClaimAllLib`). Healthy normal ops must use `claimA`/`claimB`.
-    function forceClaimAll() external nonReentrant whenNotPaused {
+    function forceClaimAll() external nonReentrant whenNotPausedUnlessShutdown {
         _delegateTo(userModule, abi.encodeWithSignature("executeForceClaimAll(address)", msg.sender));
     }
 
@@ -339,7 +284,7 @@ contract DualPoolStaking is Ownable, AccessControl, ReentrancyGuard, Pausable {
     /// @notice Points `userModule` to a new implementation (`DEFAULT_ADMIN_ROLE`).
     /// @dev Production: this role must not remain on an EOA; hold it on a Timelock-owned `DualPoolStakingAdmin` (or the timelock itself) so upgrades go through `schedule` / `execute`.
     /// @param newModule Non-zero module address.
-    function setUserModule(address newModule) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setUserModule(address newModule) external onlyRole(DEFAULT_ADMIN_ROLE) nonReentrant {
         if (newModule == address(0)) revert StakingExecutionErrors.ZeroAddress();
         if (newModule.code.length == 0) revert StakingExecutionErrors.NotAContract(newModule);
         address oldModule = userModule;
@@ -350,7 +295,7 @@ contract DualPoolStaking is Ownable, AccessControl, ReentrancyGuard, Pausable {
     /// @notice Points `adminModule` to a new implementation (`DEFAULT_ADMIN_ROLE`).
     /// @dev See `setUserModule` NatSpec: delegatecall targets are fully trusted; gate `DEFAULT_ADMIN_ROLE` behind timelocked governance.
     /// @param newModule Non-zero module address.
-    function setAdminModule(address newModule) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setAdminModule(address newModule) external onlyRole(DEFAULT_ADMIN_ROLE) nonReentrant {
         if (newModule == address(0)) revert StakingExecutionErrors.ZeroAddress();
         if (newModule.code.length == 0) revert StakingExecutionErrors.NotAContract(newModule);
         address oldModule = adminModule;
@@ -387,22 +332,22 @@ contract DualPoolStaking is Ownable, AccessControl, ReentrancyGuard, Pausable {
     }
 
     /// @notice Sets Pool A TVL cap (`ADMIN_ROLE`).
-    function setTVLCapA(uint256 _cap) external onlyRole(ADMIN_ROLE) {
+    function setTVLCapA(uint256 _cap) external onlyRole(ADMIN_ROLE) nonReentrant {
         _delegateTo(adminModule, abi.encodeWithSignature("executeSetTVLCapA(uint256)", _cap));
     }
 
     /// @notice Sets Pool B TVL cap (`ADMIN_ROLE`).
-    function setTVLCapB(uint256 _cap) external onlyRole(ADMIN_ROLE) {
+    function setTVLCapB(uint256 _cap) external onlyRole(ADMIN_ROLE) nonReentrant {
         _delegateTo(adminModule, abi.encodeWithSignature("executeSetTVLCapB(uint256)", _cap));
     }
 
     /// @notice Sets Pool A minimum stake (`ADMIN_ROLE`).
-    function setMinStakeAmountA(uint256 _amount) external onlyRole(ADMIN_ROLE) {
+    function setMinStakeAmountA(uint256 _amount) external onlyRole(ADMIN_ROLE) nonReentrant {
         _delegateTo(adminModule, abi.encodeWithSignature("executeSetMinStakeAmountA(uint256)", _amount));
     }
 
     /// @notice Sets Pool B minimum stake (`ADMIN_ROLE`).
-    function setMinStakeAmountB(uint256 _amount) external onlyRole(ADMIN_ROLE) {
+    function setMinStakeAmountB(uint256 _amount) external onlyRole(ADMIN_ROLE) nonReentrant {
         _delegateTo(adminModule, abi.encodeWithSignature("executeSetMinStakeAmountB(uint256)", _amount));
     }
 
@@ -441,13 +386,13 @@ contract DualPoolStaking is Ownable, AccessControl, ReentrancyGuard, Pausable {
     }
 
     /// @notice Repays bad debt with reward tokens pulled from `payer` (`ADMIN_ROLE`).
-    /// @dev Production: `DualPoolStakingAdmin` passes `msg.sender` (Timelock) as `payer`; do not use Core `msg.sender` (the facade).
+    /// @dev Inbound pull enforces the same `maxTransferFeeBP` balance-delta check as `notifyReward*`. Production: `DualPoolStakingAdmin` passes `msg.sender` (Timelock) as `payer`.
     function resolveBadDebt(address payer, uint256 amount) external onlyRole(ADMIN_ROLE) nonReentrant {
         if (payer == address(0)) revert StakingExecutionErrors.ZeroAddress();
         _delegateTo(adminModule, abi.encodeWithSignature("executeResolveBadDebt(address,uint256)", payer, amount));
     }
 
-    /// @notice Recovers non-liability ERC20 balances (`ADMIN_ROLE`).
+    /// @notice Recovers non-liability ERC20 balances (`ADMIN_ROLE`). Only Pool A staking token or TokenB; outbound uses `FOTTransferLib.transferGross`.
     function recoverToken(address token, address to, uint256 amount) external onlyRole(ADMIN_ROLE) nonReentrant {
         _delegateTo(
             adminModule, abi.encodeWithSignature("executeRecoverToken(address,address,uint256)", token, to, amount)
@@ -465,18 +410,34 @@ contract DualPoolStaking is Ownable, AccessControl, ReentrancyGuard, Pausable {
     }
 
     /// @notice Enables emergency mode (`OPERATOR_ROLE`).
-    function enableEmergencyMode() external onlyRole(OPERATOR_ROLE) {
+    function enableEmergencyMode() external onlyRole(OPERATOR_ROLE) nonReentrant {
         _delegateTo(adminModule, abi.encodeWithSignature("executeEnableEmergencyMode(address)", msg.sender));
     }
 
     /// @notice Grants or revokes `ADMIN_ROLE` (`DEFAULT_ADMIN_ROLE`).
-    function setAdmin(address newAdmin, bool enabled) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setAdmin(address newAdmin, bool enabled) external onlyRole(DEFAULT_ADMIN_ROLE) nonReentrant {
         _delegateTo(adminModule, abi.encodeWithSignature("executeSetAdmin(address,bool)", newAdmin, enabled));
     }
 
     /// @notice Grants or revokes `OPERATOR_ROLE` (`DEFAULT_ADMIN_ROLE`).
-    function setOperator(address newOperator, bool enabled) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setOperator(address newOperator, bool enabled) external onlyRole(DEFAULT_ADMIN_ROLE) nonReentrant {
         _delegateTo(adminModule, abi.encodeWithSignature("executeSetOperator(address,bool)", newOperator, enabled));
+    }
+
+    /// @notice Updates `maxTotalSupplyBForRewardRateCap` (`ADMIN_ROLE`).
+    function setMaxTotalSupplyBForRewardRateCap(uint256 newCap) external onlyRole(ADMIN_ROLE) nonReentrant {
+        _delegateTo(adminModule, abi.encodeWithSignature("executeSetMaxTotalSupplyBForRewardRateCap(uint256)", newCap));
+    }
+
+    /// @notice Permissionless catch-up crank for global accrual (up to `MAX_CATCHUP_ITERATIONS` steps per call).
+    /// @dev Reverts while operationally paused (`!shutdown`) so accrual cannot advance past `pausedAt` before `unpause`.
+    function crankCatchUpPool(Pool pool) external {
+        uint8 poolRaw = uint8(pool);
+        if (poolRaw > uint8(Pool.B)) revert StakingExecutionErrors.InvalidPool(poolRaw);
+        if (!shutdown && paused()) {
+            _requireNotPaused();
+        }
+        _delegateTo(userModule, abi.encodeWithSignature("executeCrankCatchUpPool(uint8)", poolRaw));
     }
 
     /// @notice Pauses user-facing flows (`OPERATOR_ROLE`).
@@ -513,10 +474,21 @@ contract DualPoolStaking is Ownable, AccessControl, ReentrancyGuard, Pausable {
         return _pendingReward(poolBState, userInfoB[user]);
     }
 
+    /// @notice Whether Pool A global accrual has caught up to the pause-aware accrual cap.
+    function poolACatchUpComplete() external view returns (bool) {
+        return PoolCatchUpLib.isCatchUpComplete(poolAState, pausedAt, paused());
+    }
+
+    /// @notice Whether Pool B global accrual has caught up to the pause-aware accrual cap.
+    function poolBCatchUpComplete() external view returns (bool) {
+        return PoolCatchUpLib.isCatchUpComplete(poolBState, pausedAt, paused());
+    }
+
     /// @dev Simulates `_catchUpExpiredGlobal` + `settleUser` without mutating storage.
     function _pendingReward(PoolInfo storage pool, UserInfo storage user) private view returns (uint256) {
         PoolInfo memory poolMem = pool;
         UserInfo memory userMem = user;
+        uint256 viewTs = PoolCatchUpLib.accrualTimestamp(block.timestamp, pausedAt, paused());
         return PoolAccrualViewLib.preview(
             poolMem,
             userMem,
@@ -524,7 +496,7 @@ contract DualPoolStaking is Ownable, AccessControl, ReentrancyGuard, Pausable {
             PRECISION,
             DUST_TOLERANCE,
             MAX_CATCHUP_ITERATIONS,
-            block.timestamp
+            viewTs
         );
     }
 }

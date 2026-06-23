@@ -8,15 +8,17 @@ import {FOTTransferLib} from "../libraries/FOTTransferLib.sol";
 import {PoolAccrualLib} from "../libraries/PoolAccrualLib.sol";
 import {NotifyRewardLib} from "../libraries/NotifyRewardLib.sol";
 import {RewardReanchorLib} from "../libraries/RewardReanchorLib.sol";
+import {PoolCatchUpLib} from "../libraries/PoolCatchUpLib.sol";
 import {StakingAdminLib} from "../libraries/StakingAdminLib.sol";
 import {StakingExecutionErrors} from "../StakingExecutionErrors.sol";
+import {DelegatecallGuard} from "./DelegatecallGuard.sol";
 import {DualPoolStorageLayout} from "./DualPoolStorageLayout.sol";
 
 /// @title DualPoolAdminModule
 /// @notice Delegate **admin/operator** execution module (`notify`, parameter setters, pause, shutdown, recovery); invoked only via `DualPoolStaking` `delegatecall`.
 /// @dev Mirrors `DualPoolUserModule` storage discipline: never treat this contract’s standalone storage as authoritative.
 /// @custom:delegatecall Mutations apply to the core’s storage at `address(this)` during the parent `delegatecall`.
-contract DualPoolAdminModule is DualPoolStorageLayout {
+contract DualPoolAdminModule is DualPoolStorageLayout, DelegatecallGuard {
     using SafeERC20 for IERC20;
 
     /// @notice TokenB backing invariant failed after an admin mutation (same selector family as the user module for tooling consistency).
@@ -64,13 +66,26 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
     event EmergencyModeActivated(address indexed by, uint256 timestamp);
     event Paused(address indexed by, uint256 timestamp);
     event Unpaused(address indexed by, uint256 timestamp);
+    event MaxTotalSupplyBForRewardRateCapUpdated(uint256 oldValue, uint256 newValue, uint256 timestamp);
+
+    /// @notice Sets `maxTotalSupplyBForRewardRateCap` (`setMaxTotalSupplyBForRewardRateCap` delegate path).
+    function executeSetMaxTotalSupplyBForRewardRateCap(uint256 newCap) external onlyDelegatecall {
+        if (newCap == 0) revert StakingExecutionErrors.ZeroAmount();
+        uint256 minCapForNonZeroRewardRate = (BASIS_POINTS * SECONDS_PER_YEAR + MAX_APR_BP - 1) / MAX_APR_BP;
+        if (newCap < minCapForNonZeroRewardRate) {
+            revert StakingExecutionErrors.ZeroRewardRate(newCap, minCapForNonZeroRewardRate);
+        }
+        uint256 oldCap = maxTotalSupplyBForRewardRateCap;
+        maxTotalSupplyBForRewardRateCap = newCap;
+        emit MaxTotalSupplyBForRewardRateCapUpdated(oldCap, newCap, block.timestamp);
+    }
 
     /// @notice Funds Pool A rewards from `sender` and schedules emissions (`notifyRewardAmountA` delegate path).
     /// @dev Reverts `ExcessiveTransferFee` if balance delta vs `amount` exceeds `maxTransferFeeBP` (same rule as `stakeB` on TokenB).
     /// @param sender Payer pulled via `rewardToken.transferFrom` (the core’s `msg.sender` in the parent call).
     /// @param amount Requested pull amount; actual uses balance delta after transfer.
     /// @param duration Emission length in seconds, or `0` to use `poolAState.rewardDuration` (must be pre-set in bounds).
-    function executeNotifyRewardAmountA(address sender, uint256 amount, uint256 duration) external {
+    function executeNotifyRewardAmountA(address sender, uint256 amount, uint256 duration) external onlyDelegatecall {
         if (emergencyMode) revert EmergencyModeActive();
         if (shutdown) revert StakingExecutionErrors.ShutdownModeActive();
         if (amount == 0) revert StakingExecutionErrors.ZeroAmount();
@@ -102,7 +117,7 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
     /// @param sender Payer pulled via `rewardToken.transferFrom`.
     /// @param amount Requested pull amount; actual uses balance delta after transfer.
     /// @param duration Emission length in seconds, or `0` to use `poolBState.rewardDuration` (must be pre-set in bounds).
-    function executeNotifyRewardAmountB(address sender, uint256 amount, uint256 duration) external {
+    function executeNotifyRewardAmountB(address sender, uint256 amount, uint256 duration) external onlyDelegatecall {
         if (emergencyMode) revert EmergencyModeActive();
         if (shutdown) revert StakingExecutionErrors.ShutdownModeActive();
         if (amount == 0) revert StakingExecutionErrors.ZeroAmount();
@@ -134,7 +149,7 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
     /// @param from Source pool for `availableRewards` debit.
     /// @param to Destination pool for credit.
     /// @param amount Reward token wei to move.
-    function executeRebalanceBudgets(Pool from, Pool to, uint256 amount) external {
+    function executeRebalanceBudgets(Pool from, Pool to, uint256 amount) external onlyDelegatecall {
         if (emergencyMode) revert EmergencyModeActive();
         if (shutdown) revert StakingExecutionErrors.ShutdownModeActive();
         if (amount == 0) revert StakingExecutionErrors.ZeroAmount();
@@ -147,7 +162,7 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
 
     /// @notice Sweeps Pool B fees to `feeRecipient` (`claimFees` delegate path).
     /// @dev CEI: clears `unclaimedFeesB` and emits before `rewardToken` transfer so state does not depend on recipient hooks.
-    function executeClaimFees() external {
+    function executeClaimFees() external onlyDelegatecall {
         uint256 fees = unclaimedFeesB;
         if (fees == 0) {
             revert StakingExecutionErrors.NoFeesToClaim();
@@ -158,13 +173,17 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
         unclaimedFeesB = 0;
         emit FeesClaimed(feeRecipient, fees, block.timestamp);
         FOTTransferLib.transferGross(rewardToken, feeRecipient, fees, maxTransferFeeBP, BASIS_POINTS);
+        _assertInvariantB();
     }
 
     /// @notice Updates Pool B withdrawal-related fees (`setFees` delegate path).
     /// @param newWithdrawFeeBP Withdraw fee bps for short holding durations.
     /// @param newMidTermFeeBP Mid-term fee bps.
     /// @param newPenaltyFeeBP Early-exit penalty bps on principal.
-    function executeSetFees(uint256 newWithdrawFeeBP, uint256 newMidTermFeeBP, uint256 newPenaltyFeeBP) external {
+    function executeSetFees(uint256 newWithdrawFeeBP, uint256 newMidTermFeeBP, uint256 newPenaltyFeeBP)
+        external
+        onlyDelegatecall
+    {
         if (
             newWithdrawFeeBP > MAX_WITHDRAW_BP || newMidTermFeeBP > MAX_MIDTERM_BP
                 || newPenaltyFeeBP > MAX_EARLY_EXIT_PENALTY_BP
@@ -183,7 +202,7 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
 
     /// @notice Sets `feeRecipient` (`setFeeRecipient` delegate path).
     /// @param newRecipient New fee sweep recipient; must not be zero or the core itself.
-    function executeSetFeeRecipient(address newRecipient) external {
+    function executeSetFeeRecipient(address newRecipient) external onlyDelegatecall {
         if (newRecipient == address(0)) revert StakingExecutionErrors.ZeroAddress();
         if (newRecipient == address(this)) revert InvalidRecipient(newRecipient);
         address oldRecipient = feeRecipient;
@@ -193,7 +212,7 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
 
     /// @notice Sets `minEarlyExitAmountB` (`setMinEarlyExitAmountB` delegate path).
     /// @param newMin New minimum principal for early exits; cross-checked vs `penaltyfeeBP`.
-    function executeSetMinEarlyExitAmountB(uint256 newMin) external {
+    function executeSetMinEarlyExitAmountB(uint256 newMin) external onlyDelegatecall {
         if (newMin == 0) revert StakingExecutionErrors.ZeroAmount();
         if (penaltyfeeBP > 0) {
             uint256 minRequired = (BASIS_POINTS + penaltyfeeBP - 1) / penaltyfeeBP;
@@ -204,50 +223,50 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
 
     /// @notice Sets `maxTransferFeeBP` (`setMaxTransferFeeBP` delegate path).
     /// @param newMaxTransferFeeBP New FOT tolerance ceiling; must be `<= BASIS_POINTS`.
-    function executeSetMaxTransferFeeBP(uint256 newMaxTransferFeeBP) external {
+    function executeSetMaxTransferFeeBP(uint256 newMaxTransferFeeBP) external onlyDelegatecall {
         if (newMaxTransferFeeBP > BASIS_POINTS) revert StakingExecutionErrors.InvalidMaxTransferFeeBp();
         maxTransferFeeBP = newMaxTransferFeeBP;
     }
 
     /// @notice Sets Pool A `tvlCap` (`setTVLCapA` delegate path).
     /// @param cap New TVL cap (`0` uncapped).
-    function executeSetTVLCapA(uint256 cap) external {
+    function executeSetTVLCapA(uint256 cap) external onlyDelegatecall {
         _applyTVLCap(poolAState, Pool.A, cap);
     }
 
     /// @notice Sets Pool B `tvlCap` (`setTVLCapB` delegate path).
     /// @param cap New TVL cap (`0` uncapped).
-    function executeSetTVLCapB(uint256 cap) external {
+    function executeSetTVLCapB(uint256 cap) external onlyDelegatecall {
         _applyTVLCap(poolBState, Pool.B, cap);
     }
 
     /// @notice Sets Pool A `minStakeAmount` (`setMinStakeAmountA` delegate path).
     /// @param amount New per-tx minimum stake in TokenA wei.
-    function executeSetMinStakeAmountA(uint256 amount) external {
+    function executeSetMinStakeAmountA(uint256 amount) external onlyDelegatecall {
         _applyMinStake(poolAState, Pool.A, amount);
     }
 
     /// @notice Sets Pool B `minStakeAmount` (`setMinStakeAmountB` delegate path).
     /// @param amount New per-tx minimum stake in TokenB wei.
-    function executeSetMinStakeAmountB(uint256 amount) external {
+    function executeSetMinStakeAmountB(uint256 amount) external onlyDelegatecall {
         _applyMinStake(poolBState, Pool.B, amount);
     }
 
     /// @notice Sets Pool A `rewardDuration` (`setRewardDurationA` delegate path).
     /// @param duration Default notify duration when `notifyRewardAmountA(..., 0)` is used; `0` clears the default; otherwise must be within `[MIN_REWARD_RATE_DURATION, MAX_DURATION]`.
-    function executeSetRewardDurationA(uint256 duration) external {
+    function executeSetRewardDurationA(uint256 duration) external onlyDelegatecall {
         _applyRewardDuration(poolAState, Pool.A, duration);
     }
 
     /// @notice Sets Pool B `rewardDuration` (`setRewardDurationB` delegate path).
     /// @param duration Default notify duration when `notifyRewardAmountB(..., 0)` is used; `0` clears; otherwise in `[MIN_REWARD_RATE_DURATION, MAX_DURATION]`.
-    function executeSetRewardDurationB(uint256 duration) external {
+    function executeSetRewardDurationB(uint256 duration) external onlyDelegatecall {
         _applyRewardDuration(poolBState, Pool.B, duration);
     }
 
     /// @notice Sets `minClaimAmount` (`setMinClaimAmount` delegate path).
     /// @param amount New minimum claim threshold in reward-token wei.
-    function executeSetMinClaimAmount(uint256 amount) external {
+    function executeSetMinClaimAmount(uint256 amount) external onlyDelegatecall {
         if (amount > MAX_MIN_CLAIM_AMOUNT) revert ExceedsMaxMinClaimAmount();
         uint256 oldAmount = minClaimAmount;
         minClaimAmount = amount;
@@ -256,7 +275,7 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
 
     /// @notice Sets Pool B `lockDuration` (`setLockDuration` delegate path).
     /// @param newLockDuration Rolling lock seconds applied on stake/compound.
-    function executeSetLockDuration(uint256 newLockDuration) external {
+    function executeSetLockDuration(uint256 newLockDuration) external onlyDelegatecall {
         if (newLockDuration > MAX_LOCK_DURATION || newLockDuration == 0) revert InvalidLockDuration();
         uint256 oldLockDuration = lockDuration;
         lockDuration = newLockDuration;
@@ -264,13 +283,20 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
     }
 
     /// @notice Repays bad debt from `sender` (`resolveBadDebt` delegate path).
+    /// @dev Reverts `ExcessiveTransferFee` if balance delta vs `amount` exceeds `maxTransferFeeBP` (same rule as `notifyReward*`).
     /// @param sender Payer whose reward tokens are pulled with `transferFrom`.
     /// @param amount Requested repayment amount (actual credited via balance delta in library).
-    function executeResolveBadDebt(address sender, uint256 amount) external {
+    function executeResolveBadDebt(address sender, uint256 amount) external onlyDelegatecall {
         _catchUpGlobalA();
         _catchUpGlobalB();
-        StakingAdminLib.ResolveBadDebtParams memory params =
-            StakingAdminLib.ResolveBadDebtParams({rewardToken: rewardToken, from: sender, amount: amount});
+        uint256 fotCap = maxTransferFeeBP;
+        StakingAdminLib.ResolveBadDebtParams memory params = StakingAdminLib.ResolveBadDebtParams({
+            rewardToken: rewardToken,
+            from: sender,
+            amount: amount,
+            maxTransferFeeBP: fotCap,
+            basisPoints: BASIS_POINTS
+        });
         StakingAdminLib.ResolveBadDebtResult memory res =
             StakingAdminLib.executeResolveBadDebt(poolAState, poolBState, params, _reanchorCaps());
         if (res.repayA > 0) emit BadDebtResolved(Pool.A, res.repayA, block.timestamp);
@@ -280,12 +306,22 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
     }
 
     /// @notice Recovers stray ERC20 (`recoverToken` delegate path).
-    /// @param token Token address to sweep when provably non-liability.
+    /// @dev Only Pool A staking token or Pool B / reward token; other addresses revert `TokenRecoveryRestricted`.
+    ///      Outbound uses `FOTTransferLib.transferGross` (cap + `OutboundTransfer` event).
+    /// @param token Pool A staking token or Pool B / reward token address.
     /// @param to Recipient.
     /// @param amount Amount to transfer if permitted.
-    function executeRecoverToken(address token, address to, uint256 amount) external {
+    function executeRecoverToken(address token, address to, uint256 amount) external onlyDelegatecall {
+        uint256 fotCap = maxTransferFeeBP;
+        uint256 feesSnapshot = unclaimedFeesB;
         StakingAdminLib.RecoverTokenParams memory params = StakingAdminLib.RecoverTokenParams({
-            rewardToken: rewardToken, unclaimedFeesB: unclaimedFeesB, token: IERC20(token), to: to, amount: amount
+            rewardToken: rewardToken,
+            unclaimedFeesB: feesSnapshot,
+            token: IERC20(token),
+            to: to,
+            amount: amount,
+            maxTransferFeeBP: fotCap,
+            basisPoints: BASIS_POINTS
         });
         StakingAdminLib.executeRecoverToken(poolAState, poolBState, params);
         emit TokenRecovered(token, amount, to);
@@ -293,7 +329,7 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
 
     /// @notice Activates shutdown (`activateShutdown` delegate path).
     /// @param sender Address recorded on `ShutdownActivated` (core passes `msg.sender`).
-    function executeActivateShutdown(address sender) external {
+    function executeActivateShutdown(address sender) external onlyDelegatecall {
         if (!emergencyMode) revert StakingExecutionErrors.NotInEmergency();
         if (shutdown) revert ShutdownActive();
         shutdown = true;
@@ -302,21 +338,29 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
     }
 
     /// @notice Finalizes shutdown (`forceShutdownFinalize` delegate path).
-    function executeForceShutdownFinalize() external {
+    function executeForceShutdownFinalize() external onlyDelegatecall {
         _catchUpGlobalA();
         _catchUpGlobalB();
         uint256 uf = unclaimedFeesB;
         unclaimedFeesB = 0;
+        bool shutdownFlag = shutdown;
+        address recipient = feeRecipient;
+        uint256 shutdownTs = shutdownAt;
+        uint256 bookedA = bookedUserRewardsA;
+        uint256 bookedB = bookedUserRewardsB;
+        uint256 fotCap = maxTransferFeeBP;
         StakingAdminLib.ForceShutdownFinalizeParams memory params = StakingAdminLib.ForceShutdownFinalizeParams({
-            shutdown: shutdown,
+            shutdown: shutdownFlag,
             rewardToken: rewardToken,
-            feeRecipient: feeRecipient,
-            shutdownAt: shutdownAt,
+            feeRecipient: recipient,
+            shutdownAt: shutdownTs,
             gracePeriod: 365 days,
             deadlockBypass: SHUTDOWN_DEADLOCK_BYPASS,
             unclaimedFeesAtCall: uf,
-            bookedUserRewardsA: bookedUserRewardsA,
-            bookedUserRewardsB: bookedUserRewardsB
+            bookedUserRewardsA: bookedA,
+            bookedUserRewardsB: bookedB,
+            maxTransferFeeBP: fotCap,
+            basisPoints: BASIS_POINTS
         });
         StakingAdminLib.executeForceShutdownFinalize(poolAState, poolBState, params);
         emit ProtocolShutdownComplete(block.timestamp);
@@ -324,7 +368,7 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
 
     /// @notice Enables emergency mode (`enableEmergencyMode` delegate path).
     /// @param sender Address recorded on `EmergencyModeActivated`.
-    function executeEnableEmergencyMode(address sender) external {
+    function executeEnableEmergencyMode(address sender) external onlyDelegatecall {
         if (emergencyMode) revert EmergencyModeActive();
         emergencyMode = true;
         emergencyActivatedAt = block.timestamp;
@@ -334,7 +378,7 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
     /// @notice Grants or revokes `ADMIN_ROLE` (`setAdmin` delegate path).
     /// @param newAdmin Target account.
     /// @param enabled True to grant, false to revoke.
-    function executeSetAdmin(address newAdmin, bool enabled) external {
+    function executeSetAdmin(address newAdmin, bool enabled) external onlyDelegatecall {
         if (newAdmin == address(0)) revert StakingExecutionErrors.ZeroAddress();
         if (enabled) _grantRole(ADMIN_ROLE, newAdmin);
         else _revokeRole(ADMIN_ROLE, newAdmin);
@@ -343,7 +387,7 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
     /// @notice Grants or revokes `OPERATOR_ROLE` (`setOperator` delegate path).
     /// @param newOperator Target account.
     /// @param enabled True to grant, false to revoke.
-    function executeSetOperator(address newOperator, bool enabled) external {
+    function executeSetOperator(address newOperator, bool enabled) external onlyDelegatecall {
         if (newOperator == address(0)) revert StakingExecutionErrors.ZeroAddress();
         if (enabled) _grantRole(OPERATOR_ROLE, newOperator);
         else _revokeRole(OPERATOR_ROLE, newOperator);
@@ -351,7 +395,8 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
 
     /// @notice Pauses the core (`pause` delegate path).
     /// @param sender Address recorded on `Paused` after global accrual snapshots.
-    function executePause(address sender) external {
+    function executePause(address sender) external onlyDelegatecall {
+        if (shutdown) revert StakingExecutionErrors.PauseForbiddenDuringShutdown();
         _catchUpGlobalA();
         _catchUpGlobalB();
         pausedAt = block.timestamp;
@@ -362,7 +407,7 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
 
     /// @notice Unpauses the core (`unpause` delegate path).
     /// @param sender Address recorded on `Unpaused` after schedule extension.
-    function executeUnpause(address sender) external {
+    function executeUnpause(address sender) external onlyDelegatecall {
         if (block.timestamp < unpauseAt) {
             revert UnpauseCooldownPending(unpauseAt, block.timestamp);
         }
@@ -420,15 +465,19 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
         }
     }
 
-    /// @dev Accrual ceiling for pause catch-up: rewards only through `min(now, periodFinish)`.
+    /// @dev Accrual ceiling for catch-up: `min(accrualTimestamp(now), periodFinish)` (paused → `pausedAt`).
     function _accrualCatchUpCap(PoolInfo storage pool) private view returns (uint256 cap) {
-        cap = block.timestamp;
-        if (pool.periodFinish < cap) cap = pool.periodFinish;
+        return PoolCatchUpLib.accrualCatchUpCap(pool, pausedAt, paused());
     }
 
     /// @dev Loops `updateGlobal` until `lastUpdateTime` reaches `_accrualCatchUpCap` (bounded by `MAX_CATCHUP_ITERATIONS`).
     function _catchUpGlobal(PoolInfo storage pool, Pool p) private {
-        uint256 cap = _accrualCatchUpCap(pool);
+        _advanceCatchUp(pool, p, true);
+    }
+
+    /// @dev Advances `pool.lastUpdateTime` toward `accrualCatchUpCap` by up to `MAX_CATCHUP_ITERATIONS` steps.
+    function _advanceCatchUp(PoolInfo storage pool, Pool p, bool requireComplete) private returns (bool complete) {
+        uint256 cap = PoolCatchUpLib.accrualCatchUpCap(pool, pausedAt, paused());
         uint256 iterations;
         while (pool.lastUpdateTime < cap && iterations < MAX_CATCHUP_ITERATIONS) {
             uint256 prev = pool.lastUpdateTime;
@@ -440,7 +489,8 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
             if (pool.lastUpdateTime == prev) break;
             iterations++;
         }
-        if (pool.lastUpdateTime < cap) {
+        complete = pool.lastUpdateTime >= cap;
+        if (requireComplete && !complete) {
             revert StakingExecutionErrors.PauseCatchUpIncomplete(cap, pool.lastUpdateTime);
         }
     }
@@ -477,7 +527,7 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
     /// @dev Advances Pool A global reward index.
     function _updateGlobalA() internal {
         PoolAccrualLib.GlobalEmit memory ge =
-            PoolAccrualLib.updateGlobal(poolAState, MAX_DELTA_TIME, PRECISION, DUST_TOLERANCE);
+            PoolAccrualLib.updateGlobal(poolAState, MAX_DELTA_TIME, PRECISION, DUST_TOLERANCE, pausedAt, paused());
         if (ge.insufficient) emit InsufficientBudget(Pool.A, ge.shortfall, block.timestamp);
         if (ge.dust) emit DustAccumulated(Pool.A, ge.dustWei, block.timestamp);
     }
@@ -485,7 +535,7 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
     /// @dev Advances Pool B global reward index.
     function _updateGlobalB() internal {
         PoolAccrualLib.GlobalEmit memory ge =
-            PoolAccrualLib.updateGlobal(poolBState, MAX_DELTA_TIME, PRECISION, DUST_TOLERANCE);
+            PoolAccrualLib.updateGlobal(poolBState, MAX_DELTA_TIME, PRECISION, DUST_TOLERANCE, pausedAt, paused());
         if (ge.insufficient) emit InsufficientBudget(Pool.B, ge.shortfall, block.timestamp);
         if (ge.dust) emit DustAccumulated(Pool.B, ge.dustWei, block.timestamp);
     }
@@ -513,8 +563,16 @@ contract DualPoolAdminModule is DualPoolStorageLayout {
         required = _invariantRequiredPart1() + _invariantRequiredPart2();
     }
 
+    /// @dev Reverts if `bookedUserRewards*` exceeds `totalPending*` (L-5 runtime guard).
+    function _assertBookedWithinPending() internal view {
+        if (bookedUserRewardsA > poolAState.totalPending || bookedUserRewardsB > poolBState.totalPending) {
+            revert StakingExecutionErrors.BookedRewardsExceedPending();
+        }
+    }
+
     /// @dev Reverts if TokenB invariant fails (emits `InvariantViolated` first).
     function _assertInvariantB() internal {
+        _assertBookedWithinPending();
         (uint256 actual, uint256 required) = _invariantBActualRequired();
         if (actual + DUST_TOLERANCE < required) {
             emit InvariantViolated(actual, required, block.timestamp);
