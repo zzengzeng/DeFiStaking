@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  buildCrankBatchCalls,
   canPermissionlessCrank,
   CatchUpIncompleteError,
   CATCH_UP_BOTH,
+  encodeCrankPoolCalldata,
   poolSideToIndex,
   runCatchUpUntilComplete,
   uniquePools,
@@ -51,6 +53,31 @@ describe("runCatchUpUntilComplete (M-2)", () => {
     });
     expect(crank).toHaveBeenCalledTimes(2);
     expect(crank.mock.calls.map(([p]) => p)).toEqual(["A", "B"]);
+  });
+
+  it("batches pending pools in one crankBatch call per round", async () => {
+    const crankBatch = vi.fn();
+    const crank = vi.fn();
+    let reads = 0;
+    await runCatchUpUntilComplete({
+      pools: CATCH_UP_BOTH,
+      listPending: async () => {
+        reads += 1;
+        return reads === 1 ? ["A", "B"] : [];
+      },
+      crankBatch,
+      crank,
+    });
+    expect(crankBatch).toHaveBeenCalledTimes(1);
+    expect(crankBatch.mock.calls[0]?.[0]).toEqual(["A", "B"]);
+    expect(crank).not.toHaveBeenCalled();
+  });
+
+  it("buildCrankBatchCalls encodes both pool cranks", () => {
+    const calls = buildCrankBatchCalls(["A", "B"]);
+    expect(calls).toHaveLength(2);
+    expect(calls[0]?.callData).toBe(encodeCrankPoolCalldata("A"));
+    expect(calls[1]?.callData).toBe(encodeCrankPoolCalldata("B"));
   });
 
   it("simulates multi-round catch-up when one crank cannot finish (e.g. >1500d idle)", async () => {

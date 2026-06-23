@@ -11,8 +11,11 @@ import { useStaking } from "@/hooks/useStaking";
 import { useTxCenter } from "@/hooks/useTxCenter";
 import { useI18n } from "@/lib/i18n";
 import {
+  buildCrankBatchCalls,
   canPermissionlessCrank,
   CatchUpIncompleteError,
+  multicall3Abi,
+  MULTICALL3_ADDRESS,
   type PoolSide,
   poolSideToIndex,
   poolsNeedingCatchUp,
@@ -24,10 +27,19 @@ export { CatchUpBlockedError } from "@/hooks/catchUpErrors";
 export { CatchUpIncompleteError };
 
 type CrankSend = (pool: PoolSide) => Promise<Hash>;
+type CrankBatchSend = (pools: readonly PoolSide[]) => Promise<Hash>;
+
+function catchUpTxTitle(pools: readonly PoolSide[], t: ReturnType<typeof useI18n>["t"]): string {
+  const ordered = uniquePools(pools);
+  if (ordered.length >= 2) return t("txCenter.crankCatchUpBoth");
+  const pool = ordered[0];
+  const poolLabel = pool === "A" ? t("txCenter.poolFlexible") : t("txCenter.poolLocked");
+  return t("txCenter.crankCatchUp", { pool: poolLabel });
+}
 
 /**
  * Runs permissionless `crankCatchUpPool` txs until requested pools reach `pool*CatchUpComplete`.
- * Used before user paths that call `_catchUpExpiredGlobal(..., requireComplete=true)` on-chain.
+ * Batches A+B into one Multicall3 tx per round to avoid wallet-confirm drift between pools.
  */
 export function usePoolCatchUpEnsurer() {
   const { t } = useI18n();
@@ -51,8 +63,31 @@ export function usePoolCatchUpEnsurer() {
     [address, t, writeContractAsync],
   );
 
+  const writeCrankBatch = useCallback(
+    async (pools: readonly PoolSide[]): Promise<Hash> => {
+      if (!address) throw new CatchUpBlockedError(t("errors.walletNotConnected"));
+      const calls = buildCrankBatchCalls(pools);
+      if (calls.length === 0) throw new CatchUpBlockedError(t("errors.catchUpIncomplete"));
+      if (calls.length === 1) {
+        return writeCrank(uniquePools(pools)[0]!);
+      }
+      return writeContractAsync({
+        abi: multicall3Abi,
+        address: MULTICALL3_ADDRESS,
+        functionName: "aggregate3",
+        args: [calls],
+        account: address,
+      });
+    },
+    [address, t, writeContractAsync, writeCrank],
+  );
+
   const ensureCatchUp = useCallback(
-    async (pools: readonly PoolSide[], sendCrank: CrankSend = writeCrank) => {
+    async (
+      pools: readonly PoolSide[],
+      sendCrank: CrankSend = writeCrank,
+      sendCrankBatch: CrankBatchSend = writeCrankBatch,
+    ) => {
       if (!publicClient || pools.length === 0) return;
 
       const paused = staking.status === "PAUSED";
@@ -66,11 +101,22 @@ export function usePoolCatchUpEnsurer() {
         await runCatchUpUntilComplete({
           pools: targets,
           listPending: (scope) => poolsNeedingCatchUp(publicClient, scope),
-          crank: async (pool) => {
-            const poolLabel = pool === "A" ? t("txCenter.poolFlexible") : t("txCenter.poolLocked");
+          crankBatch: async (pending) => {
+            const title = catchUpTxTitle(pending, t);
+            const batch = uniquePools(pending).length > 1;
             await startTransaction({
               type: "crank_catch_up",
-              title: t("txCenter.crankCatchUp", { pool: poolLabel }),
+              title,
+              description: batch ? t("txCenter.crankCatchUpBatchDesc") : t("txCenter.crankCatchUpDesc"),
+              metadata: { pools: pending.join(",") },
+              execute: () => sendCrankBatch(pending),
+              onConfirmed: () => staking.refetchAll(),
+            });
+          },
+          crank: async (pool) => {
+            await startTransaction({
+              type: "crank_catch_up",
+              title: catchUpTxTitle([pool], t),
               description: t("txCenter.crankCatchUpDesc"),
               metadata: { pool },
               execute: () => sendCrank(pool),
@@ -85,7 +131,7 @@ export function usePoolCatchUpEnsurer() {
         throw e;
       }
     },
-    [publicClient, staking, startTransaction, t, writeCrank],
+    [publicClient, staking, startTransaction, t, writeCrank, writeCrankBatch],
   );
 
   return {

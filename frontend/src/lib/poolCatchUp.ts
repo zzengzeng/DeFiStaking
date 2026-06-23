@@ -1,9 +1,41 @@
-import type { PublicClient } from "viem";
+import { encodeFunctionData, type PublicClient } from "viem";
 
 import { dualPoolStakingAbi } from "@/contracts/abis/dualPoolStaking";
 import { contractAddresses } from "@/contracts/addresses";
 
 export type PoolSide = "A" | "B";
+
+/** Canonical Multicall3 — batch A+B crank in one wallet confirmation (Sepolia + mainnet). */
+export const MULTICALL3_ADDRESS = "0xcA11bde05977b3631167028862bE2a173976CA11" as const;
+
+export const multicall3Abi = [
+  {
+    type: "function",
+    name: "aggregate3",
+    stateMutability: "payable",
+    inputs: [
+      {
+        name: "calls",
+        type: "tuple[]",
+        components: [
+          { name: "target", type: "address" },
+          { name: "allowFailure", type: "bool" },
+          { name: "callData", type: "bytes" },
+        ],
+      },
+    ],
+    outputs: [
+      {
+        name: "returnData",
+        type: "tuple[]",
+        components: [
+          { name: "success", type: "bool" },
+          { name: "returnData", type: "bytes" },
+        ],
+      },
+    ],
+  },
+] as const;
 
 /** Thrown when `runCatchUpUntilComplete` exhausts `maxRounds` without reaching complete. */
 export class CatchUpIncompleteError extends Error {
@@ -22,6 +54,24 @@ export const CATCH_UP_BOTH = ["A", "B"] as const satisfies readonly PoolSide[];
 
 export function poolSideToIndex(pool: PoolSide): 0 | 1 {
   return pool === "A" ? 0 : 1;
+}
+
+/** Calldata for `crankCatchUpPool` (used by Multicall3 batching). */
+export function encodeCrankPoolCalldata(pool: PoolSide): `0x${string}` {
+  return encodeFunctionData({
+    abi: dualPoolStakingAbi,
+    functionName: "crankCatchUpPool",
+    args: [poolSideToIndex(pool)],
+  });
+}
+
+/** Build Multicall3 `aggregate3` calls for the given pools (order preserved). */
+export function buildCrankBatchCalls(pools: readonly PoolSide[]) {
+  return uniquePools(pools).map((pool) => ({
+    target: contractAddresses.staking,
+    allowFailure: false as const,
+    callData: encodeCrankPoolCalldata(pool),
+  }));
 }
 
 export function uniquePools(pools: readonly PoolSide[]): PoolSide[] {
@@ -60,7 +110,10 @@ export async function poolsNeedingCatchUp(publicClient: PublicClient, pools: rea
 export type RunCatchUpUntilCompleteOptions = {
   pools: readonly PoolSide[];
   listPending: (pools: readonly PoolSide[]) => Promise<PoolSide[]>;
-  crank: (pool: PoolSide) => Promise<unknown>;
+  /** Single-pool crank (legacy / tests). */
+  crank?: (pool: PoolSide) => Promise<unknown>;
+  /** Preferred: crank all `pending` pools in one on-chain tx (Multicall3). */
+  crankBatch?: (pools: readonly PoolSide[]) => Promise<unknown>;
   maxRounds?: number;
 };
 
@@ -77,8 +130,14 @@ export async function runCatchUpUntilComplete(options: RunCatchUpUntilCompleteOp
   while (rounds < maxRounds) {
     const pending = await options.listPending(targets);
     if (pending.length === 0) return;
-    for (const pool of pending) {
-      await options.crank(pool);
+    if (options.crankBatch) {
+      await options.crankBatch(pending);
+    } else if (options.crank) {
+      for (const pool of pending) {
+        await options.crank(pool);
+      }
+    } else {
+      throw new Error("runCatchUpUntilComplete: crank or crankBatch required");
     }
     rounds += 1;
   }
