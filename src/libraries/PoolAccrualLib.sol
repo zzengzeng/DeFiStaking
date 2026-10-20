@@ -31,10 +31,12 @@ library PoolAccrualLib {
     /// @param user Address to settle.
     /// @param precision Fixed-point scale (core uses `1e18`).
     /// @return earnedAdded Reward wei credited to `users[user].rewards` by this call (`0` if none).
-    function settleUser(PoolInfo storage pool, mapping(address => UserInfo) storage users, address user, uint256 precision)
-        external
-        returns (uint256 earnedAdded)
-    {
+    function settleUser(
+        PoolInfo storage pool,
+        mapping(address => UserInfo) storage users,
+        address user,
+        uint256 precision
+    ) external returns (uint256 earnedAdded) {
         UserInfo storage u = users[user];
         if (u.staked == 0) {
             u.rewardPaid = pool.accRewardPerToken;

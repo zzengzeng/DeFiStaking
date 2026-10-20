@@ -76,8 +76,8 @@ contract DualPoolStakingTest is Test {
         PoolInfo memory pb = s.poolB();
         IERC20 tok = IERC20(address(s.rewardToken()));
         uint256 actual = tok.balanceOf(address(s)) + pa.badDebt + pb.badDebt;
-        uint256 required = pb.totalStaked + pa.totalPending + pb.totalPending + pa.availableRewards + pb.availableRewards
-            + s.unclaimedFeesB() + pa.dust + pb.dust;
+        uint256 required = pb.totalStaked + pa.totalPending + pb.totalPending + pa.availableRewards
+            + pb.availableRewards + s.unclaimedFeesB() + pa.dust + pb.dust;
         assertGe(actual + 10, required, "TokenB invariant (balance+badDebt >= liabilities)");
     }
 
@@ -846,7 +846,9 @@ contract DualPoolStakingTest is Test {
         stakingToken.approve(address(dualPoolStaking), DEFAULT_STAKE);
         dualPoolStaking.stakeA(DEFAULT_STAKE);
 
-        vm.expectRevert(abi.encodeWithSelector(StakingExecutionErrors.InsufficientBalance.selector, 200 ether, DEFAULT_STAKE));
+        vm.expectRevert(
+            abi.encodeWithSelector(StakingExecutionErrors.InsufficientBalance.selector, 200 ether, DEFAULT_STAKE)
+        );
         dualPoolStaking.withdrawA(200 ether);
         vm.stopPrank();
     }
@@ -931,7 +933,9 @@ contract DualPoolStakingTest is Test {
         rewardToken.approve(address(dualPoolStaking), DEFAULT_STAKE);
         dualPoolStaking.stakeB(DEFAULT_STAKE);
 
-        vm.expectRevert(abi.encodeWithSelector(StakingExecutionErrors.InsufficientBalance.selector, 200 ether, DEFAULT_STAKE));
+        vm.expectRevert(
+            abi.encodeWithSelector(StakingExecutionErrors.InsufficientBalance.selector, 200 ether, DEFAULT_STAKE)
+        );
         dualPoolStaking.withdrawB(200 ether);
         vm.stopPrank();
     }
@@ -1382,11 +1386,11 @@ contract DualPoolStakingTest is Test {
         // Warp to just before cooldown
         vm.warp(unpauseAt - 1);
 
-        vm.expectRevert(abi.encodeWithSelector(
-            bytes4(keccak256("UnpauseCooldownPending(uint256,uint256)")),
-            unpauseAt,
-            block.timestamp
-        ));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                bytes4(keccak256("UnpauseCooldownPending(uint256,uint256)")), unpauseAt, block.timestamp
+            )
+        );
         stakingAdmin.unpause();
     }
 
@@ -2451,9 +2455,8 @@ contract DualPoolStakingTest is Test {
 
         // After first deposit, rewardRate should be re-anchored
         PoolInfo memory p = dualPoolStaking.poolA();
-        uint256 remainingTime = beforeNotify.periodFinish > block.timestamp
-            ? beforeNotify.periodFinish - block.timestamp
-            : 0;
+        uint256 remainingTime =
+            beforeNotify.periodFinish > block.timestamp ? beforeNotify.periodFinish - block.timestamp : 0;
 
         if (remainingTime > 0) {
             uint256 expectedRate = beforeNotify.availableRewards / remainingTime;
@@ -2679,7 +2682,10 @@ contract DualPoolStakingTest is Test {
     }
 
     /// @dev `PoolBWadpLib` uses OZ `Math.mulDiv` with `Ceil` rounding; fuzz against an independent ceil reference.
-    function testFuzz_WadpMatchesOpenZeppelinCeil(uint128 oldStaked, uint128 added, uint32 tOld, uint32 tNew) public pure {
+    function testFuzz_WadpMatchesOpenZeppelinCeil(uint128 oldStaked, uint128 added, uint32 tOld, uint32 tNew)
+        public
+        pure
+    {
         uint256 o = bound(uint256(oldStaked), 1, 1e24);
         uint256 a = bound(uint256(added), 1, 1e24);
         vm.assume(tNew >= tOld);
