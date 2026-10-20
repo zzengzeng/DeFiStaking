@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+
 /// @title MockERC20
-/// @notice Minimal ERC20-style test token (18 decimals) with external `mint` for localnets and Foundry tests.
-/// @dev Not intended for production; no access control on `mint`.
-contract MockERC20 {
+/// @notice Minimal ERC20-style test token (18 decimals) with owner-gated `mint` for localnets and Foundry tests.
+/// @dev Not intended for production; only the deployer (owner) may mint.
+contract MockERC20 is Ownable {
     /// @notice Human-readable token name.
     string public name;
     /// @notice Token symbol.
@@ -22,10 +24,10 @@ contract MockERC20 {
     /// @notice Emitted when `owner` sets `spender` allowance to `value`.
     event Approval(address indexed owner, address indexed spender, uint256 value);
 
-    /// @notice Sets metadata; does not pre-mint supply.
+    /// @notice Sets metadata; does not pre-mint supply. Deployer becomes `owner`.
     /// @param _name Token name.
     /// @param _symbol Token symbol.
-    constructor(string memory _name, string memory _symbol) {
+    constructor(string memory _name, string memory _symbol) Ownable(msg.sender) {
         name = _name;
         symbol = _symbol;
     }
@@ -65,10 +67,10 @@ contract MockERC20 {
         return true;
     }
 
-    /// @notice Mints `amount` to `to`, increasing `totalSupply`.
+    /// @notice Mints `amount` to `to`, increasing `totalSupply`. Callable only by `owner`.
     /// @param to Recipient; must not be zero address.
     /// @param amount Mint amount.
-    function mint(address to, uint256 amount) external {
+    function mint(address to, uint256 amount) external onlyOwner {
         require(to != address(0), "ERC20: mint to zero");
         totalSupply += amount;
         balanceOf[to] += amount;

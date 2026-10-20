@@ -6,6 +6,8 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {Pool, PoolInfo, UserInfo} from "../StakeTypes.sol";
+import {FOTTransferLib} from "./FOTTransferLib.sol";
+import {RewardReanchorLib} from "./RewardReanchorLib.sol";
 import {StakingExecutionErrors} from "../StakingExecutionErrors.sol";
 
 /// @title StakingAdminLib
@@ -26,6 +28,10 @@ library StakingAdminLib {
         address to;
         /// @notice Requested sweep amount (must be `<=` computed excess).
         uint256 amount;
+        /// @notice FOT outbound tax ceiling (`0` = no transfer loss allowed; same rule as inbound).
+        uint256 maxTransferFeeBP;
+        /// @notice Basis-point denominator (`10_000`).
+        uint256 basisPoints;
     }
 
     /// @notice Parameters for terminal shutdown finalization.
@@ -48,6 +54,10 @@ library StakingAdminLib {
         uint256 bookedUserRewardsA;
         /// @notice Aggregate of all Pool B `userInfo.rewards` at call time.
         uint256 bookedUserRewardsB;
+        /// @notice FOT outbound tax ceiling for residual TokenB sweep (`0` = no transfer loss allowed).
+        uint256 maxTransferFeeBP;
+        /// @notice Basis-point denominator (`10_000`).
+        uint256 basisPoints;
     }
 
     /// @notice Parameters for Pool A emergency principal exit.
@@ -58,6 +68,10 @@ library StakingAdminLib {
         bool shutdown;
         /// @notice User receiving principal and partial rewards per liquidity rules.
         address user;
+        /// @notice FOT outbound tax ceiling for TokenA (`0` = no transfer loss allowed; same rule as inbound).
+        uint256 maxTransferFeeBP;
+        /// @notice Basis-point denominator (`10_000`).
+        uint256 basisPoints;
     }
 
     /// @notice Parameters for Pool B emergency principal exit.
@@ -68,6 +82,10 @@ library StakingAdminLib {
         bool shutdown;
         /// @notice User receiving principal and partial rewards per liquidity rules.
         address user;
+        /// @notice FOT outbound tax ceiling for TokenB (`0` = no transfer loss allowed; same rule as inbound).
+        uint256 maxTransferFeeBP;
+        /// @notice Basis-point denominator (`10_000`).
+        uint256 basisPoints;
     }
 
     /// @notice Parameters for `executeResolveBadDebt` (pull + allocate).
@@ -76,8 +94,12 @@ library StakingAdminLib {
         IERC20 rewardToken;
         /// @notice Payer supplying reward tokens.
         address from;
-        /// @notice Upper bound on tokens requested from payer.
+        /// @notice Upper bound on tokens requested from payer (`transferFrom` amount).
         uint256 amount;
+        /// @notice FOT inbound tax ceiling (`0` = no transfer loss allowed; same rule as `stakeB` / `notifyReward*`).
+        uint256 maxTransferFeeBP;
+        /// @notice Basis-point denominator (`10_000`).
+        uint256 basisPoints;
     }
 
     /// @dev Minimum TokenB balance required to cover principal, pending rewards, fees, and dust (used in recovery checks).
@@ -96,15 +118,40 @@ library StakingAdminLib {
         return principalAndPending + rewardsAndDust;
     }
 
+    /// @dev Stops the active emission schedule so post-finalize user paths cannot accrue against swept `availableRewards`.
+    function _terminateEmission(PoolInfo storage pool) private {
+        pool.rewardRate = 0;
+        pool.periodFinish = block.timestamp;
+        pool.lastUpdateTime = block.timestamp;
+    }
+
+    /// @dev Budget still scheduled for `[lastUpdateTime, periodFinish]` at `rewardRate`; must stay in `availableRewards`.
+    function _reservedEmissionBudget(PoolInfo storage pool) private view returns (uint256) {
+        if (pool.periodFinish <= pool.lastUpdateTime) return 0;
+        return (pool.periodFinish - pool.lastUpdateTime) * pool.rewardRate;
+    }
+
+    /// @dev Max reward wei movable from `pool` without breaking its active or unfinished emission schedule.
+    ///      Caller should run `PoolAccrualLib.updateGlobal` for both pools first so `lastUpdateTime` / `availableRewards` reflect accrual.
+    function _movableRebalanceBudget(PoolInfo storage pool) private view returns (uint256) {
+        uint256 reserved = _reservedEmissionBudget(pool);
+        return pool.availableRewards > reserved ? pool.availableRewards - reserved : 0;
+    }
+
     /// @notice Moves `amount` of `availableRewards` from `from` pool to `to` pool (no bad debt, distinct pools).
     /// @param poolA Pool A storage.
     /// @param poolB Pool B storage.
     /// @param from Source pool enum.
     /// @param to Destination pool enum.
     /// @param amount Reward token wei to move between `availableRewards` buckets.
-    function executeRebalanceBudgets(PoolInfo storage poolA, PoolInfo storage poolB, Pool from, Pool to, uint256 amount)
-        external
-    {
+    function executeRebalanceBudgets(
+        PoolInfo storage poolA,
+        PoolInfo storage poolB,
+        Pool from,
+        Pool to,
+        uint256 amount,
+        RewardReanchorLib.ReanchorCaps memory caps
+    ) external {
         if (poolA.badDebt > 0 || poolB.badDebt > 0) {
             revert StakingExecutionErrors.BadDebtExists();
         }
@@ -119,11 +166,18 @@ library StakingAdminLib {
             revert StakingExecutionErrors.InsufficientBalance(amount, poolFrom.availableRewards);
         }
 
+        uint256 movable = _movableRebalanceBudget(poolFrom);
+        if (amount > movable) {
+            revert StakingExecutionErrors.RebalanceExceedsMovableBudget(amount, movable);
+        }
+
         poolFrom.availableRewards -= amount;
         poolTo.availableRewards += amount;
+        RewardReanchorLib.reanchorOnBudgetInjection(poolTo, caps);
     }
 
     /// @notice Sweeps `p.token` to `p.to` if the amount is provably non-liability "excess" per pool accounting rules.
+    /// @dev Only Pool A staking token, Pool B / reward token (TokenB) are recoverable; any other ERC20 reverts `TokenRecoveryRestricted`.
     /// @param poolA Pool A storage (TokenA principal liability).
     /// @param poolB Pool B storage.
     /// @param p Recovery parameters (`RecoverTokenParams`).
@@ -155,16 +209,21 @@ library StakingAdminLib {
             if (p.amount > excessB) {
                 revert StakingExecutionErrors.TokenRecoveryRestricted();
             }
+        } else {
+            revert StakingExecutionErrors.TokenRecoveryRestricted();
         }
 
-        p.token.safeTransfer(p.to, p.amount);
+        FOTTransferLib.transferGross(p.token, p.to, p.amount, p.maxTransferFeeBP, p.basisPoints);
     }
 
     /// @notice Terminal shutdown step: sweeps **non-user** reward token residue to `feeRecipient` and retains per-pool `totalPending` equal to booked user rewards.
     /// @param poolA Pool A storage.
     /// @param poolB Pool B storage.
     /// @param p Shutdown finalization parameters (`ForceShutdownFinalizeParams`).
-    /// @dev `residual` is `availableRewards` + fee/dust buckets + **orphan** pending (`totalPending - bookedUserRewards`) per pool so users who exited principal during shutdown can still claim accrued `userInfo.rewards` after finalize.
+    /// @dev `residual` is `availableRewards` + fee/dust buckets. If no principal remains staked, it also includes
+    ///      orphan pending (`totalPending - bookedUserRewards`) because all withdraw paths settle users first. If the
+    ///      deadlock bypass is used while stake remains, unsettled pending must stay in `totalPending` so remaining
+    ///      stakers can later settle and claim pre-finalize rewards.
     function executeForceShutdownFinalize(
         PoolInfo storage poolA,
         PoolInfo storage poolB,
@@ -180,6 +239,10 @@ library StakingAdminLib {
             revert StakingExecutionErrors.StillStaked();
         }
 
+        _terminateEmission(poolA);
+        _terminateEmission(poolB);
+
+        bool hasRemainingStake = poolA.totalStaked != 0 || poolB.totalStaked != 0;
         uint256 bookedA = p.bookedUserRewardsA;
         uint256 bookedB = p.bookedUserRewardsB;
         if (bookedA > poolA.totalPending || bookedB > poolB.totalPending) {
@@ -188,18 +251,23 @@ library StakingAdminLib {
         uint256 orphanA = poolA.totalPending - bookedA;
         uint256 orphanB = poolB.totalPending - bookedB;
 
-        uint256 residual = poolA.availableRewards + poolB.availableRewards + p.unclaimedFeesAtCall + poolA.dust
-            + poolB.dust + orphanA + orphanB;
+        uint256 residual =
+            poolA.availableRewards + poolB.availableRewards + p.unclaimedFeesAtCall + poolA.dust + poolB.dust;
+        if (!hasRemainingStake) {
+            residual += orphanA + orphanB;
+        }
 
-        poolA.totalPending = bookedA;
-        poolB.totalPending = bookedB;
+        if (!hasRemainingStake) {
+            poolA.totalPending = bookedA;
+            poolB.totalPending = bookedB;
+        }
         poolA.availableRewards = 0;
         poolB.availableRewards = 0;
         poolA.dust = 0;
         poolB.dust = 0;
 
         if (residual > 0) {
-            p.rewardToken.safeTransfer(p.feeRecipient, residual);
+            FOTTransferLib.transferGross(p.rewardToken, p.feeRecipient, residual, p.maxTransferFeeBP, p.basisPoints);
         }
     }
 
@@ -215,7 +283,8 @@ library StakingAdminLib {
         PoolInfo storage poolA,
         PoolInfo storage poolB,
         mapping(address => UserInfo) storage userInfoA,
-        EmergencyWithdrawAParams memory p
+        EmergencyWithdrawAParams memory p,
+        RewardReanchorLib.ReanchorCaps memory caps
     ) external returns (uint256 stakedAmount) {
         if (!p.emergencyMode) {
             revert StakingExecutionErrors.NotInEmergency();
@@ -244,8 +313,11 @@ library StakingAdminLib {
 
         poolA.totalPending -= actualReward;
         poolB.availableRewards += actualReward;
+        if (actualReward > 0) {
+            RewardReanchorLib.reanchorOnBudgetInjection(poolB, caps);
+        }
 
-        poolA.stakingToken.safeTransfer(p.user, stakedAmount);
+        FOTTransferLib.transferGross(poolA.stakingToken, p.user, stakedAmount, p.maxTransferFeeBP, p.basisPoints);
     }
 
     /// @notice Emergency Pool B exit: returns principal, clears lock maps, and rebalances rewards similarly to Pool A path.
@@ -261,7 +333,8 @@ library StakingAdminLib {
         mapping(address => UserInfo) storage userInfoB,
         mapping(address => uint256) storage unlockTimeB,
         mapping(address => uint256) storage stakeTimestampB,
-        EmergencyWithdrawBParams memory p
+        EmergencyWithdrawBParams memory p,
+        RewardReanchorLib.ReanchorCaps memory caps
     ) external returns (uint256 stakedAmount) {
         if (!p.emergencyMode) {
             revert StakingExecutionErrors.NotInEmergency();
@@ -289,11 +362,14 @@ library StakingAdminLib {
         }
         poolB.totalPending -= actualReward;
         poolB.availableRewards += actualReward;
+        if (actualReward > 0) {
+            RewardReanchorLib.reanchorOnBudgetInjection(poolB, caps);
+        }
 
         unlockTimeB[p.user] = 0;
         stakeTimestampB[p.user] = 0;
 
-        poolB.stakingToken.safeTransfer(p.user, stakedAmount);
+        FOTTransferLib.transferGross(poolB.stakingToken, p.user, stakedAmount, p.maxTransferFeeBP, p.basisPoints);
     }
 
     /// @notice Amounts applied toward Pool A / Pool B bad debt during `executeResolveBadDebt`.
@@ -305,14 +381,17 @@ library StakingAdminLib {
     }
 
     /// @notice Pulls reward tokens from `p.from` and applies them against `badDebt` buckets, refunding surplus to Pool B `availableRewards`.
+    /// @dev Inbound pull uses balance delta; reverts `ExcessiveTransferFee` when implied tax exceeds `maxTransferFeeBP` (same as `notifyReward*`).
     /// @param poolA Pool A storage.
     /// @param poolB Pool B storage.
     /// @param p Pull parameters (`ResolveBadDebtParams`).
     /// @return r Applied repayments per pool; any remainder after both debts is added to `poolB.availableRewards`.
-    function executeResolveBadDebt(PoolInfo storage poolA, PoolInfo storage poolB, ResolveBadDebtParams memory p)
-        external
-        returns (ResolveBadDebtResult memory r)
-    {
+    function executeResolveBadDebt(
+        PoolInfo storage poolA,
+        PoolInfo storage poolB,
+        ResolveBadDebtParams memory p,
+        RewardReanchorLib.ReanchorCaps memory caps
+    ) external returns (ResolveBadDebtResult memory r) {
         if (poolA.badDebt == 0 && poolB.badDebt == 0) {
             revert StakingExecutionErrors.NoBadDebt();
         }
@@ -323,6 +402,9 @@ library StakingAdminLib {
         uint256 balBefore = p.rewardToken.balanceOf(address(this));
         p.rewardToken.safeTransferFrom(p.from, address(this), p.amount);
         uint256 rem = p.rewardToken.balanceOf(address(this)) - balBefore;
+        if (rem * p.basisPoints < p.amount * (p.basisPoints - p.maxTransferFeeBP)) {
+            revert StakingExecutionErrors.ExcessiveTransferFee();
+        }
 
         if (rem > 0 && poolA.badDebt > 0) {
             r.repayA = Math.min(rem, poolA.badDebt);
@@ -336,6 +418,7 @@ library StakingAdminLib {
         }
         if (rem > 0) {
             poolB.availableRewards += rem;
+            RewardReanchorLib.reanchorOnBudgetInjection(poolB, caps);
         }
     }
 }

@@ -8,10 +8,28 @@ const SECONDS_PER_YEAR = 31_536_000n;
  */
 export const APR_PERCENT_DAILY_APY_DISPLAY_MAX = 250;
 
+/** 链上 MAX_APR_BP=20000 对应 200%；图表展示上限与此一致，避免极小 TVL 时数值爆炸。 */
+export const APR_DISPLAY_CAP_PERCENT = 200;
+
+/** TVL=0 时 APR 历史图按典型首笔质押量（与空投 1000 枚一致）估算走势。 */
+export const CHART_REFERENCE_STAKE_WEI = 1000n * 10n ** 18n;
+
+/** 图表用 TVL：有质押用实际值，否则用参考质押量以便展示注资后 APR 走势。 */
+export function chartTvlForApr(actualTvl: bigint): bigint {
+  return actualTvl > 0n ? actualTvl : CHART_REFERENCE_STAKE_WEI;
+}
+
 /** 线性年化 APR（%），与 Dashboard 一致：`rewardRate * year / TVL` 缩放为可读百分比。 */
 export function estAprPercent(rewardRate: bigint, totalStaked: bigint): number {
   if (totalStaked <= 0n) return 0;
-  return safeNumber(Number((rewardRate * SECONDS_PER_YEAR * 10_000n) / totalStaked) / 100);
+  return capAprDisplayPercent(safeNumber(Number((rewardRate * SECONDS_PER_YEAR * 10_000n) / totalStaked) / 100));
+}
+
+/** 图表 / 统计卡片用：限制 APR 展示上限，过滤非有限值。 */
+export function capAprDisplayPercent(apr: number, maxPercent = APR_DISPLAY_CAP_PERCENT): number {
+  const n = safeNumber(apr);
+  if (n <= 0) return 0;
+  return Math.min(n, maxPercent);
 }
 
 /**

@@ -3,13 +3,19 @@
 import { useEffect, useMemo, useState } from "react";
 import { keccak256 } from "viem";
 import { useAccount, useReadContract, useWriteContract } from "wagmi";
+import { toast } from "sonner";
 
 import { ConfirmActionModal } from "@/components/ConfirmActionModal";
+import { ConsoleButton } from "@/components/console/ConsoleButton";
 import { TimelockStatus } from "@/components/TimelockStatus";
 import { timelockControllerAbi } from "@/contracts/abis/timelockController";
 import { governanceAddresses } from "@/contracts/addresses";
 import type { TimelockIndexedOp } from "@/hooks/useTimelockOps";
 import { useWriteWithStatus } from "@/hooks/useWriteWithStatus";
+import { useConsoleCopy } from "@/lib/consoleCopy";
+import { useI18n } from "@/lib/i18n";
+import { isTxBusy } from "@/lib/txFlowTypes";
+import { useUiCopy } from "@/lib/uiCopy";
 
 const ZERO_PREDECESSOR = "0x0000000000000000000000000000000000000000000000000000000000000000" as const;
 
@@ -19,11 +25,41 @@ const OZ_WAITING = 1;
 const OZ_READY = 2;
 const OZ_DONE = 3;
 
+function shortHex(value?: string): string {
+  if (!value) return "—";
+  if (value.length <= 18) return value;
+  return `${value.slice(0, 10)}…${value.slice(-8)}`;
+}
+
+function CopyMiniButton({ value, label }: { value?: string; label: string }) {
+  const { t } = useI18n();
+  return (
+    <button
+      type="button"
+      disabled={!value}
+      onClick={async () => {
+        if (!value) return;
+        try {
+          await navigator.clipboard.writeText(value);
+          toast.success(t("governanceCard.copySuccess", { label }));
+        } catch {
+          toast.error(t("governanceCard.copyFailed"));
+        }
+      }}
+      className="rounded-md border border-zinc-700 px-1.5 py-0.5 text-[10px] text-zinc-400 transition hover:border-zinc-500 hover:text-zinc-100 disabled:opacity-40"
+    >
+      {t("governanceCard.copy")}
+    </button>
+  );
+}
+
 type Props = {
   title: string;
   hint: string;
   /** `DualPoolStakingAdmin` 上 `encodeFunctionData` 得到的 calldata */
   payload: `0x${string}`;
+  /** 调度/执行所用的 TimelockController（默认 48h 治理 timelock） */
+  timelockAddress?: `0x${string}`;
   minDelay: bigint;
   canPropose: boolean;
   canExecute: boolean;
@@ -65,12 +101,28 @@ function mapOzToIndexedOp(
   };
 }
 
-export function GovernanceCard({ title, hint, payload, minDelay, canPropose, canExecute, canCancel, executeRows, children, onAfterTx, disabledReason }: Props) {
+export function GovernanceCard({
+  title,
+  hint,
+  payload,
+  timelockAddress = governanceAddresses.timelock,
+  minDelay,
+  canPropose,
+  canExecute,
+  canCancel,
+  executeRows,
+  children,
+  onAfterTx,
+  disabledReason,
+}: Props) {
+  const copy = useConsoleCopy();
+  const ui = useUiCopy();
+  const { t } = useI18n();
   const { address } = useAccount();
   const { writeContractAsync } = useWriteContract();
   const flow = useWriteWithStatus();
 
-  const timelock = governanceAddresses.timelock;
+  const timelock = timelockAddress;
   const target = governanceAddresses.adminFacade;
 
   const salt = useMemo(() => keccak256(payload), [payload]);
@@ -124,7 +176,7 @@ export function GovernanceCard({ title, hint, payload, minDelay, canPropose, can
     return { canSchedule: false, canExecute: ready && canExecute, canCancel: pending && canCancel };
   }, [canCancel, canExecute, canPropose, disabledReason, minDelay, now, ozState, tsRead.data]);
 
-  const busy = flow.state !== "idle";
+  const busy = isTxBusy(flow.state);
 
   const refresh = async () => {
     await Promise.all([idRead.refetch(), stateRead.refetch(), tsRead.refetch(), onAfterTx?.()]);
@@ -133,65 +185,74 @@ export function GovernanceCard({ title, hint, payload, minDelay, canPropose, can
   const schedule = async () => {
     if (!address) return;
     if (minDelay <= 0n) return;
-    await flow.executeWrite(
-      {
-        actionLabel: `Timelock schedule: ${title}`,
-        txType: "governance",
-        description: "TimelockController.schedule",
-        onConfirmed: refresh,
-      },
-      () =>
-        writeContractAsync({
-          address: timelock,
-          abi: timelockControllerAbi,
-          functionName: "schedule",
-          args: [target, 0n, payload, ZERO_PREDECESSOR, salt, minDelay],
-          account: address,
-        }),
-    );
-    flow.reset({ closeGlobal: true });
+    try {
+      await flow.executeWrite(
+        {
+          actionLabel: ui.timelock.scheduleAction(title),
+          txType: "governance",
+          description: "TimelockController.schedule",
+          onConfirmed: refresh,
+        },
+        () =>
+          writeContractAsync({
+            address: timelock,
+            abi: timelockControllerAbi,
+            functionName: "schedule",
+            args: [target, 0n, payload, ZERO_PREDECESSOR, salt, minDelay],
+            account: address,
+          }),
+      );
+    } finally {
+      flow.reset();
+    }
   };
 
   const execute = async () => {
     if (!address) return;
-    await flow.executeWrite(
-      {
-        actionLabel: `Timelock execute: ${title}`,
-        txType: "governance",
-        description: "TimelockController.execute",
-        onConfirmed: refresh,
-      },
-      () =>
-        writeContractAsync({
-          address: timelock,
-          abi: timelockControllerAbi,
-          functionName: "execute",
-          args: [target, 0n, payload, ZERO_PREDECESSOR, salt],
-          account: address,
-        }),
-    );
-    flow.reset({ closeGlobal: true });
+    try {
+      await flow.executeWrite(
+        {
+          actionLabel: ui.timelock.executeAction(title),
+          txType: "governance",
+          description: "TimelockController.execute",
+          onConfirmed: refresh,
+        },
+        () =>
+          writeContractAsync({
+            address: timelock,
+            abi: timelockControllerAbi,
+            functionName: "execute",
+            args: [target, 0n, payload, ZERO_PREDECESSOR, salt],
+            account: address,
+          }),
+      );
+    } finally {
+      flow.reset();
+    }
   };
 
   const cancel = async () => {
     if (!address || !opId) return;
-    await flow.executeWrite(
-      {
-        actionLabel: `Timelock cancel: ${title}`,
-        txType: "governance",
-        description: "TimelockController.cancel",
-        onConfirmed: refresh,
-      },
-      () =>
-        writeContractAsync({
-          address: timelock,
-          abi: timelockControllerAbi,
-          functionName: "cancel",
-          args: [opId],
-          account: address,
-        }),
-    );
-    flow.reset({ closeGlobal: true });
+    try {
+      await flow.executeWrite(
+        {
+          actionLabel: ui.timelock.cancelAction(title),
+          txType: "governance",
+          description: "TimelockController.cancel",
+          onConfirmed: refresh,
+        },
+        () =>
+          writeContractAsync({
+            address: timelock,
+            abi: timelockControllerAbi,
+            functionName: "cancel",
+            args: [opId],
+            account: address,
+          }),
+      );
+    } finally {
+      flow.reset();
+    }
   };
 
   const formLocked = ozState === OZ_WAITING || ozState === OZ_READY;
@@ -200,10 +261,10 @@ export function GovernanceCard({ title, hint, payload, minDelay, canPropose, can
     <div className="min-w-0 rounded-2xl border border-zinc-800 bg-gradient-to-b from-zinc-950 to-zinc-950/60 p-3 text-sm shadow-[0_0_0_1px_rgba(255,255,255,0.02)] transition hover:border-zinc-700 hover:shadow-[0_0_0_1px_rgba(255,255,255,0.05)] sm:p-4">
       <ConfirmActionModal
         open={executeOpen}
-        title={`Execute: ${title}`}
+        title={ui.timelock.executeTitle(title)}
         rows={executeRows?.()}
-        warning="This executes the queued timelock action on-chain via TimelockController → DualPoolStakingAdmin → core."
-        confirmText="Execute on-chain"
+        warning={ui.timelock.executeWarning}
+        confirmText={ui.timelock.executeConfirm}
         busy={busy}
         onClose={() => !busy && setExecuteOpen(false)}
         onConfirm={async () => {
@@ -217,43 +278,58 @@ export function GovernanceCard({ title, hint, payload, minDelay, canPropose, can
       />
       <div className="mb-1 text-sm font-semibold text-zinc-100">{title}</div>
       <div className="mb-3 text-xs text-zinc-400">{hint}</div>
+      <div className="mb-3 grid gap-2 rounded-xl border border-zinc-800 bg-zinc-950/80 p-2 text-[11px] text-zinc-500 sm:grid-cols-2">
+        <div className="min-w-0">
+          <div className="mb-1 uppercase tracking-wide">{t("governanceCard.operationId")}</div>
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="truncate font-mono text-zinc-300">{shortHex(opId)}</span>
+            <CopyMiniButton value={opId} label={t("governanceCard.operationId")} />
+          </div>
+        </div>
+        <div className="min-w-0">
+          <div className="mb-1 uppercase tracking-wide">{t("governanceCard.calldata")}</div>
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="truncate font-mono text-zinc-300">{shortHex(payload)}</span>
+            <CopyMiniButton value={payload} label={t("governanceCard.calldata")} />
+          </div>
+        </div>
+      </div>
       <fieldset disabled={formLocked} className="mb-3 min-w-0 space-y-2 disabled:opacity-60">
         {children}
       </fieldset>
       {disabledReason ? <p className="mb-3 text-[11px] text-red-300/90">{disabledReason}</p> : null}
       {formLocked ? (
-        <p className="mb-3 text-[11px] text-amber-200/90">该操作已排队或待执行：为避免 operationId 漂移，已暂时锁定表单输入。</p>
+        <p className="mb-3 text-[11px] text-amber-200/90">{t("governanceCard.formLocked")}</p>
       ) : null}
       <div className="grid gap-2">
         <TimelockStatus op={op} />
         <div className="grid min-[420px]:grid-cols-3 grid-cols-1 gap-2">
-          <button
-            type="button"
-            onClick={() => void schedule()}
+          <ConsoleButton
+            size="sm"
+            variant="neutral"
             disabled={!status.canSchedule || busy}
-            className="min-h-[40px] rounded-lg bg-zinc-200 px-3 py-1.5 text-black transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40"
+            onClick={() => void schedule()}
           >
-            {busy ? "Pending…" : "Schedule"}
-          </button>
-          <button
-            type="button"
+            {busy ? copy.common.pending : ui.timelock.schedule}
+          </ConsoleButton>
+          <ConsoleButton
+            size="sm"
+            disabled={!status.canExecute || busy}
             onClick={() => {
               if (!status.canExecute || busy) return;
               setExecuteOpen(true);
             }}
-            disabled={!status.canExecute || busy}
-            className="min-h-[40px] rounded-lg bg-emerald-300 px-3 py-1.5 text-black transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            Execute
-          </button>
-          <button
-            type="button"
-            onClick={() => void cancel()}
+            {ui.timelock.execute}
+          </ConsoleButton>
+          <ConsoleButton
+            size="sm"
+            variant="secondary"
             disabled={!status.canCancel || busy}
-            className="min-h-[40px] rounded-lg border border-zinc-700 px-3 py-1.5 transition hover:border-zinc-600 hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-40"
+            onClick={() => void cancel()}
           >
-            Cancel
-          </button>
+            {ui.timelock.cancel}
+          </ConsoleButton>
         </div>
       </div>
     </div>

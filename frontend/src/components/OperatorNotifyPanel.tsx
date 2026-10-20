@@ -11,12 +11,14 @@ import { erc20Abi } from "@/contracts/abis/erc20";
 import { contractAddresses } from "@/contracts/addresses";
 import { useApproveIfNeeded } from "@/hooks/useApproveIfNeeded";
 import { useProtocolRoles } from "@/hooks/useProtocolRoles";
+import { useStaking } from "@/hooks/useStaking";
 import { useWriteWithStatus } from "@/hooks/useWriteWithStatus";
 
+import { ConsoleButton } from "@/components/console/ConsoleButton";
 import { OperatorNotifyRewardHistory } from "@/components/OperatorNotifyRewardHistory";
-
-const STAKING = contractAddresses.staking;
-const TOKEN_B = contractAddresses.tokenB;
+import { useConsoleCopy } from "@/lib/consoleCopy";
+import { CATCH_UP_A, CATCH_UP_B } from "@/lib/poolCatchUp";
+import { useUiCopy } from "@/lib/uiCopy";
 
 const MIN_DURATION = 86_400n;
 const MAX_DURATION = 31_536_000n;
@@ -25,12 +27,21 @@ type Props = {
   pool: "A" | "B";
   /** notify 成功后刷新池子与余额 */
   invalidate: () => Promise<void>;
+  /** 治理页已单独提供紧急模式按钮时设为 true */
+  hideEmergency?: boolean;
+  /** 紧凑布局（治理页双列） */
+  compact?: boolean;
 };
 
 /** 运营（OPERATOR_ROLE）注资奖励：approve(TokenB→staking) + notifyRewardAmountA/B */
-export function OperatorNotifyPanel({ pool, invalidate }: Props) {
+export function OperatorNotifyPanel({ pool, invalidate, hideEmergency = false, compact = false }: Props) {
+  const copy = useConsoleCopy();
+  const ui = useUiCopy();
   const queryClient = useQueryClient();
   const { address } = useAccount();
+  const { poolB } = useStaking();
+  const rewardToken = poolB?.stakingToken ?? contractAddresses.tokenB;
+  const staking = contractAddresses.staking;
   const { isOperator, isLoading: rolesLoading } = useProtocolRoles();
   const { writeContractAsync } = useWriteContract();
   const flow = useWriteWithStatus();
@@ -39,7 +50,7 @@ export function OperatorNotifyPanel({ pool, invalidate }: Props) {
   const [durationSec, setDurationSec] = useState("604800");
   const [submitAttempted, setSubmitAttempted] = useState(false);
 
-  const allowance = useApproveIfNeeded({ token: TOKEN_B, spender: STAKING });
+  const allowance = useApproveIfNeeded({ token: rewardToken, spender: staking });
 
   const parsedAmountWei = useMemo(() => {
     const t = amount.trim();
@@ -63,15 +74,15 @@ export function OperatorNotifyPanel({ pool, invalidate }: Props) {
 
   const inputError = useMemo(() => {
     if (!submitAttempted) return null;
-    if (!amount.trim()) return "请输入 TokenB 数量";
-    if (parsedAmountWei === null) return "数量格式无效";
-    if (parsedAmountWei <= 0n) return "数量必须大于 0";
-    if (parsedDuration === null) return "周期（秒）必须是整数";
+    if (!amount.trim()) return copy.operator.errAmountRequired;
+    if (parsedAmountWei === null) return copy.operator.errAmountInvalid;
+    if (parsedAmountWei <= 0n) return copy.operator.errAmountPositive;
+    if (parsedDuration === null) return copy.operator.errDurationInteger;
     if (parsedDuration < MIN_DURATION || parsedDuration > MAX_DURATION) {
-      return `周期必须在 ${MIN_DURATION.toString()}～${MAX_DURATION.toString()} 秒之间`;
+      return copy.operator.errDurationRange(MIN_DURATION.toString(), MAX_DURATION.toString());
     }
     return null;
-  }, [submitAttempted, amount, parsedAmountWei, parsedDuration]);
+  }, [submitAttempted, amount, parsedAmountWei, parsedDuration, copy.operator]);
 
   const needsApproval = Boolean(parsedAmountWei && parsedAmountWei > 0n && allowance.needsApproval(parsedAmountWei));
   const busy = flow.state !== "idle";
@@ -88,9 +99,9 @@ export function OperatorNotifyPanel({ pool, invalidate }: Props) {
   const writeApproveTokenB = (amountWei: bigint) =>
     writeContractAsync({
       abi: erc20Abi,
-      address: TOKEN_B,
+      address: rewardToken,
       functionName: "approve",
-      args: [STAKING, amountWei],
+      args: [staking, amountWei],
       account: address,
     });
 
@@ -101,7 +112,7 @@ export function OperatorNotifyPanel({ pool, invalidate }: Props) {
     const fn = pool === "A" ? "notifyRewardAmountA" : "notifyRewardAmountB";
     return writeContractAsync({
       abi: dualPoolStakingAbi,
-      address: STAKING,
+      address: staking,
       functionName: fn,
       args: [parsedAmountWei, parsedDuration],
       account: address,
@@ -115,7 +126,7 @@ export function OperatorNotifyPanel({ pool, invalidate }: Props) {
       if (needsApproval) {
         await flow.executeApprove(
           {
-            actionLabel: `Approve TokenB (notify Pool ${pool})`,
+            actionLabel: ui.operator.approveNotify(pool),
             txType: "approve",
             metadata: { pool, token: "TokenB", amount: amount.trim(), durationSec: durationSec.trim() },
             onConfirmed: () => void allowance.refetchAllowance(),
@@ -127,12 +138,14 @@ export function OperatorNotifyPanel({ pool, invalidate }: Props) {
 
       await flow.executeWrite(
         {
-          actionLabel: `Notify rewards (Pool ${pool})`,
+          actionLabel: ui.operator.notify(pool),
           txType: "notify",
           metadata: { pool, token: "TokenB", amount: amount.trim(), durationSec: durationSec.trim() },
+          catchUpPools: pool === "A" ? CATCH_UP_A : CATCH_UP_B,
           onConfirmed: () => {
             void invalidate();
             void queryClient.invalidateQueries({ queryKey: ["notify-reward-logs"] });
+            void queryClient.invalidateQueries({ queryKey: ["reward-notified-history"] });
           },
         },
         () => writeNotify() as Promise<Hash>,
@@ -150,7 +163,7 @@ export function OperatorNotifyPanel({ pool, invalidate }: Props) {
     try {
       await flow.executeWrite(
         {
-          actionLabel: "Enable Emergency Mode",
+          actionLabel: ui.operator.enableEmergency,
           txType: "emergency",
           metadata: { pool, token: "TokenB" },
           onConfirmed: () => void invalidate(),
@@ -158,7 +171,7 @@ export function OperatorNotifyPanel({ pool, invalidate }: Props) {
         () =>
           writeContractAsync({
             abi: dualPoolStakingAbi,
-            address: STAKING,
+            address: staking,
             functionName: "enableEmergencyMode",
             account: address,
           }) as Promise<Hash>,
@@ -173,19 +186,30 @@ export function OperatorNotifyPanel({ pool, invalidate }: Props) {
   if (!isOperator) return null;
 
   return (
-    <div className="min-w-0 rounded-2xl border border-amber-500/30 bg-amber-500/5 p-3 sm:p-4">
+    <div
+      className={
+        compact
+          ? "min-w-0 rounded-xl border border-amber-500/25 bg-amber-500/5 p-3"
+          : "min-w-0 rounded-2xl border border-amber-500/30 bg-amber-500/5 p-3 sm:p-4"
+      }
+    >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className="text-sm font-semibold text-amber-200 sm:text-base">Operator · Notify rewards</h3>
-        <p className="text-xs text-amber-200/80">Pool {pool} · pays TokenB</p>
+        <h3 className="text-sm font-semibold text-amber-200 sm:text-base">
+          {compact ? copy.operator.titleCompact(pool) : copy.operator.title}
+        </h3>
+        <p className="text-xs text-amber-200/80">notifyRewardAmount{pool} · TokenB</p>
       </div>
       <p className="mt-2 text-xs text-zinc-400">
-        需要钱包具备 <span className="font-mono text-zinc-300">OPERATOR_ROLE</span>；奖励从钱包转出{" "}
-        <span className="font-mono text-zinc-300">TokenB</span> 到合约，请先确保余额充足并完成 approve。
+        {copy.operator.roleHintPrefix}
+        <span className="font-mono text-zinc-300">OPERATOR_ROLE</span>
+        {copy.operator.roleHintMiddle}
+        <span className="font-mono text-zinc-300">TokenB</span>
+        {copy.operator.roleHintSuffix}
       </p>
 
       <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="block text-xs text-zinc-400">
-          Amount (TokenB)
+          {copy.operator.amountLabel}
           <input
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
@@ -195,7 +219,7 @@ export function OperatorNotifyPanel({ pool, invalidate }: Props) {
           />
         </label>
         <label className="block text-xs text-zinc-400">
-          Duration (seconds)
+          {copy.operator.durationLabel}
           <input
             value={durationSec}
             onChange={(e) => setDurationSec(e.target.value)}
@@ -208,10 +232,10 @@ export function OperatorNotifyPanel({ pool, invalidate }: Props) {
 
       <div className="mt-2 flex flex-wrap gap-2">
         {[
-          { label: "7d", v: "604800" },
-          { label: "30d", v: "2592000" },
-          { label: "90d", v: "7776000" },
-          { label: "365d", v: "31536000" },
+          { label: copy.operator.duration7d, v: "604800" },
+          { label: copy.operator.duration30d, v: "2592000" },
+          { label: copy.operator.duration90d, v: "7776000" },
+          { label: copy.operator.duration365d, v: "31536000" },
         ].map((p) => (
           <button
             key={p.v}
@@ -227,31 +251,32 @@ export function OperatorNotifyPanel({ pool, invalidate }: Props) {
 
       {inputError ? <p className="mt-2 text-xs text-red-300/90">{inputError}</p> : null}
       {needsApproval ? (
-        <p className="mt-2 text-xs text-amber-200/90">当前 allowance 不足：提交时会先自动 approve 再 notify。</p>
+        <p className="mt-2 text-xs text-amber-200/90">{copy.operator.approvalNeeded}</p>
       ) : (
-        <p className="mt-2 text-xs text-zinc-500">Allowance 已覆盖本次数量（仍会发起 notify）。</p>
+        <p className="mt-2 text-xs text-zinc-500">{copy.operator.approvalSufficient}</p>
       )}
 
       <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-        <button
-          type="button"
+        <ConsoleButton
+          fullWidth
           disabled={busy || !canSubmit}
           onClick={() => void runApproveThenNotify().catch(() => flow.reset({ closeGlobal: true }))}
-          className="min-h-[44px] w-full rounded-lg bg-amber-400 px-3 py-2 text-sm font-medium text-black disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
         >
-          {busy ? "Pending…" : needsApproval ? "Approve + Notify" : "Notify"}
-        </button>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => void runEnableEmergencyMode().catch(() => flow.reset({ closeGlobal: true }))}
-          className="min-h-[44px] w-full rounded-lg bg-red-400 px-3 py-2 text-sm font-medium text-black disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
-        >
-          {busy ? "Pending…" : "Enable Emergency Mode"}
-        </button>
+          {busy ? copy.common.pending : needsApproval ? copy.common.approveNotify : copy.common.notify}
+        </ConsoleButton>
+        {!hideEmergency ? (
+          <ConsoleButton
+            fullWidth
+            variant="danger"
+            disabled={busy}
+            onClick={() => void runEnableEmergencyMode().catch(() => flow.reset({ closeGlobal: true }))}
+          >
+            {busy ? copy.common.pending : copy.common.enableEmergency}
+          </ConsoleButton>
+        ) : null}
       </div>
 
-      <OperatorNotifyRewardHistory />
+      {!compact ? <OperatorNotifyRewardHistory /> : null}
     </div>
   );
 }

@@ -1,0 +1,41 @@
+alerts:
+  - id: global-bad-debt
+    severity: critical
+    signal: DualPoolStaking.globalBadDebt
+    condition: value > 0
+    action: "Pause non-essential operations, identify debt source, prepare resolveBadDebt funding and approval."
+  - id: reward-budget-low-active-rate
+    severity: high
+    signal: "pool.availableRewards, pool.rewardRate, pool.periodFinish"
+    condition: "rewardRate > 0 && block.timestamp < periodFinish && availableRewards < rewardRate * 1 hours"
+    action: "Review recent rebalance/notify/withdraw paths and prepare bad debt prevention response."
+  - id: stale-expired-emission
+    severity: medium
+    signal: "pool.periodFinish, pool.lastUpdateTime"
+    condition: "block.timestamp > periodFinish + 7 days && lastUpdateTime < periodFinish"
+    action: "Trigger a safe maintenance read/write path or review whether user activity is blocked."
+  - id: emergency-or-shutdown
+    severity: critical
+    signal: DualPoolStaking.status
+    condition: "status in [EMERGENCY, SHUTDOWN]"
+    action: "Open incident room, publish user guidance, monitor emergencyWithdraw/forceClaimAll volume."
+  - id: timelock-operation-scheduled
+    severity: medium
+    signal: TimelockController.CallScheduled
+    condition: "any"
+    action: "Decode calldata, compare against approved proposal, verify delay and proposer."
+  - id: timelock-operation-cancelled
+    severity: medium
+    signal: TimelockController.Cancelled
+    condition: "any"
+    action: "Confirm cancellation reason and whether replacement proposal is needed."
+  - id: frontend-timelock-indexer-failure
+    severity: medium
+    signal: "/api/timelock-ops"
+    condition: "5xx rate > 5% for 10 minutes"
+    action: "Fallback to direct chain explorer links and repair indexer/RPC configuration."
+  - id: abnormal-fot-loss
+    severity: high
+    signal: "gross transfer amount vs wallet receive amount"
+    condition: "observed transfer loss > maxTransferFeeBP"
+    action: "Investigate TokenB transfer tax behavior and consider pause/emergency if accounting assumptions are violated."

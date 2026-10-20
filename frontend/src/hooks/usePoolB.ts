@@ -7,7 +7,6 @@ import { dualPoolStakingAbi } from "@/contracts/abis/dualPoolStaking";
 import { erc20Abi } from "@/contracts/abis/erc20";
 import { contractAddresses } from "@/contracts/addresses";
 import { useStaking } from "@/hooks/useStaking";
-import { parseUserInfoTuple } from "@/lib/userInfo";
 
 const DAY = 24n * 60n * 60n;
 
@@ -24,21 +23,22 @@ export function usePoolB() {
   const { address } = useAccount();
   const { writeContractAsync } = useWriteContract();
   const staking = useStaking();
+  const stakingTokenB = staking.poolB?.stakingToken ?? contractAddresses.tokenB;
   const now = BigInt(Math.floor(Date.now() / 1000));
 
   const {
     data: tokenBBalance = 0n,
     refetch: refetchTokenBBalance,
   } = useReadContract({
-    address: contractAddresses.tokenB,
+    address: stakingTokenB,
     abi: erc20Abi,
     functionName: "balanceOf",
     args: address ? [address] : undefined,
     query: { enabled: Boolean(address) },
   });
 
-  const userA = parseUserInfoTuple(staking.userA);
-  const userB = parseUserInfoTuple(staking.userB);
+  const pendingRewardsA = staking.pendingRewardA;
+  const pendingRewardsB = staking.pendingRewardB;
 
   const canStake = staking.status === "NORMAL";
   const canWithdraw = staking.status === "NORMAL" || staking.status === "SHUTDOWN";
@@ -50,8 +50,8 @@ export function usePoolB() {
     (staking.status === "NORMAL" || staking.status === "SHUTDOWN") &&
     staking.globalBadDebt === 0n &&
     claimCooldownRemainingSec === 0n &&
-    userB.rewards > 0n &&
-    userB.rewards >= staking.minClaimAmount;
+    pendingRewardsB > 0n &&
+    pendingRewardsB >= staking.minClaimAmount;
   const canEmergencyWithdraw = staking.status === "EMERGENCY";
 
   const activeFeeBp = calcFeeBp(now, staking.stakeTimestampB, staking.unlockTimeB, staking.withdrawFeeBP, staking.midTermFeeBP);
@@ -67,22 +67,24 @@ export function usePoolB() {
   };
 
   const compoundPreview = {
-    rewardAWei: userA.rewards,
-    rewardBWei: userB.rewards,
-    totalWei: userA.rewards + userB.rewards,
+    rewardAWei: pendingRewardsA,
+    rewardBWei: pendingRewardsB,
+    totalWei: pendingRewardsA + pendingRewardsB,
   };
   const canCompound =
     staking.status === "NORMAL" &&
     staking.globalBadDebt === 0n &&
     claimCooldownRemainingSec === 0n &&
-    compoundPreview.totalWei > 0n;
+    compoundPreview.totalWei > 0n &&
+    (pendingRewardsA === 0n || pendingRewardsA >= staking.minClaimAmount) &&
+    (pendingRewardsB === 0n || pendingRewardsB >= staking.minClaimAmount);
 
   const toAmount = (value: string) => parseUnits(value || "0", 18);
 
   const writeApproveTokenB = (amountWei: bigint) =>
     writeContractAsync({
       abi: erc20Abi,
-      address: contractAddresses.tokenB,
+      address: stakingTokenB,
       functionName: "approve",
       args: [contractAddresses.staking, amountWei],
       account: address,
@@ -138,6 +140,7 @@ export function usePoolB() {
 
   return {
     ...staking,
+    stakingTokenB,
     canStake,
     canWithdraw,
     canClaim,

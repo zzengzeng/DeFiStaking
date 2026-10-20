@@ -5,11 +5,13 @@ import type { Address, Hash } from "viem";
 import { formatUnits, parseUnits } from "viem";
 
 import { ApprovalGate } from "@/components/ApprovalGate";
+import { ConsoleButton } from "@/components/console/ConsoleButton";
 import { TransactionButton } from "@/components/TransactionButton";
 import { TxExplorerLink } from "@/components/TxExplorerLink";
 import { useApproveIfNeeded } from "@/hooks/useApproveIfNeeded";
 import { useStakeApprovalTransaction } from "@/hooks/useTransactionFlow";
 import { formatToken, safeNumber } from "@/lib/format";
+import { useI18n } from "@/lib/i18n";
 import { estAprPercent } from "@/lib/poolMetrics";
 import type { TxState } from "@/lib/txFlowTypes";
 
@@ -27,6 +29,8 @@ export type StakeTxConfig = {
 
 type Props = {
   title: string;
+  /** product：隐藏 rewardRate 等合约字段；console：完整调试信息 */
+  variant?: "product" | "console";
   /** 未配置 `tx` 时使用的旧版质押回调 */
   onStake?: (value: string) => Promise<unknown>;
   /** 启用 approve + stake 生产级流程 */
@@ -49,6 +53,7 @@ function trimTrailingZeros(raw: string): string {
 /** 质押卡片：可选链上交易流（approve → stake）、APR 与按输入估算日收益 */
 export function StakeCard({
   title,
+  variant = "console",
   onStake,
   tx,
   disabled,
@@ -60,6 +65,7 @@ export function StakeCard({
   rewardRateWei,
   dailyRewardSymbol = "TokenB",
 }: Props) {
+  const { t } = useI18n();
   const [amount, setAmount] = useState("");
   const [legacyPending, setLegacyPending] = useState(false);
 
@@ -81,11 +87,13 @@ export function StakeCard({
 
   const inputError = useMemo(() => {
     if (!amount.trim()) return null;
-    if (parsedWei === null) return "Invalid amount";
-    if (parsedWei <= 0n) return "Enter an amount greater than zero";
-    if (balanceWei !== undefined && parsedWei > balanceWei) return "Exceeds wallet balance";
+    if (parsedWei === null) return t("stakeCard.invalidFormat");
+    if (parsedWei <= 0n) return t("stakeCard.amountPositive");
+    if (balanceWei !== undefined && parsedWei > balanceWei) {
+      return t("stakeCard.exceedsBalance");
+    }
     return null;
-  }, [amount, parsedWei, balanceWei]);
+  }, [amount, parsedWei, balanceWei, t]);
 
   const needsApproval = Boolean(tx && parsedWei && parsedWei > 0n && allowance.needsApproval(parsedWei));
 
@@ -152,18 +160,33 @@ export function StakeCard({
 
       {showPoolMetrics && (
         <div className="mt-3 space-y-2 rounded-lg border border-zinc-800 bg-zinc-950/80 px-3 py-2.5 text-xs">
-          <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-between">
-            <span className="text-zinc-500">Current rewardRate</span>
-            <span className="break-all font-mono text-zinc-200">{formatToken(rewardRateWei, 18, 8)}</span>
+          {variant === "console" ? (
+            <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-between">
+              <span className="text-zinc-500">{t("stakeCard.rewardRate")}</span>
+              <span className="break-all font-mono text-zinc-200">{formatToken(rewardRateWei, 18, 8)}</span>
+            </div>
+          ) : null}
+          <div
+            className={
+              variant === "console"
+                ? "flex flex-col gap-0.5 border-t border-zinc-800 pt-2 sm:flex-row sm:items-baseline sm:justify-between"
+                : "flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-between"
+            }
+          >
+            <span className="text-zinc-500">
+              {variant === "console" ? t("stakeCard.estAprLinear") : t("stakeCard.estAprProduct")}
+            </span>
+            <span className="font-semibold text-emerald-300">{aprPercent === null ? "—" : `${safeNumber(aprPercent).toFixed(2)}%`}</span>
           </div>
           <div className="flex flex-col gap-0.5 border-t border-zinc-800 pt-2 sm:flex-row sm:items-baseline sm:justify-between">
-            <span className="text-zinc-500">Est. APR (linear)</span>
-            <span className="font-semibold text-zinc-100">{aprPercent === null ? "—" : `${safeNumber(aprPercent).toFixed(2)}%`}</span>
-          </div>
-          <div className="flex flex-col gap-0.5 border-t border-zinc-800 pt-2 sm:flex-row sm:items-baseline sm:justify-between">
-            <span className="text-zinc-500">Est. daily earnings (this stake)</span>
+            <span className="text-zinc-500">{t("stakeCard.estDailyReward")}</span>
             <span className="text-right font-mono font-semibold text-emerald-300/95 sm:text-left">
-              {estDailyRewardsWei === null ? "—" : `${formatToken(estDailyRewardsWei, 18, 6)} ${dailyRewardSymbol}/day`}
+              {estDailyRewardsWei === null
+                ? "—"
+                : t("stakeCard.perDay", {
+                    amount: formatToken(estDailyRewardsWei, 18, 6),
+                    symbol: dailyRewardSymbol,
+                  })}
             </span>
           </div>
         </div>
@@ -171,7 +194,7 @@ export function StakeCard({
 
       {showBalance && (
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-zinc-800 bg-zinc-950/80 px-3 py-2 text-xs">
-          <span className="text-zinc-500">Wallet balance</span>
+          <span className="text-zinc-500">{t("stakeCard.walletBalance")}</span>
           <span className="font-mono font-semibold text-zinc-100">
             {formatToken(balanceWei, tokenDecimals, 6)} {balanceSymbol}
           </span>
@@ -206,18 +229,28 @@ export function StakeCard({
               disabled={disabled || balanceWei <= 0n || Boolean(tx && txBusy)}
               className="min-h-[44px] w-full shrink-0 rounded-lg border border-zinc-600 px-3 py-2 text-xs font-semibold text-zinc-200 transition hover:border-zinc-500 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto sm:min-w-[4.5rem]"
             >
-              Max
+              {t("stakeCard.max")}
             </button>
           )}
           {tx ? (
             <TransactionButton
               flowState={displayState}
               needsApproval={needsApproval}
-              idlePrimary="Stake"
+              accent={variant === "console" ? "console" : "product"}
+              idlePrimary="stake"
               disabled={disabled || Boolean(inputError) || !amount.trim()}
               onClick={() => void submitTx()}
               className="w-full sm:min-w-[7rem] sm:flex-1"
             />
+          ) : variant === "console" ? (
+            <ConsoleButton
+              fullWidth
+              disabled={disabled || legacyPending || Boolean(inputError) || !amount.trim()}
+              onClick={() => void submitLegacy()}
+              className="sm:min-w-[7rem] sm:flex-1"
+            >
+              {legacyPending ? t("stakeCard.pending") : t("stakeCard.stake")}
+            </ConsoleButton>
           ) : (
             <button
               type="button"
@@ -225,7 +258,7 @@ export function StakeCard({
               disabled={disabled || legacyPending || Boolean(inputError) || !amount.trim()}
               className="min-h-[44px] w-full rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-black disabled:cursor-not-allowed disabled:opacity-40 sm:min-w-[7rem] sm:w-auto sm:flex-1"
             >
-              {legacyPending ? "Pending..." : "Stake"}
+              {legacyPending ? t("stakeCard.pending") : t("stakeCard.stake")}
             </button>
           )}
         </div>
@@ -233,11 +266,14 @@ export function StakeCard({
 
       {tx && stakeFlow.hash ? (
         <div className="mt-2 text-xs text-zinc-400">
-          Last tx: <TxExplorerLink hash={stakeFlow.hash} className="text-sky-400 hover:underline" label="Explorer" />
+          {t("stakeCard.recentTx")}{" "}
+          <TxExplorerLink hash={stakeFlow.hash} className="text-sky-400 hover:underline" label={t("txCenter.explorer")} />
         </div>
       ) : null}
       {tx && stakeFlow.error && stakeFlow.state === "failed" ? <p className="mt-2 text-xs text-red-300">{stakeFlow.error}</p> : null}
-      {tx && displayState === "confirmed" ? <p className="mt-2 text-xs text-emerald-300">Transaction confirmed.</p> : null}
+      {tx && displayState === "confirmed" ? (
+        <p className="mt-2 text-xs text-emerald-300">{t("stakeCard.txConfirmed")}</p>
+      ) : null}
 
       {inputError && <p className="mt-2 text-xs text-red-300">{inputError}</p>}
     </div>

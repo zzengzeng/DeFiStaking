@@ -2,18 +2,16 @@
 pragma solidity ^0.8.20;
 
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-
 import {PoolInfo, UserInfo} from "../StakeTypes.sol";
+import {FOTTransferLib} from "./FOTTransferLib.sol";
+import {RewardReanchorLib} from "./RewardReanchorLib.sol";
 import {StakingExecutionErrors} from "../StakingExecutionErrors.sol";
 
 /// @title PoolBWithdrawLib
 /// @notice Linked library: Pool B withdraw, fees, penalties, and optional early-exit forfeiture logic.
 /// @dev Early exit before `unlockTimeB` forfeits accrued `userB.rewards` back to `availableRewards` and charges `penaltyfeeBP` on principal.
+///      Outbound TokenB FOT tax is borne by the user (PRD §4.6); protocol fees stay on-contract.
 library PoolBWithdrawLib {
-    using SafeERC20 for IERC20;
-
     /// @notice Intermediate fee/penalty breakdown for a single withdraw evaluation.
     struct WithdrawCalc {
         /// @notice Schedule-based withdraw fee (not early exit) in TokenB wei.
@@ -40,6 +38,10 @@ library PoolBWithdrawLib {
         uint256 midTermFeeBP;
         /// @notice Basis-point denominator (`10_000`).
         uint256 basisPoints;
+        /// @notice Schedule caps for post-forfeiture `rewardRate` re-anchor.
+        RewardReanchorLib.ReanchorCaps reanchorCaps;
+        /// @notice FOT outbound tax ceiling (`0` = no transfer loss allowed; symmetric with inbound).
+        uint256 maxTransferFeeBP;
     }
 
     /// @notice Outputs for `executeWithdrawB` (caller aggregates fees into `unclaimedFeesB` if needed).
@@ -52,17 +54,6 @@ library PoolBWithdrawLib {
         bool isEarlyForEvent;
         /// @notice Pool B rewards moved from pending into `availableRewards` on early exit (`0` if not early / no rewards).
         uint256 forfeitedRewardsB;
-    }
-
-    /// @dev Recomputes `rewardRate` as `availableRewards / remainingSeconds` for the **current** reward period.
-    /// @dev Intent (M-1 / PRD-adjacent): early-exit penalty (and forfeiture paths above) increase `availableRewards` **without**
-    ///      extending `periodFinish`. Re-anchoring the rate keeps the *remaining* seconds from being diluted vs a stale
-    ///      `rewardRate` that was set when `availableRewards` was lower—i.e. post-penalty emissions stay consistent with liquidity.
-    function _recomputeRewardRateB(PoolInfo storage poolB) private {
-        uint256 remTime = poolB.periodFinish > block.timestamp ? poolB.periodFinish - block.timestamp : 0;
-        if (remTime > 0) {
-            poolB.rewardRate = poolB.availableRewards / remTime;
-        }
     }
 
     /// @dev Validates `minEarlyExitAmountB`, forfeits user rewards into `availableRewards`, and returns principal penalty.
@@ -140,10 +131,12 @@ library PoolBWithdrawLib {
             }
         }
 
-        // Penalty stays on-contract (see PRD); see `_recomputeRewardRateB` natspec for why we refresh `rewardRate` here.
-        if (calc.penalty > 0) {
-            poolB.availableRewards += calc.penalty;
-            _recomputeRewardRateB(poolB);
+        // Penalty stays on-contract (see PRD); see `RewardReanchorLib.reanchorOnBudgetInjection` for why we refresh `rewardRate` here.
+        if (calc.isEarly && (r.forfeitedRewardsB > 0 || calc.penalty > 0)) {
+            if (calc.penalty > 0) {
+                poolB.availableRewards += calc.penalty;
+            }
+            RewardReanchorLib.reanchorOnBudgetInjection(poolB, p.reanchorCaps);
         }
 
         uint256 netAmount = p.amount - calc.fee - calc.penalty;
@@ -151,7 +144,7 @@ library PoolBWithdrawLib {
         userB.rewardPaid = poolB.accRewardPerToken;
         poolB.totalStaked -= p.amount;
 
-        poolB.stakingToken.safeTransfer(p.user, netAmount);
+        FOTTransferLib.transferGross(poolB.stakingToken, p.user, netAmount, p.maxTransferFeeBP, p.basisPoints);
 
         r.feeOrPenaltyForEvent = calc.fee + calc.penalty;
         r.isEarlyForEvent = calc.isEarly;

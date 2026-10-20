@@ -1,54 +1,28 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { encodeFunctionData, parseUnits } from "viem";
+import { useState } from "react";
 import { useAccount, useChainId, useReadContract, useWriteContract } from "wagmi";
 import { sepolia } from "wagmi/chains";
 
 import { ConfirmActionModal } from "@/components/ConfirmActionModal";
-import { GovernanceCard } from "@/components/GovernanceCard";
+import { ConsoleButton } from "@/components/console/ConsoleButton";
+import { ConsoleStatusBadge } from "@/components/console/ConsoleStatusBadge";
+import { GovernanceTimelockCards } from "@/components/GovernanceTimelockCards";
 import { InfoTip } from "@/components/InfoTip";
+import { OperatorNotifyRewardsSection } from "@/components/OperatorNotifyRewardsSection";
+import { TimelockQueue } from "@/components/TimelockQueue";
 import { dualPoolStakingAbi } from "@/contracts/abis/dualPoolStaking";
-import { dualPoolStakingAdminAbi } from "@/contracts/abis/dualPoolStakingAdmin";
 import { timelockControllerAbi } from "@/contracts/abis/timelockController";
 import { contractAddresses, governanceAddresses, sepoliaAuxAddresses, sepoliaDeploymentMeta } from "@/contracts/addresses";
 import { useProtocolRoles } from "@/hooks/useProtocolRoles";
 import { useStaking } from "@/hooks/useStaking";
+import { useTimelockOps } from "@/hooks/useTimelockOps";
 import { useTimelockGovernanceRoles } from "@/hooks/useTimelockGovernanceRoles";
 import { useWriteWithStatus } from "@/hooks/useWriteWithStatus";
 import { getAddressExplorerUrl } from "@/lib/explorerLink";
-
-const GOV_TIMELOCK_HELPER =
-  "参数类变更走 OpenZeppelin TimelockController：PROPOSER 提交 schedule → 等待 minDelay → EXECUTOR 执行 execute。目标合约为 DualPoolStakingAdmin（onlyOwner），由 Timelock 作为 owner 调用核心。";
-
-const TOOLTIP_PAUSE =
-  "Pause stops state-changing user flows (e.g. stake, claim, compound, normal withdrawals). Principal and accrued rewards stay in the contract — nothing is auto-liquidated — but users cannot move funds until governance unpauses.";
-
-const TOOLTIP_EMERGENCY =
-  "Emergency mode narrows exit options: Pool B moves to emergency-withdraw only (rewards are forfeited; principal exits via the emergency path). Pool A follows contract rules under the same global flag. User funds remain on-chain but economic exposure changes — review before enabling.";
-
-const BASIS_POINTS = 10_000n;
-const MAX_WITHDRAW_BP = 500n;
-const MAX_MIDTERM_BP = 500n;
-const MAX_EARLY_EXIT_PENALTY_BP = 2_000n;
-const MAX_LOCK_DURATION = 90n * 24n * 60n * 60n;
-const MAX_TRANSFER_FEE_BP = BASIS_POINTS;
-
-function parseUintInput(raw: string): bigint | null {
-  const t = raw.trim();
-  if (!/^\d+$/.test(t)) return null;
-  return BigInt(t);
-}
-
-function parseTokenAmountInput(raw: string): bigint | null {
-  const t = raw.trim();
-  if (!/^\d*\.?\d+$/.test(t)) return null;
-  try {
-    return parseUnits(t, 18);
-  } catch {
-    return null;
-  }
-}
+import { useI18n } from "@/lib/i18n";
+import { isTxBusy } from "@/lib/txFlowTypes";
+import { useUiCopy } from "@/lib/uiCopy";
 
 function AddrRow({ chainId, label, addr }: { chainId: number; label: string; addr: string }) {
   const href = getAddressExplorerUrl(chainId, addr as `0x${string}`);
@@ -62,368 +36,239 @@ function AddrRow({ chainId, label, addr }: { chainId: number; label: string; add
   );
 }
 
+function QueueSummaryTile({ label, value, tone }: { label: string; value: number; tone: "muted" | "warn" | "good" }) {
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-950/80 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-xs text-zinc-500">{label}</div>
+        <ConsoleStatusBadge tone={tone} className="min-w-0 px-2">
+          {value}
+        </ConsoleStatusBadge>
+      </div>
+      <div className="mt-2 font-mono text-2xl font-semibold text-zinc-100">{value}</div>
+    </div>
+  );
+}
+
 export function GovernancePanel() {
+  const { t } = useI18n();
+  const ui = useUiCopy();
   const { address } = useAccount();
   const chainId = useChainId();
   const { writeContractAsync } = useWriteContract();
   const staking = useStaking();
   const { isOperator, refetchRoles } = useProtocolRoles();
-  const tl = useTimelockGovernanceRoles();
+  const tlGov = useTimelockGovernanceRoles(governanceAddresses.timelock);
+  const tlSuper = useTimelockGovernanceRoles(governanceAddresses.timelockSuper);
+  const timelockOps = useTimelockOps();
   const flow = useWriteWithStatus();
 
-  const [lockDuration, setLockDuration] = useState("604800");
-  const [withdrawBp, setWithdrawBp] = useState("100");
-  const [midtermBp, setMidtermBp] = useState("50");
-  const [penaltyBp, setPenaltyBp] = useState("1000");
-  const [minEarlyExitAmountB, setMinEarlyExitAmountB] = useState("10");
-  const [maxTransferFeeBp, setMaxTransferFeeBp] = useState("1000");
-
-  const [rebalanceAmount, setRebalanceAmount] = useState("10");
-  const [rebalanceFrom, setRebalanceFrom] = useState<"A" | "B">("A");
   const [confirm, setConfirm] = useState<{ kind: "pause" | "emergency" | null }>({ kind: null });
 
-  const { data: minDelayOnChain } = useReadContract({
+  const { data: minDelayGovOnChain } = useReadContract({
     address: governanceAddresses.timelock,
     abi: timelockControllerAbi,
     functionName: "getMinDelay",
     query: { staleTime: 60_000, refetchOnWindowFocus: false },
   });
+  const { data: minDelaySuperOnChain } = useReadContract({
+    address: governanceAddresses.timelockSuper,
+    abi: timelockControllerAbi,
+    functionName: "getMinDelay",
+    query: {
+      enabled: governanceAddresses.timelockSuper !== "0x0000000000000000000000000000000000000000",
+      staleTime: 60_000,
+      refetchOnWindowFocus: false,
+    },
+  });
 
-  const minDelay = minDelayOnChain ?? BigInt(sepoliaDeploymentMeta.timelockMinDelaySeconds);
-
-  const govBusy = flow.state !== "idle";
+  const minDelayGovernance = minDelayGovOnChain ?? BigInt(sepoliaDeploymentMeta.timelockMinDelaySeconds);
+  const minDelaySuper = minDelaySuperOnChain ?? BigInt(sepoliaDeploymentMeta.timelockSuperMinDelaySeconds);
+  const govBusy = isTxBusy(flow.state);
+  const canTimelockPanel =
+    tlGov.canPropose ||
+    tlGov.canExecute ||
+    tlGov.canCancel ||
+    tlSuper.canPropose ||
+    tlSuper.canExecute ||
+    tlSuper.canCancel;
+  const ops = timelockOps.data ?? [];
+  const queueStats = ops.reduce(
+    (acc, op) => {
+      if (op.state === "READY") acc.ready += 1;
+      else if (op.state === "CREATED") acc.pending += 1;
+      else if (op.state === "EXECUTED") acc.executed += 1;
+      else if (op.state === "CANCELLED") acc.cancelled += 1;
+      return acc;
+    },
+    { pending: 0, ready: 0, executed: 0, cancelled: 0 },
+  );
 
   const afterTx = async () => {
-    await Promise.all([staking.refetchAll(), refetchRoles(), tl.refetchTimelockRoles()]);
+    await Promise.all([staking.refetchAll(), refetchRoles(), tlGov.refetchTimelockRoles(), tlSuper.refetchTimelockRoles()]);
   };
 
   const callCore = async (label: string, functionName: string, args: readonly unknown[] = []) => {
-    await flow.executeWrite(
-      {
-        actionLabel: label,
-        txType: "governance",
-        description: functionName,
-        onConfirmed: afterTx,
-      },
-      () =>
-        writeContractAsync({
-          abi: dualPoolStakingAbi,
-          address: contractAddresses.staking,
-          functionName: functionName as never,
-          args: args as never,
-          account: address,
-        }),
-    );
-    flow.reset({ closeGlobal: true });
+    try {
+      await flow.executeWrite(
+        {
+          actionLabel: label,
+          txType: "governance",
+          description: functionName,
+          onConfirmed: afterTx,
+        },
+        () =>
+          writeContractAsync({
+            abi: dualPoolStakingAbi,
+            address: contractAddresses.staking,
+            functionName: functionName as never,
+            args: args as never,
+            account: address,
+          }),
+      );
+    } finally {
+      flow.reset();
+    }
   };
 
-  const withdrawBpValue = parseUintInput(withdrawBp);
-  const midtermBpValue = parseUintInput(midtermBp);
-  const penaltyBpValue = parseUintInput(penaltyBp);
-  const lockDurationValue = parseUintInput(lockDuration);
-  const minEarlyExitAmountBValue = parseUintInput(minEarlyExitAmountB);
-  const maxTransferFeeBpValue = parseUintInput(maxTransferFeeBp);
-  const rebalanceAmountValue = parseTokenAmountInput(rebalanceAmount);
-
-  const feesError =
-    withdrawBpValue === null || midtermBpValue === null || penaltyBpValue === null
-      ? "费用参数必须是整数 bp"
-      : withdrawBpValue > MAX_WITHDRAW_BP
-        ? "withdrawFeeBP 不能超过 500 bp"
-        : midtermBpValue > MAX_MIDTERM_BP
-          ? "midTermFeeBP 不能超过 500 bp"
-          : penaltyBpValue > MAX_EARLY_EXIT_PENALTY_BP
-            ? "penaltyFeeBP 不能超过 2000 bp"
-            : null;
-
-  const lockError =
-    lockDurationValue === null
-      ? "lockDuration 必须是整数秒"
-      : lockDurationValue === 0n || lockDurationValue > MAX_LOCK_DURATION
-        ? `lockDuration 必须在 1～${MAX_LOCK_DURATION.toString()} 秒之间`
-        : null;
-
-  const minEarlyRequired =
-    penaltyBpValue && penaltyBpValue > 0n ? (BASIS_POINTS + penaltyBpValue - 1n) / penaltyBpValue : 0n;
-  const minEarlyError =
-    minEarlyExitAmountBValue === null
-      ? "minEarlyExitAmountB 必须是整数"
-      : minEarlyExitAmountBValue === 0n
-        ? "minEarlyExitAmountB 必须大于 0"
-        : minEarlyExitAmountBValue < minEarlyRequired
-          ? `minEarlyExitAmountB 当前至少应为 ${minEarlyRequired.toString()}`
-          : null;
-
-  const maxTransferError =
-    maxTransferFeeBpValue === null
-      ? "maxTransferFeeBP 必须是整数 bp"
-      : maxTransferFeeBpValue > MAX_TRANSFER_FEE_BP
-        ? "maxTransferFeeBP 不能超过 10000 bp"
-        : null;
-
-  const rebalanceError =
-    rebalanceAmountValue === null || rebalanceAmountValue <= 0n ? "rebalance amount 必须是大于 0 的 TokenB 数量" : null;
-
-  const payloadSetFees = useMemo(
-    () =>
-      encodeFunctionData({
-        abi: dualPoolStakingAdminAbi,
-        functionName: "setFees",
-        args: [withdrawBpValue ?? 0n, midtermBpValue ?? 0n, penaltyBpValue ?? 0n],
-      }),
-    [withdrawBpValue, midtermBpValue, penaltyBpValue],
-  );
-
-  const payloadLock = useMemo(
-    () =>
-      encodeFunctionData({
-        abi: dualPoolStakingAdminAbi,
-        functionName: "setLockDuration",
-        args: [lockDurationValue ?? 0n],
-      }),
-    [lockDurationValue],
-  );
-
-  const payloadMinEarly = useMemo(
-    () =>
-      encodeFunctionData({
-        abi: dualPoolStakingAdminAbi,
-        functionName: "setMinEarlyExitAmountB",
-        args: [minEarlyExitAmountBValue ?? 0n],
-      }),
-    [minEarlyExitAmountBValue],
-  );
-
-  const payloadMaxTransfer = useMemo(
-    () =>
-      encodeFunctionData({
-        abi: dualPoolStakingAdminAbi,
-        functionName: "setMaxTransferFeeBP",
-        args: [maxTransferFeeBpValue ?? 0n],
-      }),
-    [maxTransferFeeBpValue],
-  );
-
-  const payloadRebalance = useMemo(() => {
-    const from = rebalanceFrom === "A" ? 0 : 1;
-    const to = rebalanceFrom === "A" ? 1 : 0;
-    return encodeFunctionData({
-      abi: dualPoolStakingAdminAbi,
-      functionName: "rebalanceBudgets",
-      args: [from, to, rebalanceAmountValue ?? 0n],
-    });
-  }, [rebalanceAmountValue, rebalanceFrom]);
-
-  const payloadUnpause = useMemo(() => encodeFunctionData({ abi: dualPoolStakingAdminAbi, functionName: "unpause", args: [] }), []);
-
-  const canTimelockPanel = tl.canPropose || tl.canExecute || tl.canCancel;
+  const desc =
+    isOperator && canTimelockPanel
+      ? t("governance.descBoth")
+      : isOperator
+        ? t("governance.descOperator")
+        : canTimelockPanel
+          ? t("governance.descTimelock")
+          : t("governance.descNone");
 
   return (
     <div className="min-w-0 space-y-4 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-3 sm:p-5">
-      <h3 className="text-lg font-semibold text-zinc-100">Governance</h3>
-      <p className="text-xs leading-relaxed text-zinc-500">
-        {isOperator && canTimelockPanel
-          ? "当前钱包同时具备 Timelock 治理角色与核心 OPERATOR_ROLE：下方分别展示运营热操作与 Timelock 调度。"
-          : isOperator
-            ? "当前钱包具备 OPERATOR_ROLE：仅可直连核心执行 pause / 紧急模式等热路径。"
-            : canTimelockPanel
-              ? "当前钱包具备 TimelockController 的 PROPOSER / EXECUTOR / CANCELLER 之一：可通过 schedule / execute 驱动 DualPoolStakingAdmin 调用核心。"
-              : "当前钱包未检测到 Timelock 治理角色或 OPERATOR_ROLE。"}
-      </p>
+      <h3 className="text-lg font-semibold text-zinc-100">{t("governance.title")}</h3>
+      <p className="text-xs leading-relaxed text-zinc-500">{desc}</p>
 
       {isOperator ? (
-        <section className="space-y-3 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 sm:p-4">
-          <h4 className="text-sm font-semibold text-amber-100/95">运营（OPERATOR_ROLE · 直连核心）</h4>
-          <p className="text-[11px] leading-relaxed text-zinc-500">
-            链上由运营热钱包执行 <span className="font-mono text-zinc-400">pause</span>、<span className="font-mono text-zinc-400">enableEmergencyMode</span> 以及{" "}
-            <span className="font-mono text-zinc-400">notifyRewardAmountA/B</span>
-            （注资入口在 <span className="font-mono text-zinc-400">Pool A / Pool B</span> 页面，仅 OPERATOR 可见）。
-          </p>
-          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-stretch">
+        <section className="space-y-3 overflow-visible rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 sm:p-4">
+          <h4 className="text-sm font-semibold text-amber-100/95">{t("governance.operatorSectionTitle")}</h4>
+          <p className="text-[11px] leading-relaxed text-zinc-500">{t("governance.operatorSectionDesc")}</p>
+          <div className="flex flex-col gap-3 overflow-visible sm:flex-row sm:flex-wrap sm:items-stretch">
             <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:max-w-[min(100%,280px)]">
-              <button
-                type="button"
-                title={TOOLTIP_PAUSE}
+              <ConsoleButton
+                fullWidth
+                variant="danger"
                 onClick={() => setConfirm({ kind: "pause" })}
-                className="min-h-[44px] flex-1 rounded-lg bg-gradient-to-r from-red-400 to-rose-400 px-3 py-2 text-sm font-semibold text-black transition hover:opacity-90 sm:flex-none"
+                className="sm:flex-none"
               >
-                Pause
-              </button>
-              <InfoTip text={TOOLTIP_PAUSE} aria-label="Pause impact" />
+                {t("governance.pause")}
+              </ConsoleButton>
+              <InfoTip text={t("governance.pauseTooltip")} aria-label={t("governance.pauseAriaLabel")} side="bottom" />
             </div>
             <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:max-w-[min(100%,320px)]">
-              <button
-                type="button"
-                title={TOOLTIP_EMERGENCY}
+              <ConsoleButton
+                fullWidth
+                variant="danger"
                 onClick={() => setConfirm({ kind: "emergency" })}
-                className="min-h-[44px] flex-1 rounded-lg bg-gradient-to-r from-orange-300 to-amber-300 px-3 py-2 text-sm font-semibold text-black transition hover:opacity-90 sm:flex-none"
+                className="bg-gradient-to-r from-orange-300 to-amber-300 hover:from-orange-200 hover:to-amber-200 sm:flex-none"
               >
-                Enable Emergency
-              </button>
-              <InfoTip text={TOOLTIP_EMERGENCY} aria-label="Emergency mode impact" />
+                {t("governance.enableEmergency")}
+              </ConsoleButton>
+              <InfoTip text={t("governance.emergencyTooltip")} aria-label={t("governance.emergencyAriaLabel")} side="bottom" />
             </div>
           </div>
+          <OperatorNotifyRewardsSection onRefresh={afterTx} />
         </section>
       ) : null}
 
       {canTimelockPanel ? (
         <>
+          <section className="space-y-3 overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950/80 p-3 sm:p-4">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
+                <h4 className="font-mono text-sm font-semibold text-zinc-100">{t("governance.queueTitle")}</h4>
+                <p className="mt-1 text-xs leading-relaxed text-zinc-500">{t("governance.queueDesc")}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void timelockOps.refetch()}
+                disabled={timelockOps.isFetching}
+                className="min-h-[34px] rounded-lg border border-zinc-700 px-3 py-1.5 text-xs font-semibold text-zinc-300 transition hover:border-amber-400/40 disabled:opacity-50"
+              >
+                {timelockOps.isFetching ? t("governance.refreshingQueue") : t("governance.refreshQueue")}
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+              <QueueSummaryTile label={t("governance.queuePending")} value={queueStats.pending} tone={queueStats.pending > 0 ? "warn" : "muted"} />
+              <QueueSummaryTile label={t("governance.queueReady")} value={queueStats.ready} tone={queueStats.ready > 0 ? "good" : "muted"} />
+              <QueueSummaryTile label={t("governance.queueExecuted")} value={queueStats.executed} tone="muted" />
+              <QueueSummaryTile label={t("governance.queueCancelled")} value={queueStats.cancelled} tone={queueStats.cancelled > 0 ? "warn" : "muted"} />
+            </div>
+            {timelockOps.isError ? (
+              <div className="rounded-xl border border-amber-400/25 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
+                {t("governance.queueIndexError")}
+              </div>
+            ) : null}
+            <TimelockQueue ops={ops} isLoading={timelockOps.isLoading} />
+          </section>
+
           <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-xs text-zinc-400">
-            <div>Schedule：需要 Timelock `PROPOSER_ROLE`。</div>
-            <div>Execute：需要 Timelock `EXECUTOR_ROLE`（到达 minDelay 后）。</div>
-            <div>Cancel：需要 Timelock `CANCELLER_ROLE`（操作仍在 pending 时）。</div>
+            <div>{ui.timelock.roleSchedule}</div>
+            <div>{ui.timelock.roleExecute}</div>
+            <div>{ui.timelock.roleCancel}</div>
           </div>
 
-          <div className="rounded-xl border border-sky-500/25 bg-sky-500/5 px-3 py-2.5 text-xs leading-relaxed text-sky-100/95">{GOV_TIMELOCK_HELPER}</div>
+          <div className="rounded-xl border border-sky-500/25 bg-sky-500/5 px-3 py-2.5 text-xs leading-relaxed text-sky-100/95">{t("governance.timelockHelper")}</div>
+
+          <p className="text-xs text-zinc-500">{t("governance.fullConfigHint")}</p>
 
           {chainId === sepolia.id ? (
             <details className="rounded-lg border border-zinc-800 bg-zinc-950/80 text-xs text-zinc-300">
               <summary className="cursor-pointer select-none px-3 py-2 font-medium text-zinc-200 hover:bg-zinc-900/80">
-                Sepolia 部署地址（与默认配置一致时可对照）
+                {t("governance.sepoliaAddressesTitle")}
               </summary>
               <div className="border-t border-zinc-800 px-3 pb-3 pt-2">
                 <p className="mb-2 text-[11px] text-zinc-500">
-                  Timelock minDelay（链上）: {minDelay.toString()}s · 可用环境变量覆盖{" "}
-                  <code className="text-zinc-400">NEXT_PUBLIC_TIMELOCK_CONTROLLER_ADDRESS</code> /{" "}
-                  <code className="text-zinc-400">NEXT_PUBLIC_STAKING_ADMIN_FACADE_ADDRESS</code>
+                  {t("governance.sepoliaMinDelay", {
+                    govDelay: minDelayGovernance.toString(),
+                    superDelay: minDelaySuper.toString(),
+                  })}
                 </p>
-                <AddrRow chainId={chainId} label="DualPoolStaking（当前）" addr={contractAddresses.staking} />
-                <AddrRow chainId={chainId} label="TokenA" addr={contractAddresses.tokenA} />
-                <AddrRow chainId={chainId} label="TokenB" addr={contractAddresses.tokenB} />
-                <AddrRow chainId={chainId} label="DualPoolStakingAdmin（门面）" addr={governanceAddresses.adminFacade} />
-                <AddrRow chainId={chainId} label="TimelockController" addr={governanceAddresses.timelock} />
-                <AddrRow chainId={chainId} label="DualPoolUserModule" addr={sepoliaAuxAddresses.dualPoolUserModule} />
-                <AddrRow chainId={chainId} label="DualPoolAdminModule" addr={sepoliaAuxAddresses.dualPoolAdminModule} />
-                <AddrRow chainId={chainId} label="OPERATOR_ROLE（参考）" addr={sepoliaAuxAddresses.operatorRoleHolder} />
+                <AddrRow chainId={chainId} label={t("governance.addrDualPoolStaking")} addr={contractAddresses.staking} />
+                <AddrRow chainId={chainId} label={t("governance.addrTokenA")} addr={contractAddresses.tokenA} />
+                <AddrRow chainId={chainId} label={t("governance.addrTokenB")} addr={contractAddresses.tokenB} />
+                <AddrRow chainId={chainId} label={t("governance.addrAdminFacade")} addr={governanceAddresses.adminFacade} />
+                <AddrRow chainId={chainId} label={t("governance.addrTimelock48h")} addr={governanceAddresses.timelock} />
+                <AddrRow chainId={chainId} label={t("governance.addrTimelock72h")} addr={governanceAddresses.timelockSuper} />
+                <AddrRow chainId={chainId} label={t("governance.addrUserModule")} addr={sepoliaAuxAddresses.dualPoolUserModule} />
+                <AddrRow chainId={chainId} label={t("governance.addrAdminModule")} addr={sepoliaAuxAddresses.dualPoolAdminModule} />
+                <AddrRow chainId={chainId} label={t("governance.addrOperatorRole")} addr={sepoliaAuxAddresses.operatorRoleHolder} />
               </div>
             </details>
           ) : null}
 
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            <GovernanceCard
-              title="setFees (bp)"
-              hint="Affects withdrawal cost and user behavior"
-              payload={payloadSetFees}
-              minDelay={minDelay}
-              canPropose={tl.canPropose}
-              canExecute={tl.canExecute}
-              canCancel={tl.canCancel}
-              executeRows={() => [
-                { label: "withdrawBp", value: withdrawBp },
-                { label: "midtermBp", value: midtermBp },
-                { label: "penaltyBp", value: penaltyBp },
-              ]}
-              onAfterTx={afterTx}
-              disabledReason={feesError}
-            >
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                <input value={withdrawBp} onChange={(e) => setWithdrawBp(e.target.value)} className="min-w-0 rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5" />
-                <input value={midtermBp} onChange={(e) => setMidtermBp(e.target.value)} className="min-w-0 rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5" />
-                <input value={penaltyBp} onChange={(e) => setPenaltyBp(e.target.value)} className="min-w-0 rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5" />
-              </div>
-            </GovernanceCard>
-
-            <GovernanceCard
-              title="setLockDuration (seconds)"
-              hint="Longer lock increases protocol stability"
-              payload={payloadLock}
-              minDelay={minDelay}
-              canPropose={tl.canPropose}
-              canExecute={tl.canExecute}
-              canCancel={tl.canCancel}
-              executeRows={() => [{ label: "lockDuration", value: lockDuration }]}
-              onAfterTx={afterTx}
-              disabledReason={lockError}
-            >
-              <input value={lockDuration} onChange={(e) => setLockDuration(e.target.value)} className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1" />
-            </GovernanceCard>
-
-            <GovernanceCard
-              title="setMinEarlyExitAmountB"
-              hint="Controls minimum amount for early-exit penalty path"
-              payload={payloadMinEarly}
-              minDelay={minDelay}
-              canPropose={tl.canPropose}
-              canExecute={tl.canExecute}
-              canCancel={tl.canCancel}
-              executeRows={() => [{ label: "minEarlyExitAmountB", value: minEarlyExitAmountB }]}
-              onAfterTx={afterTx}
-              disabledReason={minEarlyError}
-            >
-              <input value={minEarlyExitAmountB} onChange={(e) => setMinEarlyExitAmountB(e.target.value)} className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1" />
-            </GovernanceCard>
-
-            <GovernanceCard
-              title="setMaxTransferFeeBP"
-              hint="Adjusts FOT transfer fee tolerance"
-              payload={payloadMaxTransfer}
-              minDelay={minDelay}
-              canPropose={tl.canPropose}
-              canExecute={tl.canExecute}
-              canCancel={tl.canCancel}
-              executeRows={() => [{ label: "maxTransferFeeBp", value: maxTransferFeeBp }]}
-              onAfterTx={afterTx}
-              disabledReason={maxTransferError}
-            >
-              <input value={maxTransferFeeBp} onChange={(e) => setMaxTransferFeeBp(e.target.value)} className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1" />
-            </GovernanceCard>
-
-            <GovernanceCard
-              title="rebalanceBudgets"
-              hint="Treasury operation"
-              payload={payloadRebalance}
-              minDelay={minDelay}
-              canPropose={tl.canPropose}
-              canExecute={tl.canExecute}
-              canCancel={tl.canCancel}
-              executeRows={() => [
-                { label: "Direction", value: rebalanceFrom === "A" ? "A → B" : "B → A" },
-                { label: "Amount (wei est.)", value: rebalanceAmount },
-              ]}
-              onAfterTx={afterTx}
-              disabledReason={rebalanceError}
-            >
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                <select value={rebalanceFrom} onChange={(e) => setRebalanceFrom(e.target.value as "A" | "B")} className="min-w-0 rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5">
-                  <option value="A">A -&gt; B</option>
-                  <option value="B">B -&gt; A</option>
-                </select>
-                <input value={rebalanceAmount} onChange={(e) => setRebalanceAmount(e.target.value)} className="min-w-0 rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5" />
-              </div>
-            </GovernanceCard>
-
-            <GovernanceCard
-              title="unpause"
-              hint="解冻核心：通过门面调用 core.unpause（仍需满足核心侧 unpause 条件）"
-              payload={payloadUnpause}
-              minDelay={minDelay}
-              canPropose={tl.canPropose}
-              canExecute={tl.canExecute}
-              canCancel={tl.canCancel}
-              executeRows={() => [{ label: "Action", value: "DualPoolStakingAdmin.unpause()" }]}
-              onAfterTx={afterTx}
-            >
-              <p className="text-[11px] text-zinc-500">无参数。提交后等待 minDelay，再由 executor 执行。</p>
-            </GovernanceCard>
-          </div>
+          <GovernanceTimelockCards
+            minDelayGovernance={minDelayGovernance}
+            minDelaySuper={minDelaySuper}
+            tlGovernance={{ canPropose: tlGov.canPropose, canExecute: tlGov.canExecute, canCancel: tlGov.canCancel }}
+            tlSuper={{ canPropose: tlSuper.canPropose, canExecute: tlSuper.canExecute, canCancel: tlSuper.canCancel }}
+            staking={staking}
+            onAfterTx={afterTx}
+          />
         </>
       ) : null}
 
       <ConfirmActionModal
         open={confirm.kind === "pause"}
-        title="Confirm Pause?"
+        title={t("governance.confirmPauseTitle")}
         rows={[
-          { label: "Action", value: "pause()" },
-          { label: "Impact", value: "This will stop protocol interactions until resumed." },
+          { label: t("governance.rowAction"), value: t("governance.confirmPauseAction") },
+          { label: t("governance.rowImpact"), value: t("governance.confirmPauseImpact") },
         ]}
-        warning={TOOLTIP_PAUSE}
-        confirmText="Confirm Pause"
+        warning={t("governance.pauseTooltip")}
+        confirmText={t("governance.confirmPauseBtn")}
         variant="danger"
         busy={govBusy}
         onClose={() => !govBusy && setConfirm({ kind: null })}
         onConfirm={async () => {
           try {
-            await callCore("pause", "pause", []);
+            await callCore(t("governance.confirmPauseTxLabel"), "pause", []);
             setConfirm({ kind: null });
           } catch {
             /* handled */
@@ -432,16 +277,16 @@ export function GovernancePanel() {
       />
       <ConfirmActionModal
         open={confirm.kind === "emergency"}
-        title="Confirm Emergency Mode?"
-        rows={[{ label: "Action", value: "enableEmergencyMode()" }]}
-        warning={TOOLTIP_EMERGENCY}
-        confirmText="Confirm enable"
+        title={t("governance.confirmEmergencyTitle")}
+        rows={[{ label: t("governance.rowAction"), value: t("governance.confirmEmergencyAction") }]}
+        warning={t("governance.emergencyTooltip")}
+        confirmText={t("governance.confirmEmergencyBtn")}
         variant="danger"
         busy={govBusy}
         onClose={() => !govBusy && setConfirm({ kind: null })}
         onConfirm={async () => {
           try {
-            await callCore("enableEmergencyMode", "enableEmergencyMode", []);
+            await callCore(t("governance.confirmEmergencyTxLabel"), "enableEmergencyMode", []);
             setConfirm({ kind: null });
           } catch {
             /* handled */

@@ -4,7 +4,10 @@ import { useCallback, useMemo, useState } from "react";
 import type { Hash } from "viem";
 
 import { useTxCenter } from "@/hooks/useTxCenter";
+import { CatchUpBlockedError, CatchUpIncompleteError, usePoolCatchUpEnsurer } from "@/hooks/usePoolCatchUpEnsurer";
 import { mapContractError } from "@/lib/errors";
+import { useI18n } from "@/lib/i18n";
+import { CATCH_UP_A, CATCH_UP_B, type PoolSide } from "@/lib/poolCatchUp";
 import type { TxState } from "@/lib/txFlowTypes";
 import { isTxBusy } from "@/lib/txFlowTypes";
 import type { TxItem } from "@/store/useTxStore";
@@ -18,6 +21,8 @@ export type ExecuteTxOpts = {
   sessionId?: string;
   /** 链上确认成功后刷新数据 */
   onConfirmed?: () => void | Promise<unknown>;
+  /** 写操作前自动 permissionless crank，补齐全局计息（M-2 长空闲） */
+  catchUpPools?: readonly PoolSide[];
   /** @deprecated 已统一走 Tx Center，忽略 */
   syncGlobal?: boolean;
 };
@@ -31,6 +36,7 @@ export type StakeTxFlowConfig = {
   humanAmount: string;
   invalidate: () => Promise<unknown>;
   txMeta?: { pool: "A" | "B"; token: string };
+  catchUpPools?: readonly PoolSide[];
 };
 
 export type UseTransactionFlowOptions = {
@@ -39,9 +45,12 @@ export type UseTransactionFlowOptions = {
 
 /**
  * 本地按钮状态 + 全局 Tx Center（Zustand 持久化队列、多笔并发）。
+ * 失败时 error 字段为 mapContractError 结果，可直接展示。
  */
 export function useTransactionFlow(_options: UseTransactionFlowOptions = {}) {
+  const { t } = useI18n();
   const { startTransaction } = useTxCenter();
+  const { ensureCatchUp } = usePoolCatchUpEnsurer();
   const [state, setState] = useState<TxState>("idle");
   const [txHash, setTxHash] = useState<Hash | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
@@ -73,21 +82,33 @@ export function useTransactionFlow(_options: UseTransactionFlowOptions = {}) {
         setState("approval_confirmed");
         return h;
       } catch (e) {
-        const msg = mapContractError(e);
+        const msg = mapContractError(e, t);
         setError(msg);
         setState("failed");
         throw e;
       }
     },
-    [startTransaction],
+    [startTransaction, t],
+  );
+
+  const mapFlowError = useCallback(
+    (e: unknown) => {
+      if (e instanceof CatchUpBlockedError || e instanceof CatchUpIncompleteError) return e.message;
+      return mapContractError(e, t);
+    },
+    [t],
   );
 
   const executeWrite = useCallback(
     async (opts: ExecuteTxOpts, send: () => Promise<Hash>): Promise<Hash> => {
       setError(undefined);
       setTxHash(undefined);
-      setState("awaiting_signature");
       try {
+        if (opts.catchUpPools?.length) {
+          setState("catch_up");
+          await ensureCatchUp(opts.catchUpPools);
+        }
+        setState("awaiting_signature");
         const h = await startTransaction({
           type: opts.txType ?? "write",
           title: opts.actionLabel,
@@ -100,13 +121,13 @@ export function useTransactionFlow(_options: UseTransactionFlowOptions = {}) {
         setState("confirmed");
         return h;
       } catch (e) {
-        const msg = mapContractError(e);
+        const msg = mapFlowError(e);
         setError(msg);
         setState("failed");
         throw e;
       }
     },
-    [startTransaction],
+    [ensureCatchUp, mapFlowError, startTransaction],
   );
 
   const isBusy = useMemo(() => isTxBusy(state), [state]);
@@ -127,6 +148,7 @@ export function useTransactionFlow(_options: UseTransactionFlowOptions = {}) {
 /** 质押：approve（如需）→ stake，两笔独立入队 Tx Center */
 export function useStakeWithApprovalFlow(flowOptions?: UseTransactionFlowOptions) {
   const flow = useTransactionFlow(flowOptions);
+  const { t } = useI18n();
   const [flowLock, setFlowLock] = useState(false);
 
   const runStakeFlow = useCallback(
@@ -141,7 +163,7 @@ export function useStakeWithApprovalFlow(flowOptions?: UseTransactionFlowOptions
         if (cfg.needsApproval) {
           await flow.executeApprove(
             {
-              actionLabel: "Approve staking token",
+              actionLabel: t("txCenter.approveStakeToken"),
               txType: "approve",
               metadata: md,
               onConfirmed: () => cfg.refetchAllowance(),
@@ -153,10 +175,13 @@ export function useStakeWithApprovalFlow(flowOptions?: UseTransactionFlowOptions
 
         await flow.executeWrite(
           {
-            actionLabel: "Stake",
+            actionLabel: t("txCenter.typeStake"),
             txType: "stake",
             metadata: md,
             onConfirmed: () => cfg.invalidate(),
+            catchUpPools:
+              cfg.catchUpPools ??
+              (cfg.txMeta?.pool === "A" ? CATCH_UP_A : cfg.txMeta?.pool === "B" ? CATCH_UP_B : undefined),
           },
           () => cfg.stake(cfg.humanAmount),
         );
@@ -165,7 +190,7 @@ export function useStakeWithApprovalFlow(flowOptions?: UseTransactionFlowOptions
         setFlowLock(false);
       }
     },
-    [flow],
+    [flow, t],
   );
 
   const busy = useMemo(() => flowLock || isTxBusy(flow.state), [flow.state, flowLock]);

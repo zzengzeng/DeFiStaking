@@ -1,6 +1,6 @@
 import type { Hash, PublicClient } from "viem";
 
-import { mapContractError } from "@/lib/errors";
+import { mapContractErrorLocalized } from "@/lib/errors";
 import { getTxExplorerUrl } from "@/lib/explorerLink";
 import { type TxItem, useTxStore } from "@/store/useTxStore";
 
@@ -19,7 +19,7 @@ export type RunPipelineDeps = {
 
 /**
  * 更新 store 中的单笔交易：签名 → 已提交 → 确认 / 失败。
- * 支持多笔并发：每笔以独立 `id` 更新。
+ * 由 Tx Center 调用；失败描述经 mapContractErrorLocalized 写入 description。
  */
 export async function runTransactionPipeline(id: string, send: () => Promise<Hash>, deps: RunPipelineDeps): Promise<Hash> {
   const updateTx = useTxStore.getState().updateTx;
@@ -45,7 +45,7 @@ export async function runTransactionPipeline(id: string, send: () => Promise<Has
     await Promise.resolve(deps.onAfterConfirmed?.());
     return hash;
   } catch (e) {
-    const msg = mapContractError(e);
+    const msg = mapContractErrorLocalized(e);
     updateTx(id, {
       status: "failed",
       description: msg,

@@ -17,7 +17,7 @@ export type TimelockIndexedOp = {
   paramsDisplay?: string;
 };
 
-/** 通过后端索引服务获取完整 timelock 操作列表。 */
+/** 通过 `/api/timelock-ops` 获取 Timelock 排队/已执行操作（GovernancePanel 队列视图）。 */
 export function useTimelockOps() {
   const chainId = useChainId();
   return useQuery({

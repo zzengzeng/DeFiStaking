@@ -7,19 +7,19 @@ import { dualPoolStakingAbi } from "@/contracts/abis/dualPoolStaking";
 import { erc20Abi } from "@/contracts/abis/erc20";
 import { contractAddresses } from "@/contracts/addresses";
 import { useStaking } from "@/hooks/useStaking";
-import { parseUserInfoTuple } from "@/lib/userInfo";
 
 /** Pool A：读状态 + 原始写交易（由 UI 层 useWriteWithStatus 包装 toast / modal） */
 export function usePoolA() {
   const { address } = useAccount();
   const { writeContractAsync } = useWriteContract();
   const staking = useStaking();
+  const stakingTokenA = staking.poolA?.stakingToken ?? contractAddresses.tokenA;
 
   const {
     data: tokenABalance = 0n,
     refetch: refetchTokenABalance,
   } = useReadContract({
-    address: contractAddresses.tokenA,
+    address: stakingTokenA,
     abi: erc20Abi,
     functionName: "balanceOf",
     args: address ? [address] : undefined,
@@ -34,7 +34,7 @@ export function usePoolA() {
     !address || staking.lastClaimTime === 0n || now >= staking.lastClaimTime + staking.claimCooldown
       ? 0n
       : staking.lastClaimTime + staking.claimCooldown - now;
-  const pendingRewardsA = parseUserInfoTuple(staking.userA).rewards;
+  const pendingRewardsA = staking.pendingRewardA;
   const canClaim =
     (staking.status === "NORMAL" || staking.status === "SHUTDOWN") &&
     staking.globalBadDebt === 0n &&
@@ -50,7 +50,7 @@ export function usePoolA() {
           ? "存在 badDebt，暂不可 claim"
           : claimCooldownRemainingSec > 0n
             ? "Claim 冷却中"
-            : "暂无可领取奖励（链上未结算）";
+            : "暂无可领取奖励";
   const emergencyDisabledReason = canEmergencyWithdraw ? null : "仅在 EMERGENCY 模式可用";
 
   const toAmount = (value: string) => parseUnits(value || "0", 18);
@@ -58,7 +58,7 @@ export function usePoolA() {
   const writeApproveTokenA = (amountWei: bigint) =>
     writeContractAsync({
       abi: erc20Abi,
-      address: contractAddresses.tokenA,
+      address: stakingTokenA,
       functionName: "approve",
       args: [contractAddresses.staking, amountWei],
       account: address,
@@ -108,6 +108,7 @@ export function usePoolA() {
 
   return {
     ...staking,
+    stakingTokenA,
     canStake,
     canWithdraw,
     canEmergencyWithdraw,

@@ -1,9 +1,5 @@
 import { formatUnits } from "viem";
 
-/** 演示用 USD 参考价（未接预言机时可替换为真实喂价）。 */
-export const MOCK_USD_PRICE_TOKEN_A = 1.02;
-export const MOCK_USD_PRICE_TOKEN_B = 203.2;
-
 export function usdFromTokenAmount(amountWei: bigint, decimals: number, usdPerToken: number): number {
   const n = Number(formatUnits(amountWei, decimals));
   if (!Number.isFinite(n)) return 0;

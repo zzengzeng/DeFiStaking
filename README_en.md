@@ -110,7 +110,8 @@ make deploy
 ### Sepolia Deployment
 
 ```shell
-# Configure in .env: SEPOLIA_RPC_URL, PRIVATE_KEY, ETHERSCAN_API_KEY
+# Configure in .env: SEPOLIA_RPC_URL, DEPLOYER_ACCOUNT, ETHERSCAN_API_KEY
+# PRIVATE_KEY is only for non-production testing; production must use a reviewed signer/keystore flow.
 make deploy NETWORK=sepolia
 ```
 

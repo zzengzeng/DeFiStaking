@@ -1,5 +1,7 @@
 import type { Hash } from "viem";
 
+import type { TranslateFn } from "@/lib/i18n";
+
 /** 全应用统一的链上写交易状态（质押 / 提现 / 治理共用） */
 export type TxState =
   | "idle"
@@ -7,6 +9,7 @@ export type TxState =
   | "approving"
   | "approval_pending"
   | "approval_confirmed"
+  | "catch_up"
   | "awaiting_signature"
   | "submitting"
   | "pending"
@@ -26,6 +29,7 @@ export function isTxBusy(s: TxState): boolean {
     s === "approving" ||
     s === "approval_pending" ||
     s === "approval_confirmed" ||
+    s === "catch_up" ||
     s === "awaiting_signature" ||
     s === "submitting" ||
     s === "pending"
@@ -33,34 +37,36 @@ export function isTxBusy(s: TxState): boolean {
 }
 
 /** Modal / 文案：人类可读状态说明 */
-export function txStateMessage(state: TxState): string {
+export function txStateMessage(state: TxState, t: TranslateFn): string {
   switch (state) {
     case "idle":
-      return "Ready";
+      return t("txState.idle");
     case "needs_approval":
-      return "Token approval required before this action.";
+      return t("txState.needsApproval");
     case "approving":
-      return "Preparing approval transaction…";
+      return t("txState.approving");
     case "approval_pending":
-      return "Approval transaction submitted. Waiting for on-chain confirmation…";
+      return t("txState.approvalPending");
     case "approval_confirmed":
-      return "Approval confirmed.";
+      return t("txState.approvalConfirmed");
+    case "catch_up":
+      return t("txState.catchUp");
     case "awaiting_signature":
-      return "Confirm the transaction in your wallet.";
+      return t("txState.awaitingSignature");
     case "submitting":
-      return "Submitting to the network…";
+      return t("txState.submitting");
     case "pending":
-      return "Waiting for on-chain confirmation…";
+      return t("txState.pending");
     case "confirmed":
-      return "Transaction confirmed.";
+      return t("txState.confirmed");
     case "failed":
-      return "Transaction failed.";
+      return t("txState.failed");
     default:
       return state;
   }
 }
 
-type IdlePrimary = "Stake" | "Approve" | "Submit" | "Confirm";
+type IdlePrimaryKey = "stake" | "submit" | "confirm";
 
 /**
  * 主按钮文案（与产品规范一致）
@@ -68,30 +74,33 @@ type IdlePrimary = "Stake" | "Approve" | "Submit" | "Confirm";
  */
 export function transactionButtonLabel(
   state: TxState,
-  ctx: { needsApproval: boolean; idlePrimary: IdlePrimary },
+  t: TranslateFn,
+  ctx: { needsApproval: boolean; idlePrimary?: IdlePrimaryKey },
 ): string {
   switch (state) {
     case "needs_approval":
-      return "Approve";
+      return t("txButton.approve");
     case "approving":
-      return "Approving...";
+      return t("txButton.approving");
     case "approval_pending":
-      return "Approval Pending...";
+      return t("txButton.approvalPending");
     case "approval_confirmed":
-      return "Approved";
+      return t("txButton.approved");
+    case "catch_up":
+      return t("txButton.catchUp");
     case "awaiting_signature":
-      return "Confirm in Wallet";
+      return t("txButton.awaitingSignature");
     case "submitting":
-      return "Submitting...";
+      return t("txButton.submitting");
     case "pending":
-      return "Pending...";
+      return t("txButton.pending");
     case "confirmed":
-      return "Confirmed";
+      return t("txButton.confirmed");
     case "failed":
-      return "Retry";
+      return t("txButton.failed");
     case "idle":
     default:
-      return ctx.needsApproval ? "Approve" : ctx.idlePrimary;
+      return ctx.needsApproval ? t("txButton.approve") : t(`txButton.${ctx.idlePrimary ?? "submit"}`);
   }
 }
 

@@ -1,5 +1,5 @@
 # Pool
-[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/c3cdaa9f3e5e324db578e81e0109756c6d9d8922/src/StakeTypes.sol)
+[Git Source](https://github.com/zzengzeng/DeFiStaking/blob/49679f252829d0b3ac33cfb42d46070f8f7fbdc0/src/StakeTypes.sol)
 
 **Title:**
 StakeTypes

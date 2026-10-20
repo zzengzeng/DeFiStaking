@@ -57,4 +57,30 @@ export const timelockControllerAbi = [
     outputs: [],
   },
   { type: "function", name: "cancel", stateMutability: "nonpayable", inputs: [{ name: "id", type: "bytes32" }], outputs: [] },
+  {
+    type: "event",
+    name: "CallScheduled",
+    inputs: [
+      { indexed: true, name: "id", type: "bytes32" },
+      { indexed: true, name: "index", type: "uint256" },
+      { indexed: false, name: "target", type: "address" },
+      { indexed: false, name: "value", type: "uint256" },
+      { indexed: false, name: "data", type: "bytes" },
+      { indexed: false, name: "predecessor", type: "bytes32" },
+      { indexed: false, name: "salt", type: "bytes32" },
+      { indexed: false, name: "delay", type: "uint256" },
+    ],
+  },
+  {
+    type: "event",
+    name: "CallExecuted",
+    inputs: [
+      { indexed: true, name: "id", type: "bytes32" },
+      { indexed: true, name: "index", type: "uint256" },
+      { indexed: false, name: "target", type: "address" },
+      { indexed: false, name: "value", type: "uint256" },
+      { indexed: false, name: "data", type: "bytes" },
+    ],
+  },
+  { type: "event", name: "Cancelled", inputs: [{ indexed: true, name: "id", type: "bytes32" }] },
 ] as const;

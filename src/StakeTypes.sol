@@ -48,19 +48,10 @@ struct PoolInfo {
 
 /// @notice Per-user staking and reward checkpoint for one pool (mirrored in `userInfoA` / `userInfoB` mappings on the core).
 struct UserInfo {
-    /// @notice User principal staked in the pool.
+    /// @notice User principal staked in the pool (FOT inbound: balance-delta net credited).
     uint256 staked;
-    /// @notice Accrued rewards not yet paid out (after settlement).
+    /// @notice Accrued rewards not yet paid out (after settlement); claim/force-claim transfers this gross amount (FOT outbound tax borne by user).
     uint256 rewards;
     /// @notice Last `accRewardPerToken` applied to this user (reward debt / paid index).
     uint256 rewardPaid;
-}
-
-/// @notice Optional on-chain record for a timelocked governance operation (`pendingOps[opId]` on the cores).
-/// @dev `executeAfter` and `paramsHash` are written by higher-level governance scripts; cancellation clears the slot.
-struct PendingOp {
-    /// @notice Earliest timestamp at which the op may execute (0 if unset / cleared).
-    uint256 executeAfter;
-    /// @notice Commitment hash of encoded parameters (for cancellation / audit).
-    bytes32 paramsHash;
 }

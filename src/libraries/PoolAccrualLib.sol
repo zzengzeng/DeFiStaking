@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {PoolInfo, UserInfo} from "../StakeTypes.sol";
+import {PoolCatchUpLib} from "./PoolCatchUpLib.sol";
 
 /// @title PoolAccrualLib
 /// @notice Linked library: global reward index updates and per-user reward settlement for one `PoolInfo`.
@@ -50,7 +51,7 @@ library PoolAccrualLib {
         u.rewardPaid = pool.accRewardPerToken;
     }
 
-    /// @notice Advances global reward index up to `min(block.timestamp, periodFinish)` and updates pending, bad debt, and dust buckets.
+    /// @notice Advances global reward index up to the pause-aware accrual cap and updates pending, bad debt, and dust buckets.
     /// @dev `accRewardPerToken` uses `mulDiv(actualReward, precision, totalStaked)`; the index can only support
     ///      `mulDiv(totalStaked, deltaAcc, precision) <= actualReward` as user-claimable pending. The gap is **not** owed
     ///      to any staker—route it to `dust` (recycle to `availableRewards` at `dustTolerance`) and **do not** add it to
@@ -59,12 +60,18 @@ library PoolAccrualLib {
     /// @param maxDeltaTime Upper bound on elapsed seconds applied in one call (overflow / fairness guard).
     /// @param precision Fixed-point scale for index math (matches `settleUser`).
     /// @param dustTolerance Minimum dust balance before sweeping dust back into `availableRewards`.
+    /// @param pausedAt_ Core `pausedAt` (ignored when not paused).
+    /// @param paused_ Whether the core is paused (caps accrual at `pausedAt_`).
     /// @return ge Optional emission hints for shortfall and dust handling.
-    function updateGlobal(PoolInfo storage pool, uint256 maxDeltaTime, uint256 precision, uint256 dustTolerance)
-        external
-        returns (GlobalEmit memory ge)
-    {
-        uint256 tApplicable = Math.min(block.timestamp, pool.periodFinish);
+    function updateGlobal(
+        PoolInfo storage pool,
+        uint256 maxDeltaTime,
+        uint256 precision,
+        uint256 dustTolerance,
+        uint256 pausedAt_,
+        bool paused_
+    ) external returns (GlobalEmit memory ge) {
+        uint256 tApplicable = PoolCatchUpLib.accrualCatchUpCap(pool, pausedAt_, paused_);
         if (pool.totalStaked == 0) {
             pool.lastUpdateTime = tApplicable;
             return ge;

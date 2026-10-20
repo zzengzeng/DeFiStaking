@@ -5,6 +5,8 @@ export type IndexedNotifyReward = {
   duration: string;
   rate: string;
   blockNumber: string;
+  /** Unix 秒（服务端 enrich 后提供） */
+  blockTimestamp?: string;
   transactionHash: `0x${string}`;
   logIndex: number;
 };
