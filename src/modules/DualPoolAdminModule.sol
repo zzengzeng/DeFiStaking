@@ -291,11 +291,7 @@ contract DualPoolAdminModule is DualPoolStorageLayout, DelegatecallGuard {
         _catchUpGlobalB();
         uint256 fotCap = maxTransferFeeBP;
         StakingAdminLib.ResolveBadDebtParams memory params = StakingAdminLib.ResolveBadDebtParams({
-            rewardToken: rewardToken,
-            from: sender,
-            amount: amount,
-            maxTransferFeeBP: fotCap,
-            basisPoints: BASIS_POINTS
+            rewardToken: rewardToken, from: sender, amount: amount, maxTransferFeeBP: fotCap, basisPoints: BASIS_POINTS
         });
         StakingAdminLib.ResolveBadDebtResult memory res =
             StakingAdminLib.executeResolveBadDebt(poolAState, poolBState, params, _reanchorCaps());

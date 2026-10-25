@@ -116,3 +116,20 @@ export const governanceAddresses = {
     sepoliaDeploymentMeta.dualPoolStakingAdmin,
   ),
 } as const;
+
+/**
+ * 独立的 `DualPoolSuperAdmin` 合约地址（角色管理层）。
+ * 本地 / Sepolia 部署后，把合约地址填进 `NEXT_PUBLIC_DUAL_POOL_SUPER_ADMIN_ADDRESS`。
+ * 未设置时返回 zero，UI 据此判断是否启用 SuperAdmin 管理面板。
+ */
+export const superAdminAddresses = {
+  superAdmin: parseAddressEnv(
+    process.env.NEXT_PUBLIC_DUAL_POOL_SUPER_ADMIN_ADDRESS,
+    "NEXT_PUBLIC_DUAL_POOL_SUPER_ADMIN_ADDRESS",
+  ),
+} as const;
+
+/** 是否配置了 SuperAdmin 地址（非 zero）。 */
+export function isSuperAdminConfigured(): boolean {
+  return superAdminAddresses.superAdmin !== ZERO;
+}

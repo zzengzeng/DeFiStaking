@@ -9,7 +9,7 @@ import {
 import { http } from "wagmi";
 import { mainnet, sepolia } from "wagmi/chains";
 
-import { isMainnetTarget } from "@/config/chains";
+import { anvil, isAnvilTarget, isMainnetTarget } from "@/config/chains";
 import {
   hasWalletConnect,
   walletConnectProjectIdOrPlaceholder,
@@ -17,6 +17,7 @@ import {
 
 const sepoliaRpc = process.env.NEXT_PUBLIC_RPC_URL_SEPOLIA ?? "https://sepolia.drpc.org";
 const mainnetRpc = process.env.NEXT_PUBLIC_RPC_URL_MAINNET;
+const anvilRpc = process.env.NEXT_PUBLIC_RPC_URL_ANVIL ?? "http://127.0.0.1:8545";
 
 const rainbowBase = {
   appName: "DualPool Staking",
@@ -45,6 +46,15 @@ const walletsWithConnect = [
 
 function buildWagmiConfig() {
   const wallets = hasWalletConnect ? walletsWithConnect : browserWallets;
+
+  if (isAnvilTarget) {
+    return getDefaultConfig({
+      ...rainbowBase,
+      chains: [anvil],
+      transports: { [anvil.id]: http(anvilRpc) },
+      wallets,
+    });
+  }
 
   if (isMainnetTarget) {
     return getDefaultConfig({

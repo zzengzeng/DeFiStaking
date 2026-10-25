@@ -15,7 +15,11 @@ library PoolCatchUpLib {
     }
 
     /// @notice Upper bound of global accrual for catch-up: `min(accrualTimestamp(now), periodFinish)`.
-    function accrualCatchUpCap(PoolInfo storage pool, uint256 pausedAt_, bool paused_) internal view returns (uint256 cap) {
+    function accrualCatchUpCap(PoolInfo storage pool, uint256 pausedAt_, bool paused_)
+        internal
+        view
+        returns (uint256 cap)
+    {
         cap = accrualTimestamp(block.timestamp, pausedAt_, paused_);
         if (pool.periodFinish < cap) cap = pool.periodFinish;
     }

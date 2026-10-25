@@ -1,3 +1,17 @@
 {
-    "commentTranslate.hover.enabled": false
+    "commentTranslate.hover.enabled": false,
+
+    // --- Path Intellisense: 让 @openzeppelin/ 和 forge-std/ 别名能补全 ---
+    "path-intellisense.mappings": {
+        "@openzeppelin": "${workspaceFolder}/lib/openzeppelin-contracts",
+        "forge-std": "${workspaceFolder}/lib/forge-std/src"
+    },
+    "path-intellisense.autoSlash": true,
+    "path-intellisense.extensionOnImport": true,
+
+    // --- 指定 .sol 文件默认用 Juan Blanco 的 Solidity 扩展打开 ---
+    // （避免与 Hardhat 扩展冲突，两者都装了）
+    "workbench.editorAssociations": {
+        "*.sol": "juanblanco.solidity"
+    }
 }

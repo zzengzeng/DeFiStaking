@@ -490,13 +490,7 @@ contract DualPoolStaking is DualPoolStorageLayout {
         UserInfo memory userMem = user;
         uint256 viewTs = PoolCatchUpLib.accrualTimestamp(block.timestamp, pausedAt, paused());
         return PoolAccrualViewLib.preview(
-            poolMem,
-            userMem,
-            MAX_DELTA_TIME,
-            PRECISION,
-            DUST_TOLERANCE,
-            MAX_CATCHUP_ITERATIONS,
-            viewTs
+            poolMem, userMem, MAX_DELTA_TIME, PRECISION, DUST_TOLERANCE, MAX_CATCHUP_ITERATIONS, viewTs
         );
     }
 }

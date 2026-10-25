@@ -8,6 +8,7 @@ broadcast/
 md/
 xmind/
 learn/
+docs/
 
 # forge install output (submodule lib/forge-std remains tracked as a gitlink)
 /lib/
@@ -15,6 +16,7 @@ learn/
 # Env and package manager caches
 .env
 .env.*
+.vscode/settings.json
 !.env.example
 .env.governance-keys
 .env.governance-keys.*

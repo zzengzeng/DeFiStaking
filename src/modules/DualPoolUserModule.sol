@@ -52,7 +52,9 @@ contract DualPoolUserModule is DualPoolStorageLayout, DelegatecallGuard {
         Pool p = Pool(poolRaw);
         PoolInfo storage pool = p == Pool.A ? poolAState : poolBState;
         bool complete = _advanceCatchUp(pool, p, false);
-        emit PoolCatchUpCranked(p, pool.lastUpdateTime, PoolCatchUpLib.accrualCatchUpCap(pool, pausedAt, paused()), complete);
+        emit PoolCatchUpCranked(
+            p, pool.lastUpdateTime, PoolCatchUpLib.accrualCatchUpCap(pool, pausedAt, paused()), complete
+        );
     }
 
     /// @notice Pool A stake entrypoint for delegatecall from the core.

@@ -15,9 +15,10 @@ import { CatchUpBanner } from "@/components/CatchUpBanner";
 import { TxCenterHeaderButton } from "@/components/TxCenterPanel";
 import { POOL_COPY } from "@/lib/appMode";
 import { useConsoleCopy } from "@/lib/consoleCopy";
-import { governanceAddresses } from "@/contracts/addresses";
+import { governanceAddresses, isSuperAdminConfigured } from "@/contracts/addresses";
 import { useProtocolRoles } from "@/hooks/useProtocolRoles";
 import { useStaking } from "@/hooks/useStaking";
+import { useSuperAdminRoles } from "@/hooks/useSuperAdminRoles";
 import { useTimelockGovernanceRoles } from "@/hooks/useTimelockGovernanceRoles";
 
 /** 合约控制台 / 内部运维工具壳层（导航、角色徽章、Locale / Mode 切换） */
@@ -34,6 +35,11 @@ export function ConsoleShell({ children }: { children: React.ReactNode }) {
       (roles.isAdmin || roles.isOperator || tl.canAccessTimelockGovernance || tlSuper.canAccessTimelockGovernance),
   );
 
+  // SuperAdmin 角色：合约配置了就查询，否则显示为无权限
+  const saConfigured = isSuperAdminConfigured();
+  const saRoles = useSuperAdminRoles();
+  const canSeeSuperAdmin = saConfigured && saRoles.isDefaultAdmin;
+
   const links = useMemo(() => {
     const base: { href: string; label: string }[] = [
       { href: "/console", label: copy.nav.hub },
@@ -43,8 +49,11 @@ export function ConsoleShell({ children }: { children: React.ReactNode }) {
     if (canSeeGovernance) {
       base.push({ href: "/console/governance", label: copy.nav.governance });
     }
+    if (canSeeSuperAdmin) {
+      base.push({ href: "/console/super-admin", label: "Super Admin" });
+    }
     return base;
-  }, [canSeeGovernance, copy.nav.governance, copy.nav.hub, copy.nav.poolFlexible, copy.nav.poolLocked]);
+  }, [canSeeGovernance, canSeeSuperAdmin, copy.nav.governance, copy.nav.hub, copy.nav.poolFlexible, copy.nav.poolLocked]);
 
   const rolesLoading = roles.isLoading || tl.isLoading || tlSuper.isLoading;
 
