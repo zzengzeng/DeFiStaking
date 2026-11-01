@@ -188,8 +188,8 @@ require(balanceB > requiredB, "NO_EXCESS_TOKEN_B");
 | `MAX_LOCK_DURATION` | uint256 | 90 days | 锁定期上限 |
 | `MAX_DELTA_TIME` | uint256 | 30 days | 单次时间差上限，防溢出 |
 | `MAX_CATCHUP_ITERATIONS` | uint256 | 50 | 单次调用的最大计提分片数；业务入口未完整推进时回滚，公开 crank 可分批保留进度 |
-| `MAX_DURATION` | uint256 | **365 days** | 治理指定奖励周期上限；旧notify已改为只注资 |
-| `MIN_REWARD_RATE_DURATION` | uint256 | **1 days** | 治理指定奖励周期下限；治理重锚的微排放例外见§4.5 |
+| `MAX_REWARD_DURATION` | uint256 | **365 days** | 治理指定奖励周期上限；旧notify已改为只注资 |
+| `MIN_REWARD_DURATION` | uint256 | **1 days** | 治理指定奖励周期下限；治理重锚的微排放例外见§4.5 |
 | `MAX_REWARD_RATE_A / B` | uint256 | 派生上界 | 由构造函数参数 **`maxTotalSupplyBForRewardRateCap`（>0，部署时一次性写入）** 与 `MAX_APR_BP`、`SECONDS_PER_YEAR` 推导；当前部署无正常setter，**禁止**使用运行时 `rewardTokenB.totalSupply()` 改变上界。 |
 | `MAX_MIN_CLAIM_AMOUNT` | uint256 | 1e17 wei | `minClaimAmount` setter 上限 |
 | `DUST_TOLERANCE` | uint256 | 10 wei | 粉尘回收阈值及诊断容忍值，不可修改；不能放宽实际资金保留 |
@@ -293,7 +293,7 @@ uint256 public minClaimAmount;        // 合约初始值为 0（无门槛）；A
 | 变量名 | 类型 | 含义 | 默认值 / 约束 |
 | --- | --- | --- | --- |
 | `lockDuration` | uint256 | 基础锁定期 | 7 days（>0，Max 90 days） |
-| `penaltyfeeBP` | uint256 | **Pool B** Early Exit 罚金（BP） | 1000（Max 2000） |
+| `penaltyFeeBP` | uint256 | **Pool B** Early Exit 罚金（BP） | 1000（Max 2000） |
 | `withdrawFeeBP` | uint256 | 短期到期手续费（BP） | 100（Max 500） |
 | `midTermFeeBP` | uint256 | 中期到期手续费（BP） | 50（Max 500） |
 | `minStakeAmountA / B` | uint256 | 最小质押量 | 防粉尘攻击 |
@@ -312,8 +312,8 @@ uint256 public minClaimAmount;        // 合约初始值为 0（无门槛）；A
 > 为防止提现 1 wei 时导致罚金因整除被截断为 0，系统设置函数必须强制校验：
 > ```solidity
 > // 如果罚金率大于 0，最小退出额产生的罚金必须大于等于 1 wei
-> if (penaltyfeeBP > 0) {
->     require(newMinEarlyExitAmountB * penaltyfeeBP / BASIS_POINTS >= 1, "PENALTY_TOO_SMALL");
+> if (penaltyFeeBP > 0) {
+>     require(newMinEarlyExitAmountB * penaltyFeeBP / BASIS_POINTS >= 1, "PENALTY_TOO_SMALL");
 > }
 > 
 > ```
@@ -551,11 +551,11 @@ require(rate <= headroom / duration, "REWARD_INDEX_CAPACITY");
 ```text
 B = availableRewardsX; C = MAX_REWARD_RATE_X
 require(B > 0 && C >= 1)
-if B < MIN_REWARD_RATE_DURATION:       // 数值单位：wei / (1 wei/秒)
+if B < MIN_REWARD_DURATION:       // 数值单位：wei / (1 wei/秒)
     duration = B; rate = 1            // 微排放是治理过期重锚的明确例外
 else:
-    duration = min(MAX_DURATION,
-                   max(MIN_REWARD_RATE_DURATION, ceilDiv(B, C)))
+    duration = min(MAX_REWARD_DURATION,
+                   max(MIN_REWARD_DURATION, ceilDiv(B, C)))
     rate = min(C, floor(B / duration))
 require(rate > 0 && rate * duration <= B)
 lastUpdateTimeX = T
@@ -563,7 +563,7 @@ periodFinishX = T + duration
 rewardRateX = rate
 ```
 
-**不得**计算 `duration = ceilDiv(B, C)` 后仍无条件保留 `rate = C`；只要不能整除，就会承诺超过预算并制造虚假坏账。必须在最终时长确定后重新向下取整速率。`MIN_REWARD_RATE_DURATION` 是主动指定周期的下限；治理重锚中的少量预算微排放可短于此下限，适用于上表活跃窗和过期窗的对应分支，不影响锁仓、冷却或治理期限。
+**不得**计算 `duration = ceilDiv(B, C)` 后仍无条件保留 `rate = C`；只要不能整除，就会承诺超过预算并制造虚假坏账。必须在最终时长确定后重新向下取整速率。`MIN_REWARD_DURATION` 是主动指定周期的下限；治理重锚中的少量预算微排放可短于此下限，适用于上表活跃窗和过期窗的对应分支，不影响锁仓、冷却或治理期限。
 
 **绝对速率上限：**
 
@@ -602,7 +602,7 @@ $$
 * 入账已按实收 net 记账，出账由用户承担转出税在语义上**对称、可预期**。
 * 行业常见做法为披露税率 + 前端估算到手；本协议以 `maxTransferFeeBP` 提供链上封顶保护，拒绝超出容忍度的恶意高税 Token。
 
-> **非 FOT 费用**：Pool B 的 `withdrawFeeBP` / `midTermFeeBP` / `penaltyfeeBP` 等**协议费**仍按 PRD 既有流向表处理（留池或记入 `unclaimedFeesB`），与 FOT 链上转账税无关。
+> **非 FOT 费用**：Pool B 的 `withdrawFeeBP` / `midTermFeeBP` / `penaltyFeeBP` 等**协议费**仍按 PRD 既有流向表处理（留池或记入 `unclaimedFeesB`），与 FOT 链上转账税无关。
 
 ---
 
@@ -759,7 +759,7 @@ _forfeitRewards(Pool.B, user); // 同步pending/booked/badDebt及有支持的bud
 // 步骤 3：奖励核销只作内部转桶，不对外转账；不能将全部rB无条件转预算。
 
 // 步骤 4：罚金计算与路由（留在合约，不对外转账）
-uint256 penalty = amount * penaltyfeeBP / BASIS_POINTS;
+uint256 penalty = amount * penaltyFeeBP / BASIS_POINTS;
 availableRewardsB += penalty;
 
 // 步骤 4b：罚金/没收回流均不重排；新排期只能由§4.5治理入口建立。
@@ -917,9 +917,9 @@ emit EmergencyWithdrawn(user, principal, forfeited, Pool.A, block.timestamp);
 
 | 场景 | Token 类型 | 费率 | 罚金/费用去向 |
 | --- | --- | --- | --- |
-| WithdrawA（正常） | TokenA | **0**（无锁、无本金费） | 本金全额转回用户；**无** `penaltyfeeBP` / `withdrawFeeBP` 分支 |
+| WithdrawA（正常） | TokenA | **0**（无锁、无本金费） | 本金全额转回用户；**无** `penaltyFeeBP` / `withdrawFeeBP` 分支 |
 | EmergencyWithdrawA/B | TokenB（已确权未领奖励部分） | 按§5.3.2统一核销 | 先抵对应badDebt、再吸收既存物理缺口，仅有支持余款记入 **`availableRewardsB`** |
-| WithdrawB (本金罚金) | TokenB | `penaltyfeeBP` | **`availableRewardsB`** (留在合约) |
+| WithdrawB (本金罚金) | TokenB | `penaltyFeeBP` | **`availableRewardsB`** (留在合约) |
 | WithdrawB (没收奖励) | TokenB | 全部没收 | 按统一助手先核销债务/吸收缺口，仅有支持余款进入 **`availableRewardsB`** |
 | Mature Withdraw（仅 B） | TokenB | `withdrawFeeBP` / `midTermFeeBP` / 0（按持仓阶梯） | **`unclaimedFeesB`** (留存在合约，待提取) |
 
@@ -969,7 +969,7 @@ emit RewardFunded(Pool.X, payer, amount, actualAmount);
 
 **治理开启、重排与取消周期（≥48h Timelock）**
 
-`scheduleRewardsA/B(duration)`仅由治理执行，Normal/Paused可用，Emergency/Shutdown禁止。先完整结算两池旧周期；要求两池badDebt清零、B物理覆盖正常。若`duration==0`使用已配置默认`rewardDurationX`，默认0则回滚；有效时长须在`[MIN_REWARD_RATE_DURATION,MAX_DURATION]`。
+`scheduleRewardsA/B(duration)`仅由治理执行，Normal/Paused可用，Emergency/Shutdown禁止。先完整结算两池旧周期；要求两池badDebt清零、B物理覆盖正常。若`duration==0`使用已配置默认`rewardDurationX`，默认0则回滚；有效时长须在`[MIN_REWARD_DURATION,MAX_REWARD_DURATION]`。
 
 ```solidity
 uint256 T = _effectiveTime();
@@ -1000,7 +1000,7 @@ emit RewardScheduled(Pool.X, effectiveDuration, newRate, T, periodFinishX);
 * `claimFees()`: Admin提取`unclaimedFeesB`；先完整结算两池并要求无badDebt、物理覆盖正常，清零费用后经§4.6统一出账，保留全部本金、pending、available和dust。
 * `setTVLCapX(uint256 cap)`: 触发 `TVLCapUpdated`。
 * `setMinStakeAmountX(uint256 amt)`: 触发 `MinStakeAmountUpdated`。
-* `setRewardDurationA(uint256 duration)` / `setRewardDurationB(uint256 duration)`：`duration == 0` 清除默认；否则须在 `[MIN_REWARD_RATE_DURATION, MAX_DURATION]`；仅供治理`scheduleRewards*(0)`使用；触发 `RewardDurationUpdated`。
+* `setRewardDurationA(uint256 duration)` / `setRewardDurationB(uint256 duration)`：`duration == 0` 清除默认；否则须在 `[MIN_REWARD_DURATION, MAX_REWARD_DURATION]`；仅供治理`scheduleRewards*(0)`使用；触发 `RewardDurationUpdated`。
 * `setMinClaimAmount(uint256 newAmount)`  
   - Admin Only；**≥48h** 由 Timelock 调度落实  
   - `require(newAmount <= MAX_MIN_CLAIM_AMOUNT)`  
@@ -1363,7 +1363,7 @@ error RewardIndexCapacityExceeded();
 | **奖励预算不足** | 完整排放进入用户指数与保守pending，未出资部分记badDebt并告警；不得同时截断用户债权、又把短缺称为已确权坏账。 |
 | **Bad Debt 期间复投** | 完整catch-up后检查两池badDebt，涵盖本次新增短缺，再决定能否将奖励转为本金。 |
 | **僵尸粉尘死锁** | Shutdown满365天且无本金时可finalize；满1095天可放宽无本金条件，但必须保留本金与全部保留pending的真实资金，只扫min(bookResidual,balance−protected)，不能以超时剥夺用户债权。 |
-| **防零罚金漏洞** | 若设置了 `penaltyfeeBP`（**仅 Pool B** Early Exit），则 `minEarlyExitAmountB` 必须满足计算出的罚金 $\ge 1 \text{ wei}$，防止利用整除截断零成本逃逸。 |
+| **防零罚金漏洞** | 若设置了 `penaltyFeeBP`（**仅 Pool B** Early Exit），则 `minEarlyExitAmountB` 必须满足计算出的罚金 $\ge 1 \text{ wei}$，防止利用整除截断零成本逃逸。 |
 | **ERC777 绕过 CEI** | 不接受回调型资产；ERC1820对Core/Token的探测仅辅助，不能证明没有用户账户hook。须审核实际transfer行为并保留共享重入锁，不使用EOA限制误杀多签/AA。 |
 
 ---
@@ -1384,8 +1384,8 @@ error RewardIndexCapacityExceeded();
 | **停机 orphan** | $orphan_X=totalPending_X-bookedUserRewards_X$；无剩余质押 finalize 后 $totalPending_X \leftarrow bookedUserRewards_X$；deadlock bypass 仍有质押时不裁剪 $totalPending_X$ |
 | **实际停机清扫上限** | sweep=min(bookResidual,balanceB−protectedB)，先require balanceB≥protectedB；protectedB=本金B+保留pendingA+保留pendingB。 |
 | **部分领取** | 现金=max(balanceB−本金B−费用−available总额−dust总额,0)；逐池实付≤pendingX−badDebtX；只核销实付，未付保留。 |
-| **Early Exit 罚金（Pool B）** | $Penalty=\frac{Amount \times penaltyfeeBP}{10000}$ |
-| **minEarlyExit 约束** (防零，Pool B) | penaltyfeeBP>0时minEarlyExitAmountB≥ceilDiv(BASIS_POINTS,penaltyfeeBP)；为0时不得执行除法，改罚金须联动校验。 |
+| **Early Exit 罚金（Pool B）** | $Penalty=\frac{Amount \times penaltyFeeBP}{10000}$ |
+| **minEarlyExit 约束** (防零，Pool B) | penaltyFeeBP>0时minEarlyExitAmountB≥ceilDiv(BASIS_POINTS,penaltyFeeBP)；为0时不得执行除法，改罚金须联动校验。 |
 | **TokenB不变量** | BalanceB+BadDebtA+BadDebtB≥本金B+pending总额+available总额+费用+粉尘；容忍值仅诊断，付款、recover和finalize不得据此少留用户资金。 |
 | **pending与dust** | Q=REWARD_PRECISION，0<S≤Q时q=floor(DQ/S)，ceil(Sq/Q)=D；足额pending加D、预算减D，不新增dust；不足时仍pending加完整D、badDebt加缺款。 |
 | **奖励分片误差界** | 每正时间分片的指数阶段少分配<1 weiB，N片累计<N weiB；用户每次settle另有<1 weiB向下取整。不承诺微额奖励零相对误差。 |

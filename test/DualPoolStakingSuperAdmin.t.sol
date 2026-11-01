@@ -3,13 +3,13 @@ pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
 
-import {DualPoolSuperAdmin} from "../src/DualPoolSuperAdmin.sol";
+import {DualPoolStakingSuperAdmin} from "../src/DualPoolStakingSuperAdmin.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 
 /// @notice Tests for DualPoolSuperAdmin.
 /// @dev Each `test*` function runs independently after a fresh `setUp()`.
 contract DualPoolSuperAdminTest is Test {
-    DualPoolSuperAdmin internal admin;
+    DualPoolStakingSuperAdmin internal admin;
 
     address internal deployer = makeAddr("deployer");
     address internal initialOwner = makeAddr("initialOwner");
@@ -18,7 +18,7 @@ contract DualPoolSuperAdminTest is Test {
 
     function setUp() public {
         vm.startPrank(deployer);
-        admin = new DualPoolSuperAdmin(initialOwner);
+        admin = new DualPoolStakingSuperAdmin(initialOwner);
         vm.stopPrank();
     }
 
@@ -100,7 +100,7 @@ contract DualPoolSuperAdminTest is Test {
 
     function testSetAdminRevertWhenZeroAddress() public {
         vm.startPrank(deployer);
-        vm.expectRevert(DualPoolSuperAdmin.ZeroAddress.selector);
+        vm.expectRevert(DualPoolStakingSuperAdmin.ZeroAddress.selector);
         admin.setAdmin(address(0), true);
         vm.stopPrank();
     }
@@ -155,7 +155,7 @@ contract DualPoolSuperAdminTest is Test {
 
     function testSetOperatorRevertWhenZeroAddress() public {
         vm.startPrank(deployer);
-        vm.expectRevert(DualPoolSuperAdmin.ZeroAddress.selector);
+        vm.expectRevert(DualPoolStakingSuperAdmin.ZeroAddress.selector);
         admin.setOperator(address(0), true);
         vm.stopPrank();
     }
@@ -195,5 +195,118 @@ contract DualPoolSuperAdminTest is Test {
         vm.prank(caller);
         vm.expectRevert();
         admin.setOperator(bob, true);
+    }
+
+    function testTransferSuperAdminSelfTransferReverts() public {
+        vm.prank(deployer);
+        vm.expectRevert(DualPoolStakingSuperAdmin.SelfTransferForbidden.selector);
+        admin.transferSuperAdmin(deployer);
+    }
+
+    function testTransferOwnershipByDefaultAdminSucceeds() public {
+        assertEq(admin.owner(), initialOwner);
+        vm.prank(deployer);
+        admin.transferOwnership(deployer);
+        assertEq(admin.owner(), deployer);
+    }
+
+    function testRenounceForbidden() public {
+        bytes32 role = admin.ADMIN_ROLE();
+        vm.prank(deployer);
+        vm.expectRevert(abi.encodeWithSelector(DualPoolStakingSuperAdmin.RenounceForbidden.selector, role, deployer));
+        admin.renounceRole(role, deployer);
+
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(DualPoolStakingSuperAdmin.RenounceForbidden.selector, role, alice));
+        admin.renounceRole(role, alice);
+    }
+
+    function testRenounceOwnershipForbidden() public {
+        vm.prank(deployer);
+        vm.expectRevert(DualPoolStakingSuperAdmin.RenounceOwnershipForbidden.selector);
+        admin.renounceOwnership();
+    }
+
+    function testRoleUpdateForbidden() public {
+        bytes32 role = admin.ADMIN_ROLE();
+        vm.prank(deployer);
+        vm.expectRevert(abi.encodeWithSelector(DualPoolStakingSuperAdmin.RoleUpdateForbidden.selector, role, deployer));
+        admin.grantRole(role, deployer);
+
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(DualPoolStakingSuperAdmin.RoleUpdateForbidden.selector, role, alice));
+        admin.revokeRole(role, alice);
+    }
+
+    function testTransferOwnershipHappyPath() public {
+        vm.startPrank(deployer);
+        admin.transferOwnership(alice);
+        admin.setAdmin(bob, true);
+        assertEq(admin.owner(), alice);
+        vm.stopPrank();
+    }
+
+    function testTransferOwnershipZeroAddress() public {
+        vm.startPrank(deployer);
+        vm.expectRevert(DualPoolStakingSuperAdmin.ZeroAddress.selector);
+        admin.transferOwnership(address(0));
+        vm.stopPrank();
+    }
+
+    function testTransferOwnershipUnauthorizedAccount() public {
+        vm.startPrank(alice);
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, alice, bytes32(0))
+        );
+        admin.transferOwnership(bob);
+        vm.stopPrank();
+    }
+
+    function testTransferSuperAdminHappyPath() public {
+        vm.prank(deployer);
+        admin.setOperator(bob, true);
+        assertTrue(admin.hasRole(admin.OPERATOR_ROLE(), bob));
+
+        vm.prank(deployer);
+        admin.transferSuperAdmin(alice);
+
+        assertTrue(admin.hasRole(admin.DEFAULT_ADMIN_ROLE(), alice));
+        assertEq(admin.owner(), alice);
+
+        assertFalse(admin.hasRole(admin.DEFAULT_ADMIN_ROLE(), deployer));
+
+        assertTrue(admin.hasRole(admin.ADMIN_ROLE(), initialOwner));
+        assertTrue(admin.hasRole(admin.OPERATOR_ROLE(), bob));
+
+        vm.prank(alice);
+        admin.setAdmin(makeAddr("carol"), true);
+        assertTrue(admin.hasRole(admin.ADMIN_ROLE(), makeAddr("carol")));
+
+        vm.prank(deployer);
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, deployer, bytes32(0))
+        );
+        admin.setAdmin(makeAddr("momo"), true);
+    }
+
+    function testTransferSuperAdminZeroAddress() public {
+        vm.prank(deployer);
+        vm.expectRevert(DualPoolStakingSuperAdmin.ZeroAddress.selector);
+        admin.transferSuperAdmin(address(0));
+    }
+
+    function testTransferSuperAdminUnauthorizedAccount() public {
+        vm.prank(alice);
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, alice, bytes32(0))
+        );
+        admin.transferSuperAdmin(bob);
+    }
+
+    function testTransferSuperAdminEmitsEvent() public {
+        vm.prank(deployer);
+        vm.expectEmit(true, true, true, true);
+        emit DualPoolStakingSuperAdmin.SuperAdminTransferred(deployer, alice);
+        admin.transferSuperAdmin(alice);
     }
 }

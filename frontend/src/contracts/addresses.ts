@@ -133,3 +133,16 @@ export const superAdminAddresses = {
 export function isSuperAdminConfigured(): boolean {
   return superAdminAddresses.superAdmin !== ZERO;
 }
+
+/**
+ * SuperAdmin 合约的部署块号（仅 env，无默认值）。
+ * 索引 RoleGranted/RoleRevoked 事件时用作 `fromBlock`。
+ * 未配置时返回 undefined，indexer 会按链默认值回退（Sepolia 回 0）。
+ */
+export function getSuperAdminDeployBlock(chainId: number): bigint {
+  const raw = process.env.NEXT_PUBLIC_SUPER_ADMIN_DEPLOY_BLOCK;
+  if (raw && /^\d+$/.test(raw.trim())) return BigInt(raw.trim());
+  // 本地部署链：通常区块数少，从 0 扫描；Sepolia / mainnet 没有默认部署，只能靠 env 配置
+  if (chainId === 31337) return 0n;
+  return 0n;
+}
