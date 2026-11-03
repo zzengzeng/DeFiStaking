@@ -67,7 +67,13 @@
 2. **治理门面**：`DualPoolStakingAdmin` 以不可变 `timelockGovernance` / `timelockSuper` 鉴权；构造参数为 `(coreAddress, timelockGovernance, timelockSuper)`。Core将 `ADMIN_ROLE`、`DEFAULT_ADMIN_ROLE` 与Ownable owner交给该门面。常规setter路径为48h锁 → `onlyGovernanceTimelock` wrapper → Core `onlyRole(ADMIN_ROLE)`；模块/角色等超级入口必须经72h锁 → `onlySuperTimelock` wrapper → Core超级权限。
 3. **运维与 0h 路径**：`pause`、`enableEmergencyMode`、纯注资 `fundRewardsA/B` 保留在 **Core** 上且为 **`OPERATOR_ROLE`**，由独立热钱包/运维多签持有。旧 `notifyRewardAmount*(amount,duration)` 如保留，只接受 `duration == 0` 并转至相同fund路径；非零duration回滚。开启、取消、重排和过期重锚另走48h治理，不可在注资后由stake/compound等入口自动完成。
 4. **治理时间锁与信任边界**：继续使用标准OpenZeppelin **`TimelockController`**（`schedule` → 延迟 → `execute` / `cancel`）。标准锁允许经其自身治理调用 `updateDelay`，因此48h/72h是部署与运行治理约束，并非标准合约不可降低的永久硬下限；不引入定制锁。审计与运维同时核对 `CallScheduled` / `CallExecuted` / `Cancelled` / `MinDelayChange` 和角色变化。Super经延迟替换模块仍有接管协议的能力，属于升级架构的信任边界。
-5. **继承入口不得形成旁路**：`ADMIN_ROLE` 和 `OPERATOR_ROLE` 均由 `DEFAULT_ADMIN_ROLE` 管理。Core继承的 `grantRole` / `revokeRole` / `renounceRole`、`transferOwnership` / `renounceOwnership` 必须覆盖共享重入锁与权限约束，不能经48h常规wrapper绕过72h超级路径；不得直接放弃最后治理控制权。治理门面不提供通用任意调用wrapper。部署者完成模块、参数和角色交接后撤销临时权限。
+5. **继承入口不得形成旁路**：`ADMIN_ROLE` 和 `OPERATOR_ROLE` 均由 `DEFAULT_ADMIN_ROLE` 管理（`_setRoleAdmin(ADMIN_ROLE, DEFAULT_ADMIN_ROLE)`、`_setRoleAdmin(OPERATOR_ROLE, DEFAULT_ADMIN_ROLE)`）。Core 必须覆盖全部继承入口：
+   * `grantRole` / `revokeRole`：直接 revert，强制角色变更走 `setAdmin` / `setOperator`，保证每次变更都有专用事件可索引。
+   * `renounceRole`：直接 revert，防止超管或管理员单方面放弃角色。
+   * `renounceOwnership`：直接 revert，owner 身份不得烧毁。
+   * `transferOwnership`：仅 `DEFAULT_ADMIN_ROLE` 可调用，并调用内部 `_transferOwnership`，避免父合约 `onlyOwner` 被重复检查。
+   * `transferSuperAdmin(address)`：新增函数，原子完成 `DEFAULT_ADMIN_ROLE` 与 `Ownable` owner 的交接；拒绝零地址与自转让；不迁移 `ADMIN_ROLE` / `OPERATOR_ROLE` 持有者。
+   以上覆盖入口必须共享重入锁，不能经 48h 常规 wrapper 绕过 72h 超级路径；不得直接放弃最后治理控制权。治理门面不提供通用任意调用 wrapper。部署者完成模块、参数和角色交接后撤销临时权限。
 
 > **关键操作 Timelock 要求（与上表一致，延迟在 Timelock 层落实）**
 > * **0h (立即生效)**：`pause()`、`enableEmergencyMode()`、`fundRewardsA/B`及兼容的 `notifyRewardAmount*(amount, 0)`；注资不代表奖励周期开始。
@@ -226,10 +232,10 @@ enum Pool { A, B } // 使用 enum 替代 string 节省 Gas
 
 **核心布尔状态及全局控制变量声明**
 
-下列名称表达逻辑状态；Core已继承Pausable时沿用 `paused()`，不得重复声明同名字段。文中的 `shutdownMode` 对应现有Core的 `shutdown` 状态/getter，实际激活入口为 `activateShutdown()`，不能与 `shutdown()` getter混淆。
+下列名称表达逻辑状态；Core 继承 `Pausable` 时必须沿用 `paused()`，不得重复声明同名字段。`shutdownMode` 表示停机状态，实际激活入口为 `activateShutdown()`。
 
 ```solidity
-bool public paused;                // 暂停标志，可经冷却后 unpause
+// paused / paused() 复用 OpenZeppelin Pausable 的存储与 getter，不得重复声明
 bool public emergencyMode;         // 紧急模式标志，单向不可逆
 bool public shutdownMode;          // 停机模式标志，单向不可逆
 uint256 public pausedAt;           // 最近一次 pause 时间戳
@@ -241,6 +247,8 @@ uint256 public badDebtB;           // Pool B 坏账缺口
 uint256 public minClaimAmount;        // 合约初始值为 0（无门槛）；Admin 须在部署后尽早通过 setMinClaimAmount 设置（建议 ≥1e15 wei），上限 MAX_MIN_CLAIM_AMOUNT（1e17 wei）
 
 ```
+
+> **实现形态**：`badDebtA/B` 可并入 `PoolInfo.badDebt`（每池一个），避免与结构体字段重复；`paused` 复用 `Pausable`；`minClaimAmount` / `feeRecipient` 等为全局参数。
 
 统一奖励时钟：Emergency或Shutdown使用 `terminalRewardTime`；否则Paused使用 `pausedAt`，Normal使用真实 `block.timestamp`。Emergency从Paused进入时冻结于 `pausedAt`，否则冻结于激活时；锁仓、WADP、冷却、Timelock和清算宽限仍使用真实时间。
 
@@ -259,6 +267,8 @@ uint256 public minClaimAmount;        // 合约初始值为 0（无门槛）；A
 | `dustA / dustB` | uint256 | 经对账确认的既有残值桶；本版合法计提不再逐片新增dust，不得从未出资奖励生成此项 | weiB |
 | `rewardDurationA / B`（`PoolInfo.rewardDuration`） | uint256 | 各池默认排放时长（秒）；仅供48h治理 `scheduleRewards*(0)` 使用；`0` 表示未设默认，治理须传显式duration或先设置默认；Operator注资不使用此值 | seconds |
 | `bookedUserRewardsA / B` | uint256 | 链上汇总：该池所有 `userInfo*.rewards` 之和；在 settle / claim / compound / forfeit / emergency 路径增减；用于停机清算 | weiB |
+
+> **实现形态（允许但需固定）**：上述 per-pool 字段可用单个 `PoolInfo` struct 或独立全局变量实现。若采用 struct，必须把 `bookedUserRewards` 一并纳入（现有 `StakeTypes.PoolInfo` 尚未包含该字段），且字段顺序在首次部署后不可变更（delegatecall 模块与 Core 共享槽位）。对外 getter 形状须固定：`PoolInfo public poolA` 自动生成的 getter 返回整条字段元组，**不能按字段单独调用 `poolA.tvlCap()`**；若希望 ABI 与 PRD 名称一致（如 `maxTVLCapA()` / `totalStakedA()`），必须额外编写显式 view getter。两种方式的 ABI 须在部署清单中固定并同步前端/索引器。
 
 > **`bookedUserRewards` 与 `totalPending`**
 > * `totalPendingX`：池级已排放未兑付奖励的**保守预留**（主要由 `_updateGlobalX` 增加），不要求精确等于当前所有 `rewards` 字段之和。必须覆盖已记账奖励和未 settle 但用户已可结算的奖励；仍有本金时不得按 `booked` 裁剪预留。
@@ -287,6 +297,8 @@ uint256 public minClaimAmount;        // 合约初始值为 0（无门槛）；A
 > $$T_{new} = \left\lceil\frac{(Staked_{old} \times T_{old}) + (Amount_{new} \times Now)}{Staked_{old} + Amount_{new}}\right\rceil$$
 > 
 > 实现见 **`PoolBWadpLib`**（OpenZeppelin `Math.Rounding.Ceil`），详见 **§4.4**。
+
+> **实现形态（允许但需固定）**：`userStakedA/B`、`rewardsA/B`、`userRewardPaidA/B` 可用 `UserInfo` struct（`staked` / `rewards` / `rewardPaid`）聚合到 `userInfoA` / `userInfoB` 映射中；字段顺序同样在首次部署后冻结。
 
 ### 3.4 费率与边界配置
 
@@ -998,7 +1010,7 @@ emit RewardScheduled(Pool.X, effectiveDuration, newRate, T, periodFinishX);
 
 * `rebalanceBudgets(Pool from, Pool to, uint256 amt)`: 两池先完整结算到同一个 `effectiveTime`，再检查 `badDebtA == 0 && badDebtB == 0`。不得搬走源池维持既有排期所需的预算；调拨后的两池均须满足 §4.5 排期预算约束。只减源available、加目标available，不调用任何隐式重锚；目标后续排期另走≥48h治理入口。暂停内治理调拨使用`pausedAt`；允许先在同一治理batch取消源排期再搬走其未来预算，触发`BudgetRebalanced`。
 * `claimFees()`: Admin提取`unclaimedFeesB`；先完整结算两池并要求无badDebt、物理覆盖正常，清零费用后经§4.6统一出账，保留全部本金、pending、available和dust。
-* `setTVLCapX(uint256 cap)`: 触发 `TVLCapUpdated`。
+* `setMaxTVLCapX(uint256 cap)`: 触发 `MaxTVLCapUpdated`。
 * `setMinStakeAmountX(uint256 amt)`: 触发 `MinStakeAmountUpdated`。
 * `setRewardDurationA(uint256 duration)` / `setRewardDurationB(uint256 duration)`：`duration == 0` 清除默认；否则须在 `[MIN_REWARD_DURATION, MAX_REWARD_DURATION]`；仅供治理`scheduleRewards*(0)`使用；触发 `RewardDurationUpdated`。
 * `setMinClaimAmount(uint256 newAmount)`  
@@ -1176,6 +1188,8 @@ function forceShutdownFinalize() external onlyAdmin nonReentrant {
 
 生产资金路径固定为：**持币的48h Timelock授权Core → Timelock经门面调用 → Core从该真实payer单跳拉款**。门面只暴露 `resolveBadDebt(amount)`，内部固定payer为该门面对应的48h Timelock；Core若保留 `resolveBadDebt(address payer, uint256 amount)`，必须从持ADMIN_ROLE的调用门面取得其immutable `timelockGovernance()`绑定并校验payer一致，禁止调用者任填已给Core授权的用户。门面源码、地址及角色必须按治理配置审核。
 
+门面必须以 `public immutable address timelockGovernance` 暴露该 getter；Core 的 `onlyAdmin`（`onlyRole(ADMIN_ROLE)`）保证 `msg.sender` 为审核过的门面。
+
 ```solidity
 // Core语义；门面内部固定传入其48h Timelock，不从门面中转Token。
 function resolveBadDebt(address payer, uint256 amount) external onlyAdmin nonReentrant {
@@ -1277,6 +1291,9 @@ event PoolCatchUpCranked(Pool indexed pool, uint256 lastUpdateTime, bool complet
 event BudgetRebalanced(Pool indexed from, Pool indexed to, uint256 amount, uint256 at);
 event Paused(address indexed by, uint256 at);
 event Unpaused(address indexed by, uint256 at);
+event UserModuleUpdated(address indexed oldModule, address indexed newModule, uint256 at);
+event AdminModuleUpdated(address indexed oldModule, address indexed newModule, uint256 at);
+event SuperAdminTransferred(address indexed oldSuperAdmin, address indexed newSuperAdmin, uint256 at);
 event EmergencyModeActivated(address indexed by, uint256 at);
 event ShutdownActivated(address indexed by, uint256 at); 
 event ProtocolShutdownComplete(uint256 at);
@@ -1293,7 +1310,7 @@ event FeeRecipientUpdated(address indexed oldAddr, address indexed newAddr, uint
 event FeesUpdated(uint256 penaltyBP, uint256 withdrawBP, uint256 midTermBP, uint256 at);
 event LockDurationUpdated(uint256 oldDuration, uint256 newDuration, uint256 at);
 event MinClaimAmountUpdated(uint256 oldVal, uint256 newVal, uint256 at); 
-event TVLCapUpdated(Pool indexed pool, uint256 oldCap, uint256 newCap, uint256 at);
+event MaxTVLCapUpdated(Pool indexed pool, uint256 oldCap, uint256 newCap, uint256 at);
 event MinStakeAmountUpdated(Pool indexed pool, uint256 oldAmount, uint256 newAmount, uint256 at);
 event RewardDurationUpdated(Pool indexed pool, uint256 oldDuration, uint256 newDuration, uint256 at);
 
@@ -1305,7 +1322,7 @@ event RewardDurationUpdated(Pool indexed pool, uint256 oldDuration, uint256 newD
 
 `DustAccumulated`保留历史ABI；本版合法计提的dustDelta为0，不为正常计提发出粉尘新增事件，也不能为了使用旧事件而恢复逐片回收奖励余数。
 
-`OutboundTransfer(address token,address to,uint256 grossAmount,uint256 netReceived)`沿用`FOTTransferLib`事件并纳入调用日志索引；`FeesClaimed`、`UserModuleUpdated`、`AdminModuleUpdated`及AccessControl角色事件沿用既有ABI。最小提前退出额、最大转账损耗等setter也须记录新旧值，不能只改状态而无可索引记录。
+`OutboundTransfer(address token,address to,uint256 grossAmount,uint256 netReceived)`沿用`FOTTransferLib`事件并纳入调用日志索引；`UserModuleUpdated`、`AdminModuleUpdated`、`SuperAdminTransferred` 及 AccessControl 角色事件沿用/新增既有风格 ABI。**`FeesClaimed` 的完整签名仍待核对既有 ABI，定稿前不得视为冻结；至少须记录 `(address indexed recipient, uint256 amount, uint256 at)` 三项信息。** 最小提前退出额、最大转账损耗等setter也须记录新旧值，不能只改状态而无可索引记录。
 
 **`EmergencyWithdrawn` 字段说明**：`principal` 为退回的本金（A 池为 TokenA wei，B 池为 TokenB wei）；`rewardsForfeited` 为该池上紧急退出前用户已计提、本次被清零的奖励（`userInfo*.rewards` 快照，A/B 均为对应池奖励代币 wei），供链下监控统计没收量。
 
@@ -1342,7 +1359,16 @@ error RewardIndexCapacityExceeded();
 
 ```
 
-> **部署角色交接（`script/DualPoolStaking.s.sol`）**：部署后将 `ADMIN_ROLE`、`DEFAULT_ADMIN_ROLE` 与Core `owner`交接到已审核治理门面并从deployer撤销；Timelock proposer/executor及 `OPERATOR_ROLE` 从环境变量显式配置。生产部署必须设置 `PRODUCTION=true`，强制治理/运维地址非零且不等于deployer；`feeRecipient`须显式等于清单国库，不默认保留部署钱包。部署脚本须断言最终角色图、48h/超级治理延迟、模块地址和国库，不能只打印配置。
+> **部署角色交接（Core + 模块 + 门面）**：标准顺序为
+> 1. 部署 48h / 72h 两个 `TimelockController`，配置 proposer / executor / canceller，`minDelay` 分别为 ≥48h / ≥72h。
+> 2. 部署 `DualPoolUserModule` 与 `DualPoolAdminModule`。
+> 3. 部署 `DualPoolStaking`（deployer 在构造时仅获得 `DEFAULT_ADMIN_ROLE`，不直接获得 `ADMIN_ROLE` / `OPERATOR_ROLE`）。
+> 4. 部署 `DualPoolStakingAdmin(core, timelockGovernance, timelockSuper)`。
+> 5. deployer 调用 `setUserModule` / `setAdminModule` / `setAdmin(facade, true)` / `setOperator(ops, true)`。
+> 6. deployer 调用 `transferSuperAdmin(facade)`，原子交接 `DEFAULT_ADMIN_ROLE` 与 `Ownable owner`；此后 deployer 不再持有任何角色。
+> 7. 参数（含 `feeRecipient`）一律经 48h Timelock → 门面 → Core 设置，不得在部署脚本里直接调用 Core 的 setter 绕过 Timelock。
+>
+> 生产部署必须显式配置治理/运维地址（非零且不等于 deployer），`feeRecipient` 必须显式等于清单国库，不默认保留部署钱包。部署脚本须断言最终角色图（deployer 无角色、门面持有 `ADMIN_ROLE` / `DEFAULT_ADMIN_ROLE` / owner、ops 持有 `OPERATOR_ROLE`）、48h/72h 延迟、两个模块地址和国库，不能只打印配置。旧 `PRODUCTION=true` 开关如保留，仅作为额外的环境检查，不作为角色交接的依据。
 
 ---
 
