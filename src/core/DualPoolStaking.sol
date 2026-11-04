@@ -9,6 +9,7 @@ import {DualPoolRoles} from "./DualPoolRoles.sol";
 import {Pool, PoolInfo} from "../StakeTypes.sol";
 
 import {IDualPoolAdminModule} from "../interfaces/IDualPoolAdminModule.sol";
+import {DualPoolUserModule} from "../core/DualPoolUserModule.sol";
 
 contract DualPoolStaking is DualPoolRoles {
     using Address for address;

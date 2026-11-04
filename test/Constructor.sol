@@ -9,7 +9,7 @@ import {DualPoolStaking} from "../src/core/DualPoolStaking.sol";
 import {Pool} from "../src/StakeTypes.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
-contract TestConstructor is BaseTest {
+contract ConstructorTest is BaseTest {
     function testConstructorRolesAndOwner() public {
         vm.startPrank(deployer);
         assertTrue(core.hasRole(core.DEFAULT_ADMIN_ROLE(), deployer));
@@ -51,20 +51,20 @@ contract TestConstructor is BaseTest {
         new DualPoolStaking(address(tokenA), address(tokenB), MIN_CAP_FOR_NONZERO_RATE - 1);
     }
 
-    function testConstructorBindsTokens() public view{
+    function testConstructorBindsTokens() public view {
         assertEq(address(core.getPool(Pool.A).stakingToken), address(tokenA));
         assertEq(address(core.getPool(Pool.B).stakingToken), address(tokenB));
         assertEq(address(core.rewardTokenB()), address(tokenB));
     }
 
-    function testConstructorDerivesRateCap() public view{
+    function testConstructorDerivesRateCap() public view {
         assertEq(core.maxTotalSupplyBForRewardRateCap(), CAP);
         uint256 maxRate = Math.mulDiv(CAP, MAX_APR_BP, BASIS_POINTS * SECONDS_PER_YEAR);
         assertEq(core.maxRewardRateA(), maxRate);
         assertEq(core.maxRewardRateB(), maxRate);
     }
 
-    function testConstructorDefaults() public view{
+    function testConstructorDefaults() public view {
         assertEq(core.lockDuration(), 7 days);
         assertEq(core.penaltyFeeBP(), 1000);
         assertEq(core.withdrawFeeBP(), 100);
