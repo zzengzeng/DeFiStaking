@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
@@ -13,9 +15,12 @@ import {DualPoolUserModule} from "../core/DualPoolUserModule.sol";
 
 contract DualPoolStaking is DualPoolRoles {
     using Address for address;
+    using SafeERC20 for IERC20;
 
     address public adminModule;
     address public userModule;
+
+    error ZeroAmount();
 
     error SameToken();
     error NotAContract();
@@ -26,10 +31,19 @@ contract DualPoolStaking is DualPoolRoles {
     error ModuleNotSet();
     error ModuleNotContract();
 
+    error ContractPaused();
+    error WrongState();
+    error AlreadyEmergencyMode();
+    error PayerDeductionMismatch();
+    error ReceivedExceedsAmount();
+    error FeeExceedsCap();
+
     event AdminModuleUpdated(address indexed oldAdminModule, address indexed newAdminModule, uint256 currentTime);
     event UserModuleUpdated(address indexed oldUserModule, address indexed newUserModule, uint256 currentTime);
+    event EmergencyModeActivated(address sender, uint256 currentTime);
+    event RewardsFunded(Pool indexed pool, address sender, uint256 amount, uint256 received, uint256 currentTime);
 
-    constructor(address _tokenA, address _tokenB, uint256 _cap) {
+    constructor(address _tokenA, address _tokenB, uint256 _cap, uint256 unpause_cooldown) {
         if (_tokenA == address(0) || _tokenB == address(0)) revert ZeroAddress();
         if (_tokenA == _tokenB) revert SameToken();
         if (_tokenA.code.length == 0 || _tokenB.code.length == 0) revert NotAContract();
@@ -45,6 +59,8 @@ contract DualPoolStaking is DualPoolRoles {
         if (rate == 0) revert RateTooSmall();
         maxRewardRateA = rate;
         maxRewardRateB = rate;
+
+        UNPAUSE_COOLDOWN = unpause_cooldown;
 
         lockDuration = 7 days;
         penaltyFeeBP = 1000;
@@ -120,5 +136,69 @@ contract DualPoolStaking is DualPoolRoles {
 
     function getPool(Pool pool) external view returns (PoolInfo memory) {
         return pool == Pool.A ? poolA : poolB;
+    }
+
+    function pause() external onlyRole(OPERATOR_ROLE) nonReentrant {
+        if (emergencyMode || shutdownMode) revert WrongState();
+        if (paused()) revert ContractPaused();
+
+        _pause();
+
+        pausedAt = block.timestamp;
+        unpauseAt = block.timestamp + UNPAUSE_COOLDOWN;
+    }
+
+    function enableEmergencyMode() external onlyRole(OPERATOR_ROLE) nonReentrant {
+        if (emergencyMode) revert AlreadyEmergencyMode();
+        if (shutdownMode) revert WrongState();
+
+        if (!paused()) {
+            _pause();
+            pausedAt = block.timestamp;
+        }
+
+        emergencyMode = true;
+        terminalRewardTime = pausedAt;
+
+        emit EmergencyModeActivated(msg.sender, block.timestamp);
+    }
+
+    function _pool(Pool pool) internal view returns (PoolInfo storage) {
+        return pool == Pool.A ? poolA : poolB;
+    }
+
+    function fundRewards(Pool pool, uint256 amount) external onlyRole(OPERATOR_ROLE) nonReentrant {
+        if (paused() || emergencyMode || shutdownMode) revert WrongState();
+        if (amount == 0) revert ZeroAmount();
+
+        IERC20 token = rewardTokenB;
+        uint256 payerBefore = token.balanceOf(msg.sender);
+        uint256 coreBefore = token.balanceOf(address(this));
+
+        token.safeTransferFrom(msg.sender, address(this), amount);
+
+        uint256 payerAfter = token.balanceOf(msg.sender);
+        uint256 coreAfter = token.balanceOf(address(this));
+
+        uint256 payerDeducted = payerBefore - payerAfter;
+        uint256 received = coreAfter - coreBefore;
+
+        if (payerDeducted != amount) {
+            revert PayerDeductionMismatch();
+        }
+
+        if (received > amount) {
+            revert ReceivedExceedsAmount();
+        }
+
+        if ((amount - received) * BASIS_POINTS > amount * maxTransferFeeBP) {
+            revert FeeExceedsCap();
+        }
+
+        PoolInfo storage p = _pool(pool);
+        uint256 old = p.availableRewards;
+        p.availableRewards = old + received;
+
+        emit RewardsFunded(pool, msg.sender, amount, received, block.timestamp);
     }
 }

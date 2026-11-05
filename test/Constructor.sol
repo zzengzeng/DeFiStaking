@@ -19,36 +19,36 @@ contract ConstructorTest is BaseTest {
 
     function testConstructorRevertsOnZeroToken() public {
         vm.expectRevert(DualPoolStorageLayout.ZeroAddress.selector);
-        new DualPoolStaking(address(0), address(tokenB), CAP);
+        new DualPoolStaking(address(0), address(tokenB), CAP, 24 hours);
 
         vm.expectRevert(DualPoolStorageLayout.ZeroAddress.selector);
-        new DualPoolStaking(address(tokenA), address(0), CAP);
+        new DualPoolStaking(address(tokenA), address(0), CAP, 24 hours);
     }
 
     function testConstructorRevertsOnSameToken() public {
         vm.expectRevert(DualPoolStaking.SameToken.selector);
-        new DualPoolStaking(address(tokenA), address(tokenA), CAP);
+        new DualPoolStaking(address(tokenA), address(tokenA), CAP, 24 hours);
     }
 
     function testConstructorRevertsOnTokenWithoutCode() public {
         vm.expectRevert(DualPoolStaking.NotAContract.selector);
-        new DualPoolStaking(address(0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266), address(tokenB), CAP);
+        new DualPoolStaking(address(0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266), address(tokenB), CAP, 24 hours);
     }
 
     function testConstructorRevertsOnTokenBWrongDecimals() public {
         tokenB = new MockERC20("TokenB", "TKB", BAD_DECIMALS);
         vm.expectRevert(DualPoolStaking.InvalidTokenDecimals.selector);
-        new DualPoolStaking(address(tokenA), address(tokenB), CAP);
+        new DualPoolStaking(address(tokenA), address(tokenB), CAP, 24 hours);
     }
 
     function testConstructorRevertsOnZeroCap() public {
         vm.expectRevert(DualPoolStaking.CapZero.selector);
-        new DualPoolStaking(address(tokenA), address(tokenB), 0);
+        new DualPoolStaking(address(tokenA), address(tokenB), 0, 24 hours);
     }
 
     function testConstructorRevertsWhenRateTooSmall() public {
         vm.expectRevert(DualPoolStaking.RateTooSmall.selector);
-        new DualPoolStaking(address(tokenA), address(tokenB), MIN_CAP_FOR_NONZERO_RATE - 1);
+        new DualPoolStaking(address(tokenA), address(tokenB), MIN_CAP_FOR_NONZERO_RATE - 1, 24 hours);
     }
 
     function testConstructorBindsTokens() public view {

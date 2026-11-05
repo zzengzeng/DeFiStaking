@@ -1,4 +1,11 @@
-# ERC20 (Staking) 协议需求规格说明书 v1.1
+# ERC20 (Staking) 协议需求规格说明书 v1.1.1
+
+> **v1.1.1 修订说明（2026-11-04）**
+>
+> - **§2.1**：明确 Operator 必须由多签合约持有（生产环境 ≥2-of-3），禁止单签热钱包
+> - **§7.3**：明确 `enableEmergencyMode` 入口下 `pausedAt` 的赋值语义 —— Normal → Emergency 同步写入 `block.timestamp`；Paused → Emergency 保持原 `pausedAt` 不变
+> - **§6.2**：明确本项目**不保留**旧 `notifyRewardAmountX(amount, duration)` 兼容入口，所有 Operator 注资统一走 `fundRewardsA/B`
+> - **§10.5**：新增生产部署安全检查清单（Operator/Admin/模块/参数/Token/监控/文档/验证）
 
 ## 1. 文档概览
 
@@ -58,7 +65,7 @@
 | --- | --- | --- | --- |
 | **Owner（`DEFAULT_ADMIN_ROLE`）** | 部署后交接至治理门面；Core的Ownable owner同样交接 | 模块指针（`setUserModule` / `setAdminModule`）、`setAdmin` / `setOperator` 等超级配置；DEFAULT_ADMIN_ROLE与Ownable owner不是同一种权限 | **≥72h**：由超级Timelock调用门面超级wrapper |
 | **Admin（`ADMIN_ROLE`）** | 授予治理门面；以不可变 `timelockGovernance` 鉴权常规调用 | 奖励排期/取消/过期重锚、风险参数、`recoverToken`、`rebalanceBudgets`、`unpause` 等 | **≥48h**：须由常规Timelock `schedule` → 到期 `execute` 再调用门面→Core |
-| **Operator（`OPERATOR_ROLE`）** | 经72h超级路径授予独立运维地址 | **`pause()`、`enableEmergencyMode()`、纯注资 `fundRewardsA/B`**；兼容 `notifyRewardAmount*(amount, 0)` 也只注资，不经治理门面 | **0h**（防御性/注资类）；不得指定新周期、重排旧预算或通过其他用户入口间接重排 |
+| **Operator（`OPERATOR_ROLE`）** | 经72h超级路径授予**多签合约（生产环境强制 ≥2-of-3）**；禁止单签热钱包 | **`pause()`、`enableEmergencyMode()`、纯注资 `fundRewardsA/B`**；纯注资不经治理门面 | **0h**（防御性/注资类）；不得指定新周期、重排旧预算或通过其他用户入口间接重排 |
 | **User** | 任意地址 | `stakeA`/`stakeB`、`withdrawA`/`withdrawB`、`claimA`/`claimB`、`compoundB`、`forceClaimAll`、`emergencyWithdrawA`/`emergencyWithdrawB` | — |
 
 #### 2.1.1 标准 Timelock 管 Admin（推荐主路径）
@@ -942,7 +949,7 @@ emit EmergencyWithdrawn(user, principal, forfeited, Pool.A, block.timestamp);
 
 **注资与排期分离（Operator / Timelock）**
 
-`fundRewardsA/B(amount)`由Operator执行，仅增加对应池预算，不开启、取消或重排周期。兼容旧`notifyRewardAmountX(amount,duration)`时，必须`duration==0`并仅转入fund路径；非零duration回滚。`setRewardDurationX`仅供治理`scheduleRewardsX(0)`读取，不再使旧notify具备排期权限。
+`fundRewardsA/B(amount)`由Operator执行，仅增加对应池预算，不开启、取消或重排周期。**本项目不保留旧 `notifyRewardAmountX(amount, duration)` 兼容入口**，所有 Operator 注资统一走 `fundRewardsA/B`，不再区分 `duration`。`setRewardDurationX`仅供治理`scheduleRewardsX(0)`读取，不再赋予任何旧 `notify` 入口以排期权限。
 
 纯注资的payer为Core识别的实际Operator调用者，不允许任填已授权的其他账户。
 
@@ -951,7 +958,6 @@ emit EmergencyWithdrawn(user, principal, forfeited, Pool.A, block.timestamp);
 ```solidity
 require(!paused && !emergencyMode && !shutdownMode, "WRONG_STATE"); // 保留原普通注资状态限制
 require(amount > 0, "ZERO_AMOUNT");
-// 兼容旧notify时另require(duration == 0, "SCHEDULING_REQUIRES_TIMELOCK")
 ```
 
 **执行步骤（防御 FOT 变种 CEI）**
@@ -1118,7 +1124,7 @@ function _restorePoolClock(PoolInfo storage pool, uint256 frozenAt, uint256 delt
 
 ### 7.3 EmergencyMode（单向不可逆）
 
-* **激活**：Operator权限，0h延迟立即生效（`enableEmergencyMode`）。**不可撤销**；激活前先从本地状态取 `cutoff = paused ? pausedAt : block.timestamp`，再写 `emergencyMode = true`、`terminalRewardTime = cutoff`。不依赖全局计提、Token余额查询或覆盖断言，已有账目/物理缺口不能阻止这个防御开关。
+* **激活**：Operator权限，0h延迟立即生效（`enableEmergencyMode`）。**不可撤销**；激活前先从本地状态取 `cutoff = paused ? pausedAt : block.timestamp`，再写 `emergencyMode = true`、`terminalRewardTime = cutoff`。若当前已暂停，保持原 `pausedAt` 不变；若当前未暂停，同步将 `pausedAt` 设为 `block.timestamp` 以保证状态可观测一致性（Emergency 路径的 `effectiveTime` 仍走 `terminalRewardTime`，此处仅为监控与可读性）。不依赖全局计提、Token余额查询或覆盖断言，已有账目/物理缺口不能阻止这个防御开关。
 * **奖励停止**：自激活起永久停止冻结点之后的新增排放、普通注资和排期；激活不改变用户份额。此前未结算区间仍须完整计提到 `min(terminalRewardTime, periodFinishX)`，再结算用户、减本金。不能先减份额再把旧收益分给剩余用户。公开crank在所有状态下可推进到各自有效上限。
 * **退出**：`emergencyWithdrawA/B` 使用 `require(emergencyMode && !shutdownMode)`，完全无视暂停；免锁、免协议费，明确放弃本池未领取奖励，按§5.5的负债安全规则核销。A紧急退出向B回流预算前须先完成两池旧区间计提；B紧急退出结算B。奖励账目缺口不应通过普通B不变量阻断已经满足本金保护的紧急返本，但不豁免本金足额覆盖、FOT检查及用户账本正确性。
 * **边界**：资产行为或历史账本损坏而无法完成计提/结算时，须另行修复或迁移，不承诺任意异常状态下无条件退出。A普通/Shutdown退本的独立性按§5.3执行；Emergency A仍有上述跨池计提依赖。
@@ -1432,7 +1438,7 @@ error RewardIndexCapacityExceeded();
 | --- | --- | --- |
 | **治理密钥安全** | Core的`DEFAULT_ADMIN_ROLE`与Ownable owner交接至治理门面；门面以不可变双Timelock鉴权，proposer/executor由已配置治理主体控制；模块替换、超级权限变更经≥72h超级路径。标准锁后续延迟变更的信任边界见§2.1.1。 | 可替换 delegatecall 模块或重配关键权限，等价于协议升级/接管风险。 |
 | **模块地址有效性** | `setUserModule` / `setAdminModule` 目标地址必须为已部署合约，并在上线记录中保存 bytecode hash、源码版本、部署交易。 | delegatecall 到错误模块会导致入口异常、交易空执行或状态破坏。 |
-| **Operator 热权限边界** | `OPERATOR_ROLE` 仅用于pause、enableEmergencyMode及fund（兼容notify仅注资）；不得同时持有Admin/Super权限，地址独立于治理门面；周期开启/取消/重排均≥48h。 | 热钱包被盗可暂停、进入紧急模式或注入异常奖励预算。 |
+| **Operator 多签安全与权限边界** | `OPERATOR_ROLE` 必须由多签合约持有（生产环境 ≥2-of-3，签名者地理与设备分散，硬件钱包存储）；`OPERATOR_ROLE` 仅用于pause、enableEmergencyMode及fund；不得同时持有Admin/Super权限，地址独立于治理门面；周期开启/取消/重排均≥48h。 | 多签被攻破（低概率）可暂停、进入紧急模式或注入异常奖励预算；缓解措施：多签阈值、签名者分散、硬件钱包、定期轮换、交易监控。 |
 | **TokenA/TokenB 类型限制** | TokenB必须18 decimals；不支持rebasing/reflection、发送方额外扣税、黑名单、恶意balanceOf、回调或可阻断转账资产；ERC1820探测不足以替代Token行为审查。 | 不变量、真实入账、奖励分配或退出路径可能失真或被阻断。 |
 | **奖励数值范围** | REWARD_PRECISION、原始总份额硬上限、整窗headroom及索引预览尺度须一起实现；原始单位上限按Token decimals换算披露，业务cap及复投豁免不能绕过。 | 只提高精度而无硬边界仍可能奖励归零；缺少容量检查可能在本金下降后溢出并阻断结算；旧尺度模块不能混用。 |
 | **FOT TokenB 出账税费由用户承担** | 前端与公告必须展示合约转出 gross、用户预计到手 net、最大税费保护 `maxTransferFeeBP`；链上账本按 gross 核销。 | 用户实际到账少于 claim/withdraw 账面金额，属于代币税费经济结果而非协议补贴项。 |
@@ -1500,3 +1506,71 @@ error RewardIndexCapacityExceeded();
 **本次集中收口状态：** 上述奖励会计、排期权限、暂停/终态、部分支付、没收核销、清扫保护、FOT及部署资金链已形成本文统一开发目标；**业务代码与测试仍待修复验收**，本次修订不代表实现通过。保留原有双池、模块化、FOT、BadDebt、WADP、锁仓及费用范围，未采用docs/v1的重写方案。现存代码、旧伪代码或历史审阅证据不能覆盖本次已修订条款。
 
 开发完成条件：实现与本轮规范一致，每项验收对应修复提交、测试名、运行配置及结果；原舍入、重锚、暂停注入及新增退出/资金安全回归通过；完整测试套件可编译且无失败，不能删除或skip失败回归充当通过；重新核验runtime/initcode大小、ABI与事件索引。独立整数模型可用于推导，但不能替代Solidity回归或真实治理调用链验证。本文收口不等于代码已修好、完成独立外审或满足生产发布条件。
+
+### 10.5 生产部署安全检查清单
+
+本节为生产环境上线前的强制检查项，任何一项不满足都视为上线阻断项。
+
+#### Operator 配置
+
+- [ ] Operator 地址必须是多签合约（如 Gnosis Safe），禁止单签 EOA / 热钱包
+- [ ] 多签阈值至少 2-of-3（推荐 3-of-5）
+- [ ] 签名者地理分散（不同城市/国家，防止区域性风险）
+- [ ] 签名者设备安全（硬件钱包存储私钥）
+- [ ] 有签名者丢失/损坏的恢复流程（文档化并测试过）
+- [ ] Operator 多签不能同时持有 `ADMIN_ROLE` 或 `DEFAULT_ADMIN_ROLE`
+- [ ] Operator 地址与治理门面地址完全独立
+
+#### Admin 配置
+
+- [ ] Admin 地址是治理门面（`DualPoolStakingAdmin`）
+- [ ] 治理门面由 `TimelockController` 控制（常规 48h 延迟）
+- [ ] Timelock 的 `proposer` / `executor` 由安全的治理多签控制
+- [ ] Timelock 的 `canceller` 配置合理（防止恶意取消）
+
+#### DEFAULT_ADMIN 配置
+
+- [ ] `DEFAULT_ADMIN_ROLE` 是超级治理门面
+- [ ] 由 `TimelockController` 控制（超级 72h 延迟）
+- [ ] 部署后转移所有权，deployer 撤销所有角色（`DEFAULT_ADMIN_ROLE`、`ADMIN_ROLE`、`Ownable` owner）
+
+#### 模块配置
+
+- [ ] `adminModule` 指向已部署的 `DualPoolAdminModule` 合约
+- [ ] `userModule` 指向已部署的 `DualPoolUserModule` 合约
+- [ ] 模块 bytecode hash 记录在上线文档
+- [ ] 模块源码版本与审计版本一致
+
+#### 参数配置
+
+- [ ] `feeRecipient` 等于清单国库地址（不是 deployer 或默认值）
+- [ ] `lockDuration`、`penaltyFeeBP`、`withdrawFeeBP`、`midTermFeeBP` 等参数符合业务需求
+- [ ] `maxTransferFeeBP` 覆盖 TokenB 的实际税费上限
+- [ ] `maxTVLCap`、`minStakeAmount` 等池参数已设置
+
+#### Token 验证
+
+- [ ] TokenA / TokenB 已审查（非 rebasing、reflection、黑名单、ERC777 hook）
+- [ ] TokenB decimals == 18
+- [ ] TokenA / TokenB 的转账行为已测试（标准转账、FOT 转账）
+
+#### 监控与告警
+
+- [ ] 链上监控覆盖所有关键事件（`Paused`、`EmergencyModeActivated`、`RewardsFunded`、`InvariantViolated` 等）
+- [ ] `badDebtA > 0` 或 `badDebtB > 0` 触发 P0 告警
+- [ ] `balanceB + badDebt < requiredB` 触发 P0 告警
+- [ ] Operator 多签交易实时监控
+
+#### 文档与公告
+
+- [ ] 用户公告披露：FOT 税费由用户承担、Emergency 奖励冻结、Shutdown 清算规则
+- [ ] 前端展示：gross/net 金额、紧急模式状态、Timelock 延迟
+- [ ] 审计范围明确：覆盖所有入口、角色权限、资金路径
+
+#### 最终验证
+
+- [ ] 完整 `forge test` 通过（无 skip、无 failure）
+- [ ] 主网 fork 测试通过（真实 Token、真实治理调用链）
+- [ ] 部署脚本断言最终角色图（deployer 无角色、门面持有 `ADMIN_ROLE` / `DEFAULT_ADMIN_ROLE` / owner、Operator 多签持有 `OPERATOR_ROLE`）
+- [ ] 部署脚本断言所有参数、模块地址、国库地址
+- [ ] 独立审计完成（如适用）

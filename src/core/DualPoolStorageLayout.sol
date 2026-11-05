@@ -6,6 +6,8 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Pool, PoolInfo, UserInfo} from "../StakeTypes.sol";
 
 abstract contract DualPoolStorageLayout {
+    uint256 public immutable UNPAUSE_COOLDOWN;
+
     uint256 public constant MAX_APR_BP = 20000;
     uint256 public constant SECONDS_PER_YEAR = 31536000;
     uint256 public constant BASIS_POINTS = 10000;
