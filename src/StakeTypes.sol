@@ -33,8 +33,6 @@ struct PoolInfo {
 
     uint256 bookedUserRewards;
 
-    uint256 dust;
-
     uint256 maxTVLCap;
 
     uint256 minStakeAmount;

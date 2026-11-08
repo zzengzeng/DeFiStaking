@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 import {BaseTest} from "./BaseTest.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {DualPoolStaking} from "../src/core/DualPoolStaking.sol";
+import {DualPoolRewardEngine} from "../src/core/DualPoolRewardEngine.sol";
 import {Pool} from "../src/StakeTypes.sol";
 import {MockFOTERC20} from "./mocks/MockFOTERC20.sol";
 import {MockMintOnTransferERC20} from "./mocks/MockMintOnTransferERC20.sol";
@@ -37,7 +38,7 @@ contract TestOperator is BaseTest {
     function testPauseRevertEmergencyMode() public {
         vm.startPrank(ops);
         core.enableEmergencyMode();
-        vm.expectRevert(DualPoolStaking.WrongState.selector);
+        vm.expectRevert(DualPoolRewardEngine.WrongState.selector);
         core.pause();
         vm.stopPrank();
     }
@@ -130,7 +131,7 @@ contract TestOperator is BaseTest {
     function testFundRewardsRevertPaused() public {
         vm.startPrank(ops);
         core.pause();
-        vm.expectRevert(DualPoolStaking.WrongState.selector);
+        vm.expectRevert(DualPoolRewardEngine.WrongState.selector);
         core.fundRewards(Pool.B, 100e18);
         vm.stopPrank();
     }
@@ -138,7 +139,7 @@ contract TestOperator is BaseTest {
     function testFundRewardsRevertEmergency() public {
         vm.startPrank(ops);
         core.enableEmergencyMode();
-        vm.expectRevert(DualPoolStaking.WrongState.selector);
+        vm.expectRevert(DualPoolRewardEngine.WrongState.selector);
         core.fundRewards(Pool.B, 100e18);
         vm.stopPrank();
     }
@@ -190,8 +191,8 @@ contract TestOperator is BaseTest {
     }
 
     function _forceShutdown() internal {
-        // slot 46: emergencyMode (byte 0), shutdownMode (byte 1)
-        vm.store(address(core), bytes32(uint256(46)), bytes32(uint256(0x0101)));
+        // slot 4: emergencyMode (byte 0), shutdownMode (byte 1)
+        vm.store(address(core), bytes32(uint256(44)), bytes32(uint256(0x0101)));
         assertTrue(core.emergencyMode());
         assertTrue(core.shutdownMode());
     }
@@ -199,7 +200,7 @@ contract TestOperator is BaseTest {
     function testPauseRevertShutdownMode() public {
         vm.startPrank(ops);
         _forceShutdown();
-        vm.expectRevert(DualPoolStaking.WrongState.selector);
+        vm.expectRevert(DualPoolRewardEngine.WrongState.selector);
         core.pause();
         vm.stopPrank();
     }
@@ -215,7 +216,7 @@ contract TestOperator is BaseTest {
     function testFundRewardsRevertShutdownMode() public {
         vm.startPrank(ops);
         _forceShutdown();
-        vm.expectRevert(DualPoolStaking.WrongState.selector);
+        vm.expectRevert(DualPoolRewardEngine.WrongState.selector);
         core.fundRewards(Pool.A, 100);
         vm.stopPrank();
     }

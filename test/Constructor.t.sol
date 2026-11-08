@@ -9,7 +9,7 @@ import {DualPoolStaking} from "../src/core/DualPoolStaking.sol";
 import {Pool} from "../src/StakeTypes.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
-contract ConstructorTest is BaseTest {
+contract TestConstructor is BaseTest {
     function testConstructorRolesAndOwner() public {
         vm.startPrank(deployer);
         assertTrue(core.hasRole(core.DEFAULT_ADMIN_ROLE(), deployer));

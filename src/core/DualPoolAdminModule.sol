@@ -2,10 +2,20 @@
 pragma solidity ^0.8.20;
 import {IDualPoolAdminModule} from "../interfaces/IDualPoolAdminModule.sol";
 
-import {DualPoolStorageLayout} from "./DualPoolStorageLayout.sol";
+import {DualPoolRewardEngine} from "./DualPoolRewardEngine.sol";
 import {Pool, PoolInfo} from "../StakeTypes.sol";
 
-contract DualPoolAdminModule is DualPoolStorageLayout, IDualPoolAdminModule {
+contract DualPoolAdminModule is DualPoolRewardEngine, IDualPoolAdminModule {
+    error BadDebtExists();
+    error WindowActive();
+    error InvalidRate();
+    error UnderfundedSchedule();
+    error RewardIndexCapacity();
+
+    event RewardScheduled(
+        Pool indexed pool, uint256 effectiveDuration, uint256 newRate, uint256 time, uint256 periodFinish
+    );
+
     function setLockDuration(uint256 newLockDuration) external override {
         if (newLockDuration == 0 || newLockDuration > MAX_LOCK_DURATION) {
             revert InvalidLockDuration();
@@ -36,10 +46,6 @@ contract DualPoolAdminModule is DualPoolStorageLayout, IDualPoolAdminModule {
         uint256 old = minClaimAmount;
         minClaimAmount = newMinClaimAmount;
         emit MinClaimAmountUpdated(old, newMinClaimAmount, block.timestamp);
-    }
-
-    function _pool(Pool pool) internal view returns (PoolInfo storage) {
-        return pool == Pool.A ? poolA : poolB;
     }
 
     function setMaxTVLCap(Pool pool, uint256 newMaxTVLCap) external override {
@@ -92,5 +98,43 @@ contract DualPoolAdminModule is DualPoolStorageLayout, IDualPoolAdminModule {
     function _minExitForPenalty(uint256 penaltyBP) internal pure returns (uint256) {
         if (penaltyBP == 0) return 0;
         return (BASIS_POINTS + penaltyBP - 1) / penaltyBP;
+    }
+
+    function scheduleRewards(Pool pool, uint256 duration) external override {
+        if (emergencyMode || shutdownMode) revert WrongState();
+
+        _updateGlobalA();
+        _updateGlobalB();
+
+        if (poolA.badDebt != 0 || poolB.badDebt != 0) revert BadDebtExists();
+
+        _assertInvariantB();
+
+        uint256 effectiveDuration = duration == 0 ? _pool(pool).rewardDuration : duration;
+
+        if (effectiveDuration < MIN_REWARD_DURATION || effectiveDuration > MAX_REWARD_DURATION) {
+            revert InvalidRewardDuration();
+        }
+
+        uint256 time = _effectiveTime();
+
+        PoolInfo storage p = _pool(pool);
+
+        if (p.periodFinish > time) revert WindowActive();
+
+        uint256 newRate = p.availableRewards / effectiveDuration;
+        if (newRate == 0) revert InvalidRate();
+        if (newRate > _maxRewardRate(pool)) revert InvalidRate();
+
+        if (newRate * effectiveDuration > p.availableRewards) revert UnderfundedSchedule();
+
+        uint256 headroom = (type(uint256).max - p.accRewardPerToken) / REWARD_PRECISION;
+        if (newRate > headroom / effectiveDuration) revert RewardIndexCapacity();
+
+        p.rewardRate = newRate;
+        p.periodFinish = time + effectiveDuration;
+        p.lastUpdateTime = time;
+
+        emit RewardScheduled(pool, effectiveDuration, newRate, time, p.periodFinish);
     }
 }

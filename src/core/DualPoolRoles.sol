@@ -2,11 +2,10 @@
 pragma solidity ^0.8.20;
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
-import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import {DualPoolStorageLayout} from "../core/DualPoolStorageLayout.sol";
+import {DualPoolRewardEngine} from "../core/DualPoolRewardEngine.sol";
 
-abstract contract DualPoolRoles is DualPoolStorageLayout, Ownable, AccessControl, Pausable, ReentrancyGuard {
+abstract contract DualPoolRoles is DualPoolRewardEngine, Ownable, AccessControl, ReentrancyGuard {
     error SelfTransferForbidden();
     error RoleUpdateForbidden(bytes32 role, address account);
     error RenounceForbidden(bytes32 role, address callerConfirm);

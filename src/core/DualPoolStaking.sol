@@ -32,7 +32,6 @@ contract DualPoolStaking is DualPoolRoles {
     error ModuleNotContract();
 
     error ContractPaused();
-    error WrongState();
     error AlreadyEmergencyMode();
     error PayerDeductionMismatch();
     error ReceivedExceedsAmount();
@@ -163,10 +162,6 @@ contract DualPoolStaking is DualPoolRoles {
         emit EmergencyModeActivated(msg.sender, block.timestamp);
     }
 
-    function _pool(Pool pool) internal view returns (PoolInfo storage) {
-        return pool == Pool.A ? poolA : poolB;
-    }
-
     function fundRewards(Pool pool, uint256 amount) external onlyRole(OPERATOR_ROLE) nonReentrant {
         if (paused() || emergencyMode || shutdownMode) revert WrongState();
         if (amount == 0) revert ZeroAmount();
@@ -200,5 +195,18 @@ contract DualPoolStaking is DualPoolRoles {
         p.availableRewards = old + received;
 
         emit RewardsFunded(pool, msg.sender, amount, received, block.timestamp);
+    }
+
+    function crankCatchUpPool(Pool pool) external nonReentrant {
+        _advanceGlobal(pool, false);
+
+        PoolInfo storage p = _pool(pool);
+        uint256 target = Math.min(_effectiveTime(), p.periodFinish);
+
+        emit PoolCatchUpCranked(pool, p.lastUpdateTime, p.lastUpdateTime >= target, block.timestamp);
+    }
+
+    function scheduleRewards(Pool pool, uint256 duration) external onlyRole(ADMIN_ROLE) nonReentrant {
+        _delegateTo(adminModule, abi.encodeCall(IDualPoolAdminModule.scheduleRewards, (pool, duration)));
     }
 }

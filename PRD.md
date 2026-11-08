@@ -1,5 +1,15 @@
-# ERC20 (Staking) 协议需求规格说明书 v1.1.1
+# ERC20 (Staking) 协议需求规格说明书 v1.1.2
 
+> **v1.1.2 修订说明（2026-11-06）**
+>
+> - **全新部署**：本项目为全新部署，无历史状态需迁移。移除 `dustA` / `dustB`、`DUST_TOLERANCE` 及 `DustAccumulated` 事件；指数取整余数只体现为 `orphan pending`（留在 `totalPendingX`），不再回灌预算。
+> - 统一不变量、`recoverToken`、`forceClaimAll`、`forceShutdownFinalize` 中的 required 公式，去掉 `dust` 项。
+> - **§6.2**：`scheduleRewards` 增加前置条件 `periodFinishX <= T`；活跃窗口必须走 `reanchorRewards`，禁止覆盖。
+> - **§4.2**：`bookedUserRewardsX` 的递增下沉到 `_settleUserX` 内部，禁止调用方自行补写。
+> - **§4.1.1**：新增状态不变量 `paused ⇒ pausedAt != 0`；明确 `crankCatchUpPool` 的 `complete` 语义。
+> - **§3.2**：明确每个财务入口的终末检查须同时校验 `badDebtX <= totalPendingX`。
+> - **§8**：明确事件时间字段一律使用真实 `block.timestamp`，不参与会计。
+>
 > **v1.1.1 修订说明（2026-11-04）**
 >
 > - **§2.1**：明确 Operator 必须由多签合约持有（生产环境 ≥2-of-3），禁止单签热钱包
@@ -112,9 +122,9 @@ require(rewardTokenB.decimals() == 18, "TOKEN_B_MUST_BE_18_DECIMALS");
 
 为了确保系统在任何极端模式下（包括产生坏账时）逻辑可控，公式引入已记录 `BadDebt`；该值只对应已纳入pending但未获预算支持的奖励债务，不得用于掩盖外部资产损失：
 
-$$BalanceB + BadDebt_{A} + BadDebt_{B} \ge TotalStakedB + TotalPending_{A+B} + AvailableRewards_{A+B} + UnclaimedFeesB + Dust_{A} + Dust_{B}$$
+$$BalanceB + BadDebt_{A} + BadDebt_{B} \ge TotalStakedB + TotalPending_{A+B} + AvailableRewards_{A+B} + UnclaimedFeesB$$
 
-> **`Dust_{A/B}` 纳入右侧（required）的语义**：`dustA` / `dustB` 为经对账确认可安全分离的既有已出资残值桶（wei），达到 `DUST_TOLERANCE` 回灌前仍留在TokenB余额中、未计入available。按§4.1的新奖励刻度及份额硬上限，正常计提的 `pendingDelta` 等于完整排放D，`dustDelta`恒为0；不得把尚可形成用户收益的分子余数逐片当作dust回预算。已有dust只能同额转桶，不能与pending双计或来自未出资奖励。`DUST_TOLERANCE = 10 wei`保留为回收阈值及诊断容忍值，不得作为实际付款、清扫或裁减用户债权的额度。
+> **v1.1.2（全新部署）移除 `Dust`**：本项目为全新部署，无历史残值桶需要迁移，`dustA` / `dustB` 与 `DUST_TOLERANCE` 从状态、不变量和事件中全部移除。按§4.1的新奖励刻度及份额硬上限，正常计提的 `pendingDelta` 等于完整排放D，指数取整余数不再回灌预算，而是作为 `orphan pending` 留在 `totalPendingX`（见§3.2、§7.4）。
 
 **TokenA本金覆盖**另须满足 `stakingTokenA.balanceOf(address(this)) >= totalStakedA`。各池还须保持 `bookedUserRewardsX <= totalPendingX`、`badDebtX <= totalPendingX`。健康态badDebt为0，TokenB余额完整覆盖required；实际支付不能把badDebt视作现金。
 
@@ -128,8 +138,7 @@ $$BalanceB + BadDebt_{A} + BadDebt_{B} \ge TotalStakedB + TotalPending_{A+B} + A
 >     // actual用于账目覆盖，不代表可支付现金。
 >     uint256 actual = balanceB + badDebtA + badDebtB;
 >     uint256 required = totalStakedB + totalPendingA + totalPendingB
->                       + availableRewardsA + availableRewardsB + unclaimedFeesB
->                       + dustA + dustB;
+>                       + availableRewardsA + availableRewardsB + unclaimedFeesB;
 >     if (actual < required) {
 >         revert InvariantViolation(actual, required);
 >     }
@@ -165,7 +174,6 @@ $$BalanceB + BadDebt_{A} + BadDebt_{B} \ge TotalStakedB + TotalPending_{A+B} + A
 | `totalStakedB` | Pool B 全部质押本金之和 | TokenB |
 | `totalPendingA/B` | 已排放未兑付奖励的保守负债预留，覆盖booked及合法未settle债权 | TokenB |
 | `availableRewardsA/B` | 各池未确权奖励预算，含已排期未来承诺及未排余额 | B另含罚金与安全奖励回流；不能据此随意搬走活跃排期预算 |
-| `dustA / dustB` | 经对账确认的既有已出资残值暂存（wei）；本版计提不新增 | 未回灌前计入不变量 **required** 侧（见上文公式） |
 | `badDebtA/B` | 完整排放确权后尚未获资金支持的奖励缺口 | 用户对应债权必须已纳入 `totalPending`；不能只记录坏账却遗漏债权 |
 | `unclaimedFeesB` | 已产生但未提取的 Mature 提现手续费 | 提取后公式右侧同步减少 |
 
@@ -177,7 +185,7 @@ $$BalanceB + BadDebt_{A} + BadDebt_{B} \ge TotalStakedB + TotalPending_{A+B} + A
 // TokenB：仅允许回收超额部分，且必须在 badDebt 清零前提下
 require(badDebtA == 0 && badDebtB == 0, "BAD_DEBT_EXISTS");
 uint256 requiredB = totalStakedB + totalPendingA + totalPendingB
-                   + availableRewardsA + availableRewardsB + unclaimedFeesB + dustA + dustB;
+                   + availableRewardsA + availableRewardsB + unclaimedFeesB;
 uint256 balanceB  = rewardTokenB.balanceOf(address(this));
 require(balanceB > requiredB, "NO_EXCESS_TOKEN_B");
 
@@ -205,7 +213,6 @@ require(balanceB > requiredB, "NO_EXCESS_TOKEN_B");
 | `MIN_REWARD_DURATION` | uint256 | **1 days** | 治理指定奖励周期下限；治理重锚的微排放例外见§4.5 |
 | `MAX_REWARD_RATE_A / B` | uint256 | 派生上界 | 由构造函数参数 **`maxTotalSupplyBForRewardRateCap`（>0，部署时一次性写入）** 与 `MAX_APR_BP`、`SECONDS_PER_YEAR` 推导；当前部署无正常setter，**禁止**使用运行时 `rewardTokenB.totalSupply()` 改变上界。 |
 | `MAX_MIN_CLAIM_AMOUNT` | uint256 | 1e17 wei | `minClaimAmount` setter 上限 |
-| `DUST_TOLERANCE` | uint256 | 10 wei | 粉尘回收阈值及诊断容忍值，不可修改；不能放宽实际资金保留 |
 | `UNPAUSE_COOLDOWN` | uint256 | **24 hours** | 解除暂停的最短冷却期（immutable） |
 | `SECONDS_PER_YEAR` | uint256 | **31536000** | 常量 |
 | `MAX_APR_BP` | uint256 | 20000 | 200%，用于推导速率上限（immutable） |
@@ -271,7 +278,6 @@ uint256 public minClaimAmount;        // 合约初始值为 0（无门槛）；A
 | `availableRewardsA / B` | uint256 | 未释放奖励预算（B 池含没收奖励及罚金） | weiB |
 | `totalPendingA / B` | uint256 | 已排放未兑付奖励的保守负债预留，含未逐用户 settle 的债权与可能的 orphan | weiB |
 | `unclaimedFeesB` | uint256 | **已收取但未被管理员提取的提现手续费** | weiB |
-| `dustA / dustB` | uint256 | 经对账确认的既有残值桶；本版合法计提不再逐片新增dust，不得从未出资奖励生成此项 | weiB |
 | `rewardDurationA / B`（`PoolInfo.rewardDuration`） | uint256 | 各池默认排放时长（秒）；仅供48h治理 `scheduleRewards*(0)` 使用；`0` 表示未设默认，治理须传显式duration或先设置默认；Operator注资不使用此值 | seconds |
 | `bookedUserRewardsA / B` | uint256 | 链上汇总：该池所有 `userInfo*.rewards` 之和；在 settle / claim / compound / forfeit / emergency 路径增减；用于停机清算 | weiB |
 
@@ -282,9 +288,10 @@ uint256 public minClaimAmount;        // 合约初始值为 0（无门槛）；A
 > * `bookedUserRewardsX`：已记入用户 `rewards` 字段、尚未 claim 的合计。
 > * 所有合法流程均须满足 **`bookedUserRewardsX ≤ totalPendingX`**，以及 **`badDebtX ≤ totalPendingX`**；差额 `orphanX = totalPendingX - bookedUserRewardsX` 包含尚未settle的用户债权，不能直接认定无人有权领取（停机finalize时仅在无剩余质押本金时并入residual；deadlock bypass后仍有质押者时保留在 `totalPending` 供后续settle/claim，见 **§7.4**）。
 > * 若 `bookedUserRewardsX > totalPendingX`，实现 **revert** `BookedRewardsExceedPending()`。
+> * `badDebtX <= totalPendingX` 必须在**每个财务入口的终末覆盖检查**中显式校验（不限于 `forceClaimAll`）；违反时 revert（可复用 `InvariantViolation` 或新增 `DebtExceedsPending()`）。
 
 > **⚠️ 实现警告（Critical）**：
-> 开发者在实现对应的 `_updateGlobalX()` 函数时，**切勿将逻辑碎片化**。必须以 **§4.1** 中提供的统一代码块为准（包含提前 return 防除零、坏账映射、粉尘还原回收等），以保证时序的安全性和会计一致性。
+> 开发者在实现对应的 `_updateGlobalX()` 函数时，**切勿将逻辑碎片化**。必须以 **§4.1** 中提供的统一代码块为准（包含提前 return 防除零、坏账映射等），以保证时序的安全性和会计一致性。
 
 ### 3.3 用户账本映射
 
@@ -357,6 +364,8 @@ function _effectiveTime() internal view returns (uint256) {
 // targetX = min(_effectiveTime(), periodFinishX)
 ```
 
+> **状态不变量（强制）**：`paused == true ⇒ pausedAt != 0`。任何把 `paused` 置为 true 的内部路径（当前为 `pause()` 与 `enableEmergencyMode()`）必须同步写入 `pausedAt`；禁止在其他位置单独调用 `_pause()`。实现应在 `_effectiveTime()` 或 `unpause()` 的 `_restorePoolClock` 前加入防御性断言，避免 `pausedAt == 0` 导致时钟归零、`periodFinish` 被平移数十年。
+
 `terminalRewardTime` 在首次进入 Emergency 时设为 `paused ? pausedAt : block.timestamp`，Shutdown沿用该冻结点；两种终态均不可恢复排放或平移该截止点。
 
 `MAX_DELTA_TIME = 30 days` 仅限制**单个计算分片**，不表示一次业务调用只能结算30天。`_updateGlobalX()` 必须在改变份额、预算、排期或清算资金前完整推进至 `targetX`，活跃但闲置超过30天的周期同样适用。防御开关及Shutdown激活按§7先记录冻结状态，不依赖计提成功；之后的金融路径仍须完整结算。
@@ -381,9 +390,9 @@ function _updateGlobalX() internal {
 }
 ```
 
-循环不能完整推进时，业务调用必须回滚，禁止继续修改份额。另提供不要求单次完成的公开 `crankCatchUpPool(Pool)` 分批推进，保留已完成进度并发出事件；该公开入口在 Normal、Paused、Emergency、Shutdown 均可达，仅推进至各状态允许的冻结点，不转账、不改变份额；不得依赖已失衡的物理覆盖断言而阻断合法计提。Operator / Admin 权限、锁仓判断、冷却、Timelock 等仍使用真实 `block.timestamp`，不得把奖励时钟用于这些等待期限。
+循环不能完整推进时，业务调用必须回滚，禁止继续修改份额。另提供不要求单次完成的公开 `crankCatchUpPool(Pool)` 分批推进，保留已完成进度并发出事件；`PoolCatchUpCranked.complete` 定义为本次调用结束后 `lastUpdateTimeX >= target`，为 false 时调用方应再次调用。该公开入口在 Normal、Paused、Emergency、Shutdown 均可达，仅推进至各状态允许的冻结点，不转账、不改变份额，且**不得调用 `_assertInvariantB`**；不得依赖已失衡的物理覆盖断言而阻断合法计提。Operator / Admin 权限、锁仓判断、冷却、Timelock 等仍使用真实 `block.timestamp`，不得把奖励时钟用于这些等待期限。
 
-#### 4.1.2 单个分片的负债、坏账与粉尘
+#### 4.1.2 单个分片的负债、坏账与取整
 
 **保留 v1.1 的完整排放确权语义**：非空池按 `deltaReward = rate × deltaTime` 增长奖励指数。预算不足须登记未出资缺口，同时完整预留相应债权；不能把指数改成只按实收预算增长，却仍称用户已获得完整排放债权。
 
@@ -406,22 +415,16 @@ function _accrueSliceX(uint256 target) internal {
         uint256 pendingDelta = Math.mulDiv(
             totalStakedX, deltaAcc, REWARD_PRECISION, Math.Rounding.Ceil
         );
-        // 可等价直接pending += deltaReward；合法输入下dustDelta恒为0。
+        // 可等价直接pending += deltaReward；合法输入下取整余数留在 pending（orphan）。
         availableRewardsX = oldAvailable - deltaReward;
         totalPendingX += pendingDelta;
     } else {
-        // 未获资金支持的奖励不得转成可用粉尘/预算。
+        // 未获资金支持的奖励不得转成可用预算。
         uint256 shortfall = deltaReward - oldAvailable;
         availableRewardsX = 0;
         totalPendingX += deltaReward;
         badDebtX += shortfall;
         emit InsufficientBudget(Pool.X, shortfall, block.timestamp);
-    }
-
-    // 仅回收经对账确认的既有dust；不把新计提的指数分子余数写入dust。
-    if (badDebtX == 0 && dustX >= DUST_TOLERANCE) {
-        availableRewardsX += dustX;
-        dustX = 0;
     }
 
     accRewardPerTokenX += deltaAcc;
@@ -433,13 +436,13 @@ function _accrueSliceX(uint256 target) internal {
 
 **取整与守恒要求：**
 
-- 足额分支：令 `Q = REWARD_PRECISION`、`D = deltaReward`、`0 < S = totalStaked <= Q`、`q = floor(D × Q / S)`。有 `0 <= D×Q−S×q < S <= Q`，因此指数阶段少分配金额 `D−S×q/Q < 1 weiB`，而 `pendingDelta = ceil(S×q/Q) = D`、`dustDelta = 0`。预算减少额等于完整pending增加额，不逐片释放这部分资金。
+- 足额分支：令 `Q = REWARD_PRECISION`、`D = deltaReward`、`0 < S = totalStaked <= Q`、`q = floor(D × Q / S)`。有 `0 <= D×Q−S×q < S <= Q`，因此指数阶段少分配金额 `D−S×q/Q < 1 weiB`，而 `pendingDelta = ceil(S×q/Q) = D`。预算减少额等于完整pending增加额，不逐片释放这部分资金；差额作为 `orphan pending` 留在 `totalPendingX`。
 - 禁止使用 `floor(S×q/Q)` 作为每步pending预留，也禁止为减少预留而把误差回灌预算。用户可能跨多个分片后一次结算，累计合法债权必须由pending覆盖。
 - 不足分支：`pending += D`、`badDebt += D - oldAvailable`。调整后不变量两侧等额增长；补款仅增加实收余额、减少 badDebt，不能重复增加 pending。
 - 采用绝对误差验收：每个实际推进正整数秒的计提分片，指数截断少分配金额严格小于1 weiB。N个分片累计严格小于N weiB，即使其他账户反复改变份额也成立；用户自己的每次settle另有不足1 weiB的向下取整。零时间调用不产生新分片，单个最多365天的奖励窗口最多31,536,000个正时间分片，指数阶段累计误差严格小于31,536,000 weiB（3.1536e-11 B）。微额奖励的相对误差可能较大，不承诺所有金额都零误差或所有调用频率严格等价。
 - 本版不跨份额变化累计分子余数，不把旧区间尾数分给新入场者；新用户继续以入场前已固化的acc作快照。精度提高、份额硬上限和完整pending预留必须共同实现，不能仅改常量或仅限制公开crank频率。
-- `DUST_TOLERANCE`只用于既有dust回收及诊断，不是奖励损失、付款或清扫的许可额度。已存在的pending与booked差额仍按§7.4保护和处理。
-- 本规则适用于新部署或已审计迁移状态。旧 `PRECISION=1e18` 尺度的acc/paid不能直接交给 `REWARD_PRECISION=1e45` 版本模块使用；必须另行证明并执行尺度转换或新部署迁移，不能清零快照、裁减用户奖励或假设替换模块已完成迁移。历史错误dust、少记pending或 `booked>pending` 同样须先对账。
+- 本版（全新部署）不存在 `dust` 字段；指数取整差额只体现为 `totalPendingX - bookedUserRewardsX` 的 orphan pending，按§7.4保护和处理。
+- 本规则适用于全新部署；不涉及旧 `PRECISION=1e18` 尺度迁移。若未来存在历史状态（非本项目范围），必须另行证明并执行尺度转换，不能清零快照、裁减用户奖励或假设替换模块已完成迁移；少记pending或 `booked>pending` 同样须先对账。
 
 完整 catch-up 后才可执行 §4.5 重锚。时间推进只增加实际计入的分片，禁止在仍有未结算历史时把锚点直接设置为当前时间。
 
@@ -477,13 +480,16 @@ function _settleUserX(address user) internal {
     if (earned > 0) {
         // 仅修改个人账本，严禁再累加全局 totalPendingX 造成复算
         rewardsX[user] += earned;
-        // UserModule 同步：bookedUserRewardsX += earned（与 rewards 映射一致）
+        // booked 与 rewards 必须同步；该递增只能发生在这里
+        bookedUserRewardsX += earned;
     }
     // 所有入口都在 settle 内固化快照，earned == 0 时也必须更新。
     userRewardPaidX[user] = accRewardPerTokenX;
 }
 
 ```
+
+> **`bookedUserRewardsX` 同步约束（强制）**：`bookedUserRewardsX` 的**递增只能发生在 `_settleUserX` 内部**。任何调用方（claim / withdraw / compound / emergency / forceClaimAll）不得在外部自行执行 `booked += earned`，否则会重复记账或漏记。`bookedUserRewardsX` 的递减只发生在实际支付（claim / withdraw / emergency forfeit）路径，与 `rewardsX[user]` 同步扣减。
 
 > **实现与验收边界**：外层 Fail-safe 可以重复写入相同快照，但不能依赖各入口自行补写。组件/ABI需与代码核对，安全行为须满足本PRD及回归测试；现有实现不能反向覆盖本规范。
 
@@ -871,7 +877,7 @@ function forceClaimAll() external nonReentrant {
     uint256 rB = rewardsB[msg.sender];
     require(rA + rB > 0, "NOTHING_TO_CLAIM");
     uint256 reserved = totalStakedB + unclaimedFeesB
-        + availableRewardsA + availableRewardsB + dustA + dustB;
+        + availableRewardsA + availableRewardsB;
     uint256 balanceB = rewardTokenB.balanceOf(address(this));
     uint256 liquid = balanceB > reserved ? balanceB - reserved : 0;
     uint256 payA;
@@ -905,7 +911,7 @@ function forceClaimAll() external nonReentrant {
 }
 ```
 
-零支付、转账税或sender扣款异常均整笔回滚，不核销债权、不刷新冷却。付款不减少badDebt，不把未付部分转dust/预算；资金不足的余款继续留在rewards/booked/pending，补款后可再领取。事件中的remaining/unpaid字段改为“仍保留债权”，ABI/索引器不得沿用旧“已放弃”的含义。
+零支付、转账税或sender扣款异常均整笔回滚，不核销债权、不刷新冷却。付款不减少badDebt，不把未付部分转预算；资金不足的余款继续留在rewards/booked/pending，补款后可再领取。事件中的remaining/unpaid字段改为“仍保留债权”，ABI/索引器不得沿用旧“已放弃”的含义。
 
 ### 5.5 EmergencyWithdrawA / EmergencyWithdrawB
 
@@ -989,8 +995,11 @@ emit RewardFunded(Pool.X, payer, amount, actualAmount);
 
 `scheduleRewardsA/B(duration)`仅由治理执行，Normal/Paused可用，Emergency/Shutdown禁止。先完整结算两池旧周期；要求两池badDebt清零、B物理覆盖正常。若`duration==0`使用已配置默认`rewardDurationX`，默认0则回滚；有效时长须在`[MIN_REWARD_DURATION,MAX_REWARD_DURATION]`。
 
+> **调用前置条件（强制）**：`periodFinishX <= T`，即旧窗口必须已经结束。若 `periodFinishX > T`（仍有活跃窗口），必须改用 `reanchorRewardsA/B()`，**不得用 `scheduleRewards` 覆盖活跃周期**。否则治理可绕过 §4.5 对活跃窗 `remainingTime` 重算与速率 clamp 的约束，等价于开后门重排。
+
 ```solidity
 uint256 T = _effectiveTime();
+require(periodFinishX <= T, "WINDOW_ACTIVE"); // 活跃窗口必须走 reanchorRewardsX
 uint256 newRate = availableRewardsX / effectiveDuration;
 require(newRate > 0 && newRate <= MAX_REWARD_RATE_X, "INVALID_RATE");
 require(newRate * effectiveDuration <= availableRewardsX, "UNDERFUNDED_SCHEDULE");
@@ -1015,7 +1024,7 @@ emit RewardScheduled(Pool.X, effectiveDuration, newRate, T, periodFinishX);
 已有`setFees`、`setLockDuration`、`setFeeRecipient`、`setMinEarlyExitAmountB`、`setMaxTransferFeeBP`沿用§3的参数边界和48h门面路径；模块及角色变更另走72h超级路径。固定排放供应cap不提供正常setter。
 
 * `rebalanceBudgets(Pool from, Pool to, uint256 amt)`: 两池先完整结算到同一个 `effectiveTime`，再检查 `badDebtA == 0 && badDebtB == 0`。不得搬走源池维持既有排期所需的预算；调拨后的两池均须满足 §4.5 排期预算约束。只减源available、加目标available，不调用任何隐式重锚；目标后续排期另走≥48h治理入口。暂停内治理调拨使用`pausedAt`；允许先在同一治理batch取消源排期再搬走其未来预算，触发`BudgetRebalanced`。
-* `claimFees()`: Admin提取`unclaimedFeesB`；先完整结算两池并要求无badDebt、物理覆盖正常，清零费用后经§4.6统一出账，保留全部本金、pending、available和dust。
+* `claimFees()`: Admin提取`unclaimedFeesB`；先完整结算两池并要求无badDebt、物理覆盖正常，清零费用后经§4.6统一出账，保留全部本金、pending和available。
 * `setMaxTVLCapX(uint256 cap)`: 触发 `MaxTVLCapUpdated`。
 * `setMinStakeAmountX(uint256 amt)`: 触发 `MinStakeAmountUpdated`。
 * `setRewardDurationA(uint256 duration)` / `setRewardDurationB(uint256 duration)`：`duration == 0` 清除默认；否则须在 `[MIN_REWARD_DURATION, MAX_REWARD_DURATION]`；仅供治理`scheduleRewards*(0)`使用；触发 `RewardDurationUpdated`。
@@ -1159,7 +1168,7 @@ function forceShutdownFinalize() external onlyAdmin nonReentrant {
     // 任何剩余质押存在时，两池完整pending均保留，包含尚未逐用户settle的债权。
     uint256 protectedB = totalStakedB + keptA + keptB;
     uint256 bookResidual = availableRewardsA + availableRewardsB
-                         + unclaimedFeesB + dustA + dustB + removableOrphan;
+                         + unclaimedFeesB + removableOrphan;
     uint256 balanceB = rewardTokenB.balanceOf(address(this));
     require(stakingTokenA.balanceOf(address(this)) >= totalStakedA, "PRINCIPAL_A_DEFICIT");
     require(balanceB >= protectedB, "USER_LIABILITIES_UNFUNDED");
@@ -1168,7 +1177,7 @@ function forceShutdownFinalize() external onlyAdmin nonReentrant {
 
     totalPendingA = keptA; totalPendingB = keptB;
     availableRewardsA = 0; availableRewardsB = 0;
-    unclaimedFeesB = 0; dustA = 0; dustB = 0;
+    unclaimedFeesB = 0;
     rewardRateA = 0; rewardRateB = 0;
     periodFinishA = lastUpdateTimeA; periodFinishB = lastUpdateTimeB;
     // 不清零本金、booked、用户奖励或指数/快照，也不修改terminalRewardTime。
@@ -1182,11 +1191,11 @@ function forceShutdownFinalize() external onlyAdmin nonReentrant {
 }
 ```
 
-> **语义**：实际清扫不超过账面协议残值和真实用户保护资金之外的现金。只允许预算、粉尘、协议费用及已证明无人拥有的orphan承担残值减记，并发事件；不得减记用户本金、保留pending或booked。实际余额连 `protectedB` 都不足时整体回滚，保留原账本，等待真实补款，不伪报完成。无本金时可将pending裁至booked；1095天旁路后仍有本金时完整保留pending供之后settle/claim。
+> **语义**：实际清扫不超过账面协议残值和真实用户保护资金之外的现金。只允许预算、协议费用及已证明无人拥有的orphan承担残值减记，并发事件；不得减记用户本金、保留pending或booked。实际余额连 `protectedB` 都不足时整体回滚，保留原账本，等待真实补款，不伪报完成。无本金时可将pending裁至booked；1095天旁路后仍有本金时完整保留pending供之后settle/claim。
 >
 > finalize后用户仍能提本金、领取保留奖励；该动作不是销毁合约或关闭用户退出。Emergency后不再有stake/compound，finalize至少在Shutdown满365天后执行，旧B仓位自然已超过90天最大锁期及180天最高费率年龄，不需新增“Shutdown免费”分支。
 >
-> 可再次调用finalize，但每次均须满足相同时间、计提、无badDebt及物理保护条件。第一次已清零的预算/费用/粉尘不会重复计入残值；剩余本金未全部退出前完整pending继续保留。后续全部本金退出且已逐用户settle后，可再次finalize将pending裁至booked、按同样现金上限清扫真正orphan。recover不得提前裁剪pending，也不得把未settle债权当盈余；第三方捐赠不重启排期。
+> 可再次调用finalize，但每次均须满足相同时间、计提、无badDebt及物理保护条件。第一次已清零的预算/费用不会重复计入残值；剩余本金未全部退出前完整pending继续保留。后续全部本金退出且已逐用户settle后，可再次finalize将pending裁至booked、按同样现金上限清扫真正orphan。recover不得提前裁剪pending，也不得把未settle债权当盈余；第三方捐赠不重启排期。
 
 ### 7.5 resolveBadDebt（坏账物理修复）
 
@@ -1249,9 +1258,9 @@ if (token == address(stakingTokenA)) {
 }
 else if (token == address(rewardTokenB)) {
     require(badDebtA == 0 && badDebtB == 0, "BAD_DEBT_EXISTS");
-    // 必须保护本金、待付负债、预算、手续费与粉尘桶（与 _assertInvariantB required 一致）
+    // 必须保护本金、待付负债、预算与手续费（与 _assertInvariantB required 一致）
     uint256 required = totalStakedB + totalPendingA + totalPendingB
-                      + availableRewardsA + availableRewardsB + unclaimedFeesB + dustA + dustB;
+                      + availableRewardsA + availableRewardsB + unclaimedFeesB;
     uint256 balance = rewardTokenB.balanceOf(address(this));
     require(balance > required, "NO_EXCESS_TOKEN_B");
     require(amount <= balance - required, "EXCEEDS_EXCESS");
@@ -1264,7 +1273,7 @@ FOTTransferLib.transferGross(IERC20(token), to, amount, maxTransferFeeBP, BASIS_
 emit TokenRecovered(token, amount, to);
 ```
 
-> **`forceShutdownFinalize`** 清扫同样经 `FOTTransferLib.transferGross` 转至 `feeRecipient`。recover不重排、不改份额或预算；全部pending（含未settle债权和保守保留的orphan）均计入required，且TokenB须无badDebt。转出不得借10 wei容忍值侵蚀应保留资金。
+> **`forceShutdownFinalize`** 清扫同样经 `FOTTransferLib.transferGross` 转至 `feeRecipient`。recover不重排、不改份额或预算；全部pending（含未settle债权和保守保留的orphan）均计入required，且TokenB须无badDebt。
 
 ---
 
@@ -1309,7 +1318,6 @@ event BadDebtResolvedTotal(uint256 totalRepaid, uint256 at);
 event InvariantViolated(uint256 actual, uint256 required, uint256 at);
 event InsufficientBudget(Pool indexed pool, uint256 shortfall, uint256 at); 
 event TokenRecovered(address indexed token, uint256 amount, address indexed to);
-event DustAccumulated(Pool indexed pool, uint256 dustTotal, uint256 at); 
 
 // ── 参数变更事件 ──────────────────────────────────────────────────────────
 event FeeRecipientUpdated(address indexed oldAddr, address indexed newAddr, uint256 at);
@@ -1324,9 +1332,9 @@ event RewardDurationUpdated(Pool indexed pool, uint256 oldDuration, uint256 newD
 
 **事件语义修订**：`ForceClaimed.unpaidA/unpaidB` 表示本次未支付、仍保留在用户rewards中的债权，**不表示已放弃**；实际支付才减少pending/booked，不因部分付款减少badDebt。零支付回滚，不发成功事件；健康Normal跨池足额领取仍逐池检查minClaim，只有坏账/Shutdown部分路径豁免该门槛。索引器、前端与ABI须随实现更新，不能沿用旧版“未付即没收”的解释。
 
-`EmergencyModeActivated` / `ShutdownActivated` 记录真实触发时间；前端/监控同时读取公开 `terminalRewardTime` 作为永久计息截止点。`InvariantViolated` 仅在成功的允许降级路径记录；emit后再revert的事件不会留在链上，监控必须主动读状态与失败交易。
+**事件时间字段约定（强制）**：所有事件的 `at` / `currentTime` 字段一律使用**真实 `block.timestamp`**。会计与奖励计算使用 `_effectiveTime()`；在 Paused / Emergency / Shutdown 下两者可能不同。监控与索引器不得把事件时间用于奖励计算，只能用于展示与审计。
 
-`DustAccumulated`保留历史ABI；本版合法计提的dustDelta为0，不为正常计提发出粉尘新增事件，也不能为了使用旧事件而恢复逐片回收奖励余数。
+`EmergencyModeActivated` / `ShutdownActivated` 记录真实触发时间；前端/监控同时读取公开 `terminalRewardTime` 作为永久计息截止点。`InvariantViolated` 仅在成功的允许降级路径记录；emit后再revert的事件不会留在链上，监控必须主动读状态与失败交易。
 
 `OutboundTransfer(address token,address to,uint256 grossAmount,uint256 netReceived)`沿用`FOTTransferLib`事件并纳入调用日志索引；`UserModuleUpdated`、`AdminModuleUpdated`、`SuperAdminTransferred` 及 AccessControl 角色事件沿用/新增既有风格 ABI。**`FeesClaimed` 的完整签名仍待核对既有 ABI，定稿前不得视为冻结；至少须记录 `(address indexed recipient, uint256 amount, uint256 at)` 三项信息。** 最小提前退出额、最大转账损耗等setter也须记录新旧值，不能只改状态而无可索引记录。
 
@@ -1394,7 +1402,7 @@ error RewardIndexCapacityExceeded();
 | **WADP 取整** | `PoolBWadpLib` 使用 **Ceil**，防止 floor 叠加导致提前进入低提现费档。 |
 | **奖励预算不足** | 完整排放进入用户指数与保守pending，未出资部分记badDebt并告警；不得同时截断用户债权、又把短缺称为已确权坏账。 |
 | **Bad Debt 期间复投** | 完整catch-up后检查两池badDebt，涵盖本次新增短缺，再决定能否将奖励转为本金。 |
-| **僵尸粉尘死锁** | Shutdown满365天且无本金时可finalize；满1095天可放宽无本金条件，但必须保留本金与全部保留pending的真实资金，只扫min(bookResidual,balance−protected)，不能以超时剥夺用户债权。 |
+| **僵尸残值死锁** | Shutdown满365天且无本金时可finalize；满1095天可放宽无本金条件，但必须保留本金与全部保留pending的真实资金，只扫min(bookResidual,balance−protected)，不能以超时剥夺用户债权。 |
 | **防零罚金漏洞** | 若设置了 `penaltyFeeBP`（**仅 Pool B** Early Exit），则 `minEarlyExitAmountB` 必须满足计算出的罚金 $\ge 1 \text{ wei}$，防止利用整除截断零成本逃逸。 |
 | **ERC777 绕过 CEI** | 不接受回调型资产；ERC1820对Core/Token的探测仅辅助，不能证明没有用户账户hook。须审核实际transfer行为并保留共享重入锁，不使用EOA限制误杀多签/AA。 |
 
@@ -1415,15 +1423,15 @@ error RewardIndexCapacityExceeded();
 | **活跃窗重排** (≥48h治理) | 先完整结算旧窗再按当前available排期；注资、首笔进池、复投、罚金回流、调拨均不隐式改变rate/finish。 |
 | **停机 orphan** | $orphan_X=totalPending_X-bookedUserRewards_X$；无剩余质押 finalize 后 $totalPending_X \leftarrow bookedUserRewards_X$；deadlock bypass 仍有质押时不裁剪 $totalPending_X$ |
 | **实际停机清扫上限** | sweep=min(bookResidual,balanceB−protectedB)，先require balanceB≥protectedB；protectedB=本金B+保留pendingA+保留pendingB。 |
-| **部分领取** | 现金=max(balanceB−本金B−费用−available总额−dust总额,0)；逐池实付≤pendingX−badDebtX；只核销实付，未付保留。 |
+| **部分领取** | 现金=max(balanceB−本金B−费用−available总额,0)；逐池实付≤pendingX−badDebtX；只核销实付，未付保留。 |
 | **Early Exit 罚金（Pool B）** | $Penalty=\frac{Amount \times penaltyFeeBP}{10000}$ |
 | **minEarlyExit 约束** (防零，Pool B) | penaltyFeeBP>0时minEarlyExitAmountB≥ceilDiv(BASIS_POINTS,penaltyFeeBP)；为0时不得执行除法，改罚金须联动校验。 |
-| **TokenB不变量** | BalanceB+BadDebtA+BadDebtB≥本金B+pending总额+available总额+费用+粉尘；容忍值仅诊断，付款、recover和finalize不得据此少留用户资金。 |
-| **pending与dust** | Q=REWARD_PRECISION，0<S≤Q时q=floor(DQ/S)，ceil(Sq/Q)=D；足额pending加D、预算减D，不新增dust；不足时仍pending加完整D、badDebt加缺款。 |
+| **TokenB不变量** | BalanceB+BadDebtA+BadDebtB≥本金B+pending总额+available总额+费用；付款、recover和finalize不得据此少留用户资金。 |
+| **pending与取整** | Q=REWARD_PRECISION，0<S≤Q时q=floor(DQ/S)，ceil(Sq/Q)=D；足额pending加D、预算减D，取整差额留在pending作为orphan；不足时仍pending加完整D、badDebt加缺款。 |
 | **奖励分片误差界** | 每正时间分片的指数阶段少分配<1 weiB，N片累计<N weiB；用户每次settle另有<1 weiB向下取整。不承诺微额奖励零相对误差。 |
 | **新窗口指数容量** | H=floor((UINT_MAX−acc)/REWARD_PRECISION)，最终候选duration>0且rate≤floor(H/duration)；不足仅拒绝新排期，不重置指数或阻断已验证窗口退出。 |
 | **最大速率约束** (上限保护) | $MAX\_REWARD\_RATE\_X=\frac{\text{maxTotalSupplyBForRewardRateCap} \times MAX\_APR\_BP}{10000 \times SECONDS\_PER\_YEAR}$（构造函数写入的 cap；**非** `notify` 时刻 `totalSupply()`） |
-| **Excess TokenB 可回收量** | $Excess=BalanceB-(TotalStakedB+TotalPending_{A+B}+AvailableRewards_{A+B}+UnclaimedFeesB+Dust_{A}+Dust_{B})$（与 §2.2 / §7.6、`recoverToken` 链上一致） |
+| **Excess TokenB 可回收量** | $Excess=BalanceB-(TotalStakedB+TotalPending_{A+B}+AvailableRewards_{A+B}+UnclaimedFeesB)$（与 §2.2 / §7.6、`recoverToken` 链上一致） |
 | **Shutdown 有序退出检查** | 状态守卫见§7.1：Shutdown忽略paused，非Shutdown的Emergency使用紧急退出；B继续按原Early/Mature规则，锁期及费率年龄取真实时间。 |
 
 ---
@@ -1446,7 +1454,7 @@ error RewardIndexCapacityExceeded();
 | **BadDebt 修复路径资金来源** | 付款人固定为调用门面immutable timelockGovernance绑定的48h Timelock，持币直接授权Core；Core验证绑定后单跳拉款按实收核销，不能任填用户或从空门面拉款。 | 坏账无法修复，`recoverToken`、预算调拨等依赖无坏账的治理操作被永久阻断。 |
 | **Shutdown 终态语义** | finalize前两池完整计提且badDebt=0；无本金才可裁pending至booked。旁路仍有本金时完整保留pending及其真实资金，清扫受账面残值与实际可支付额双限；后续orphan须待全本金退出后按同一安全条件再次finalize。 | 若前端/公告仍按“一律清扫 orphan”解释，会误导留仓用户对可领取奖励的预期。 |
 | **Emergency奖励领取的治理活性依赖** | 必须披露：Emergency关闭全部普通奖励领取；已无本金但仍有奖励的用户也不能领取或用零本金紧急退出，未放弃债权继续保留。运营须准备Admin经≥48h Timelock路径转入Shutdown后恢复按既有保护规则领取的治理流程；状态不会自动过渡。 | 若治理失联或不执行Shutdown，既有奖励可能无限期冻结；不能将Emergency宣传为用户可自主领取全部资产的模式。 |
-| **forceClaimAll 部分兑付顺序** | 健康Normal支持跨池足额领取且逐池满足minClaim；仅坏账/Shutdown允许部分并豁免minClaim，本金/费用/available/dust隔离，A→B优先，未付债权保留，零支付回滚。不能宣传为全协议等比例赔付。 | 用户可能误以为所有用户统一等比例兑付、未付奖励已被没收，或忽略真实资金补入前仍可能无法付款。 |
+| **forceClaimAll 部分兑付顺序** | 健康Normal支持跨池足额领取且逐池满足minClaim；仅坏账/Shutdown允许部分并豁免minClaim，本金/费用/available隔离，A→B优先，未付债权保留，零支付回滚。不能宣传为全协议等比例赔付。 | 用户可能误以为所有用户统一等比例兑付、未付奖励已被没收，或忽略真实资金补入前仍可能无法付款。 |
 | **链下监控依赖** | 监控必须覆盖 `InvariantViolated`、`InsufficientBudget`、`BadDebtResolved*`、`OutboundTransfer`、pause/emergency/shutdown、rewardRate/availableRewards 异常。 | 异常会计状态无法被及时发现，治理响应滞后。 |
 
 ### 10.2 上线前必须调整/确认的实现项
@@ -1492,16 +1500,16 @@ error RewardIndexCapacityExceeded();
 | F03 暂停时钟 | §4.1/§4.5/§7.2：冻结时间、活跃窗口平移一次 | 规范已修订，代码待修；暂停前fund只增加预算、不重排；暂停中fund及兼容仅注资notify必须回滚且不改账本。暂停中治理调拨/排期或偿债余款后恢复，足额预算不得产生虚假坏账；过期/零窗口不重启，终态不恢复时钟 |
 | 长闲置与补款 | 活跃/过期完整catch-up；完整确权后补款不重复加pending | 31/100/365天场景；预算5、排放10后补5，用户应可兑付10，补款不得误成可回收excess |
 | F04 退出状态机 | §5/§7：Emergency与Shutdown退出守卫一致且可达 | 待实现/回归；Pause→Emergency→Shutdown（paused仍true）普通提款不再被paused阻断；B保持原Early/Mature规则；0h开关不因计提/余额异常失败，crank全状态可用。另覆盖Normal全退本金保留奖励→Emergency领取及零本金紧急退出回滚、债权不核销→治理转Shutdown后按原领取规则可达的轨迹 |
-| F05 部分支付 | §5.4：只核销实付、余款保留 | 待实现；健康Normal跨池足额领取及逐池minClaim继续可用；坏账/Shutdown部分按A→B优先、逐池pending−debt上限正确；零支付回滚、二次补款后仍可领余款，不写dust/不减badDebt，成功支付更新共享冷却 |
+| F05 部分支付 | §5.4：只核销实付、余款保留 | 待实现；健康Normal跨池足额领取及逐池minClaim继续可用；坏账/Shutdown部分按A→B优先、逐池pending−debt上限正确；零支付回滚、二次补款后仍可领余款，不减badDebt，成功支付更新共享冷却 |
 | F06 停机清扫 | §7.4：账面残值与物理资金双上限 | 待实现；用户奖励约1600、余额1607时最多扫7；protected不足整体回滚；365/1095天及有未settle用户场景覆盖；finalize后仍可退本/领保留奖励；重复调用不重复清扫旧桶，全本金退出后再finalize安全释放真正orphan |
 | F07 没收核销 | §5.5：未出资债权不变可用预算 | 待实现；badDebt、pending/booked、真实缺口及回B预算守恒；Shutdown保留原B奖励处理规则；终态回流不重排 |
 | F08 资产准入/FOT | §4.6/§7.6：gross核销，净入账/出账及sender扣款受检 | 待实现；标准Token、cap=0、税率/极小额边界；stake/fund/resolve及全部用户/治理出账拒绝sender额外扣税；recover保护全required |
 | F09 热权限/治理 | §2/§6：Operator只注资，排期≥48h | 待实现；1 wei fund/stake/compound/罚金回流不能改变旧rate/finish；旧notify非零duration拒绝；治理真实调用链、模块code/布局及继承权限旁路验证 |
 | F10 偿债与部署 | §7.5/§8.2：门面immutable绑定真实payer、显式国库及完整交接 | 待实现；持币48h Timelock授权Core→门面→Core单跳偿债，任填用户payer拒绝；国库严格等于清单TREASURY、deployer撤权，最终角色图断言通过 |
 | F11 全套验收 | 原失败回归恢复，无skip掩盖 | 待完成；完整forge test可编译无失败，随机交错/模糊不变量验证债权、资金桶、退出和治理保护，固定编译配置重测合约及initcode大小 |
-| F12 结算频率与精度 | §3.1/§4.1/§4.2：奖励专用Q、硬份额上限、绝对误差界 | 规范已复核，代码待实现；36 decimals、100 A、1 B/秒、1天的单次/12秒/60秒计提均应产生86400 B奖励。增加第三方1原始单位stake/withdraw扰动、1 weiB微额排放及S=1、Q−1、Q、Q+1边界；S>Q必须拒绝，业务cap=0及compound豁免不能绕过；指数误差按每片<1 weiB而非所有微额相对误差为0验收；新计提dustDelta=0，pending完整覆盖债权 |
+| F12 结算频率与精度 | §3.1/§4.1/§4.2：奖励专用Q、硬份额上限、绝对误差界 | 规范已复核，代码待实现；36 decimals、100 A、1 B/秒、1天的单次/12秒/60秒计提均应产生86400 B奖励。增加第三方1原始单位stake/withdraw扰动、1 weiB微额排放及S=1、Q−1、Q、Q+1边界；S>Q必须拒绝，业务cap=0及compound豁免不能绕过；指数误差按每片<1 weiB而非所有微额相对误差为0验收；取整差额留在pending作为orphan，pending完整覆盖债权 |
 | F13 指数容量与尺度 | §4.5：整窗headroom、旧尺度迁移边界 | 规范已复核，代码待实现；按最小残余S=1验证最终rate/duration容量，覆盖恰好合法及超1单位边界、所有重锚微排放分支；headroom不足不影响旧窗口结算/取消/退出，不清acc/paid；旧1e18与新1e45尺度不得混用 |
-| 历史状态 | 修订算法不能替代历史对账 | 若存在旧部署，先核对pending/booked/dust/badDebt并制定迁移或补账方案，不能按改代码自动完成处理 |
+| 历史状态 | 修订算法不能替代历史对账 | 本项目为全新部署，无历史状态需迁移；若未来存在旧部署，先核对pending/booked/badDebt并制定迁移或补账方案，不能按改代码自动完成处理 |
 
 **本次集中收口状态：** 上述奖励会计、排期权限、暂停/终态、部分支付、没收核销、清扫保护、FOT及部署资金链已形成本文统一开发目标；**业务代码与测试仍待修复验收**，本次修订不代表实现通过。保留原有双池、模块化、FOT、BadDebt、WADP、锁仓及费用范围，未采用docs/v1的重写方案。现存代码、旧伪代码或历史审阅证据不能覆盖本次已修订条款。
 

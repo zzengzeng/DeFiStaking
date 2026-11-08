@@ -21,6 +21,11 @@ abstract contract DualPoolStorageLayout {
     uint256 public constant MAX_EARLY_EXIT_PENALTY_BP = 2000;
     uint256 public constant MAX_WITHDRAW_BP = 500;
     uint256 public constant MAX_MIDTERM_BP = 500;
+    uint256 public constant REWARD_PRECISION = 1e45;
+    uint256 public constant MAX_DELTA_TIME = 30 days;
+    uint256 public constant MAX_CATCHUP_ITERATIONS = 50;
+    uint256 public constant MAX_REWARD_SHARES_A = 1e45;
+    uint256 public constant MAX_REWARD_SHARES_B = 1e45;
 
     uint256 public maxTotalSupplyBForRewardRateCap;
     uint256 public maxRewardRateA;

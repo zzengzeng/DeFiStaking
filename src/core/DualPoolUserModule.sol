@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
+import {DualPoolRewardEngine} from "./DualPoolRewardEngine.sol";
 
-contract DualPoolUserModule {}
+contract DualPoolUserModule is DualPoolRewardEngine {}
