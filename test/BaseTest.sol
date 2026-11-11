@@ -26,7 +26,7 @@ abstract contract BaseTest is Test, Constants {
     bytes32 public ADMIN_ROLE;
     bytes32 public OPERATOR_ROLE;
 
-    function setUp() public {
+    function setUp() public virtual {
         tokenA = new MockERC20("TokenA", "TKA", GOOD_DECIMALS);
         tokenB = new MockERC20("TokenB", "TKB", GOOD_DECIMALS);
         vm.startPrank(deployer);

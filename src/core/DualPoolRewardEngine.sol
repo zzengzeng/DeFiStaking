@@ -3,10 +3,11 @@ pragma solidity ^0.8.20;
 
 import {DualPoolStorageLayout} from "./DualPoolStorageLayout.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
-import {Pool, PoolInfo} from "../StakeTypes.sol";
+import {Pool, PoolInfo, UserInfo} from "../StakeTypes.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 abstract contract DualPoolRewardEngine is DualPoolStorageLayout, Pausable {
+    error ZeroAmount();
     error RewardShareLimit();
     error WrongState();
     error CatchUpIncomplete();
@@ -15,8 +16,12 @@ abstract contract DualPoolRewardEngine is DualPoolStorageLayout, Pausable {
     error BookedRewardsExceedPending();
     error DebtExceedsPending();
 
-    event InsufficientBudget(Pool pool, uint256 shortfall, uint256 currentTime);
-    event PoolCatchUpCranked(Pool pool, uint256 lastUpdateTime, bool isCatchUp, uint256 currentTime);
+    error PayerDeductionMismatch();
+    error ReceivedExceedsAmount();
+    error FeeExceedsCap();
+
+    event InsufficientBudget(Pool indexed pool, uint256 shortfall, uint256 currentTime);
+    event PoolCatchUpCranked(Pool indexed pool, uint256 lastUpdateTime, bool isCatchUp, uint256 currentTime);
 
     function _effectiveTime() internal view returns (uint256) {
         if (emergencyMode || shutdownMode) return terminalRewardTime;
@@ -102,5 +107,27 @@ abstract contract DualPoolRewardEngine is DualPoolStorageLayout, Pausable {
         if (poolB.bookedUserRewards > poolB.totalPending) revert BookedRewardsExceedPending();
         if (poolA.badDebt > poolA.totalPending) revert DebtExceedsPending();
         if (poolB.badDebt > poolB.totalPending) revert DebtExceedsPending();
+    }
+
+    function _settleUser(Pool pool, address user) internal {
+        UserInfo storage u = pool == Pool.A ? userInfoA[user] : userInfoB[user];
+        PoolInfo storage p = pool == Pool.A ? poolA : poolB;
+
+        uint256 earned = Math.mulDiv(u.staked, p.accRewardPerToken - u.rewardPaid, REWARD_PRECISION);
+
+        if (earned > 0) {
+            u.rewards += earned;
+            p.bookedUserRewards += earned;
+        }
+
+        u.rewardPaid = p.accRewardPerToken;
+    }
+
+    function _settleUserA(address user) internal {
+        _settleUser(Pool.A, user);
+    }
+
+    function _settleUserB(address user) internal {
+        _settleUser(Pool.B, user);
     }
 }

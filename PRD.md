@@ -1,5 +1,25 @@
-# ERC20 (Staking) 协议需求规格说明书 v1.1.2
+# ERC20 (Staking) 协议需求规格说明书 v1.1.4
 
+> **v1.1.4 修订说明（2026-11-06）**
+>
+> - **§8**：明确 `Paused` / `Unpaused` 沿用 OZ `Pausable` 原生签名 `(address account)`；暂停时间点通过 `pausedAt` / `unpauseAt` 读取，不写入事件。
+> - **§5.3**：`withdrawB` 在 Early Exit / Mature 两个分支中，全额退出后必须清零 `unlockTimeB[user]` 与 `stakeTimestampB[user]`。
+> - **§5.4**：`claimA/claimB` 在 `shutdownMode` 下豁免 `minClaimAmount`；非 Shutdown 仍严格校验。
+> - **§5.2**：明确 `compoundB` 豁免 `minStakeAmountB`（无外部转账、无 dust 攻击面），但不豁免 `MAX_REWARD_SHARES_B` 与奖励数值硬上限。
+> - **§5.3.2**：没收助手的"分别发事件"改为通过 `RewardForfeited` 同时记录 `debtCancelled` / `lossAbsorbed` / `budgetReturned` 三个分量。
+>
+> **v1.1.3 修订说明（2026-11-06）**
+>
+> - **§5.4**：`claimA/claimB` 恢复 `_updateGlobalA/B + _settleUserX` 步骤；明确跨池 `badDebt` 检查需要两池都先计提（与 §10.2 "结算对应池" 的关系：结算是目标池，计提更新是两池）。
+> - **§5.5**：补 `emergencyWithdrawB` 完整伪代码（守卫、结算、本金覆盖、奖励核销、清零 B 锁/WADP、事件）。
+> - **§5.3**：明确 `withdrawB` 的 Early Exit / Mature 分支条件，以及 Shutdown 下沿用同一分支。
+> - **§5.3.1**：明确 `withdrawA` 只校验 TokenA 本金覆盖，**禁止调用 `_assertInvariantB()`**。
+> - **§5.4**：`forceClaimAll` 明确健康路径调用 `_assertInvariantB()`，降级路径不调用。
+> - **§3.1**：新增 `CLAIM_COOLDOWN`、`FEE_TIER_1`、`FEE_TIER_2` 常量，明确 `claimCooldown` 不可调。
+> - **§5.3.3**：补充 `withdrawB` 转出前后 B 本金覆盖检查、`stakeTimestampB == 0` 守卫。
+> - **§5.3.2**：明确 Early Exit 部分退出时仍放弃全部未领 B 奖励。
+> - **§5.1**：区分 `stakeA`（只查 TokenA 覆盖）与 `stakeB`（`_assertInvariantB`）的终检。
+>
 > **v1.1.2 修订说明（2026-11-06）**
 >
 > - **全新部署**：本项目为全新部署，无历史状态需迁移。移除 `dustA` / `dustB`、`DUST_TOLERANCE` 及 `DustAccumulated` 事件；指数取整余数只体现为 `orphan pending`（留在 `totalPendingX`），不再回灌预算。
@@ -213,6 +233,9 @@ require(balanceB > requiredB, "NO_EXCESS_TOKEN_B");
 | `MIN_REWARD_DURATION` | uint256 | **1 days** | 治理指定奖励周期下限；治理重锚的微排放例外见§4.5 |
 | `MAX_REWARD_RATE_A / B` | uint256 | 派生上界 | 由构造函数参数 **`maxTotalSupplyBForRewardRateCap`（>0，部署时一次性写入）** 与 `MAX_APR_BP`、`SECONDS_PER_YEAR` 推导；当前部署无正常setter，**禁止**使用运行时 `rewardTokenB.totalSupply()` 改变上界。 |
 | `MAX_MIN_CLAIM_AMOUNT` | uint256 | 1e17 wei | `minClaimAmount` setter 上限 |
+| `CLAIM_COOLDOWN` | uint256 | **24 hours** | Claim / Compound / forceClaim 共享冷却；**不可调**（constant/immutable），变更需升级模块或重新部署 |
+| `FEE_TIER_1` | uint256 | **90 days** | Pool B Mature 提现费率第一档边界：`holdingDuration < FEE_TIER_1` 用 `withdrawFeeBP` |
+| `FEE_TIER_2` | uint256 | **180 days** | Pool B Mature 提现费率第二档边界：`< FEE_TIER_2` 用 `midTermFeeBP`，`>= FEE_TIER_2` 为 0 |
 | `UNPAUSE_COOLDOWN` | uint256 | **24 hours** | 解除暂停的最短冷却期（immutable） |
 | `SECONDS_PER_YEAR` | uint256 | **31536000** | 常量 |
 | `MAX_APR_BP` | uint256 | 20000 | 200%，用于推导速率上限（immutable） |
@@ -324,7 +347,7 @@ uint256 public minClaimAmount;        // 合约初始值为 0（无门槛）；A
 | `midTermFeeBP` | uint256 | 中期到期手续费（BP） | 50（Max 500） |
 | `minStakeAmountA / B` | uint256 | 最小质押量 | 防粉尘攻击 |
 | `maxTVLCapA / B` | uint256 | TVL 上限 | 0=无限 |
-| `claimCooldown` | uint256 | Claim/Compound 冷却 | 24h |
+| `claimCooldown` | uint256 | Claim/Compound 冷却 | 24h（即 `CLAIM_COOLDOWN`，不可调） |
 | `maxTransferFeeBP` | uint256 | 出入账FOT损耗容忍阈值 | 默认1000；范围0～BASIS_POINTS，0要求无损，不是跳过检查；不支持sender额外扣税 |
 | `feeRecipient` | address | Pool B 提现手续费接收地址（`unclaimedFeesB` → `claimFees`） | 显式配置国库，非零且非Core；后续Admin变更≥48h Timelock，不得默认遗留部署钱包 |
 | `minEarlyExitAmountB` | uint256 | **仅 Pool B**：最小提前退出量 | 须满足计算罚金 $\ge 1 \text{ wei}$ |
@@ -677,7 +700,10 @@ require(maxTVLCapX == 0 || totalStakedX + received <= maxTVLCapX, "CAP_EXCEEDED"
 7. **Rolling Lock（仅B）**：`unlockTimeB[user] = _updateRollingLock(unlockTimeB[user], lockDuration)`；A无锁。
 8. **不触发重锚**：首笔入场、空池入场及过期窗口均不修改rate/finish；按原窗口计提，过期预算等待§4.5治理排期。
 
-9. **终检与事件**：`_assertInvariantB()`; emit `Staked(...)`
+9. **终检与事件**：
+   - `stakeA`：只校验 TokenA 本金覆盖 `stakingTokenA.balanceOf(address(this)) >= totalStakedA`，**禁止调用 `_assertInvariantB()`**（B 池缺口或 TokenB 查询失败不得阻断 A 入金）。
+   - `stakeB`：调用 `_assertInvariantB()`。
+   - emit `Staked(...)`。
 
 ### 5.2 CompoundB（复投：Pool A/B 奖励 → Pool B 本金）
 
@@ -686,7 +712,7 @@ require(maxTVLCapX == 0 || totalStakedX + received <= maxTVLCapX, "CAP_EXCEEDED"
 ```text
 步骤 1：状态与冷却校验
   require(!paused && !emergencyMode && !shutdownMode)
-  require(lastClaimTime[user] == 0 || block.timestamp >= lastClaimTime[user] + claimCooldown)
+  require(lastClaimTime[user] == 0 || block.timestamp >= lastClaimTime[user] + CLAIM_COOLDOWN)
 
 步骤 2：完整结算与坏账检查（必须在本金变更前）
   _updateGlobalA() // 完整 catch-up
@@ -721,7 +747,8 @@ require(maxTVLCapX == 0 || totalStakedX + received <= maxTVLCapX, "CAP_EXCEEDED"
 
 步骤 8：结转本金 (UX 优化：豁免外部 Cap 限制)
   // 说明：此豁免仅适用于由已确权奖励转化而来的内部复利，绝不适用于任何外部 stakeB 转入行为。
-  // 只豁免业务TVL cap；步骤4的奖励数值硬上限不可豁免，超限整笔回滚并保留原奖励。
+  // 只豁免业务TVL cap 与 minStakeAmountB（无外部转账、无 dust 攻击面）；
+  // 步骤4的奖励数值硬上限与 MAX_REWARD_SHARES_B 不可豁免，超限整笔回滚并保留原奖励。
   // 旨在防止池子接近饱满时直接卡死用户的自动复投。
   userStakedB_before = userStakedB[user]
   userStakedB[user] += (rA + rB)
@@ -756,19 +783,40 @@ require(amount > 0 && amount <= userStakedA[user], "INVALID_AMOUNT");
 
 _updateGlobalA();
 _settleUserA(user);
+// 转出前确认全池A本金覆盖（用扣减前的 totalStakedA），B缺口不阻断足额A本金退出
+require(stakingTokenA.balanceOf(address(this)) >= totalStakedA, "PRINCIPAL_DEFICIT_A");
+
 // 扣减本金、更新指数快照后，全额转出 TokenA 本金；fee/penalty 为 0
 userStakedA[user] -= amount;
 totalStakedA -= amount;
-// A独立退本须在转出前确认全池A本金覆盖；B缺口不阻断足额A本金退出。
 FOTTransferLib.transferGross(stakingTokenA, user, amount, maxTransferFeeBP, BASIS_POINTS);
+
+// 禁止在本函数末尾调用 _assertInvariantB()：B 池缺口或 TokenB 查询失败不得阻断 A 退本。
+// 只依赖上面的 TokenA 本金覆盖检查。
 
 ```
 
 #### 5.3.2 Early Exit Pool B (会计闭环)
 
+**分支选择（强制，顺序不可交换）**：
+
+```solidity
+if (block.timestamp < unlockTimeB[user]) {
+    // Early Exit：走 §5.3.2
+} else {
+    // Mature：走 §5.3.3 费率阶梯
+}
+```
+
+- **Shutdown 不改变分支**：仍按 `unlockTimeB` 判断 Early / Mature，只忽略 `paused`。
+- **Emergency（非 Shutdown）禁止 `withdrawB`**，必须走 `emergencyWithdrawB`。
+- **全额退出清理**：任一分支在 `userStakedB[user] == 0` 时必须清零 `unlockTimeB[user]` 与 `stakeTimestampB[user]`，避免旧锁/旧 WADP 影响下一次 stake。
+
+**Early Exit 的奖励没收语义（强制）**：只要走 Early Exit 分支，无论 `amount` 是全部还是部分本金，都会**放弃本池全部未领 B 奖励**（`rewardsB[user]` 全量进入 `_forfeitRewards`）。`amount` 本身仍须满足 `amount >= minEarlyExitAmountB`。
+
 **Shutdown状态守卫**：`withdrawB`在Shutdown下忽略paused，仍按既有unlockTime、Early Exit和Mature费率分支处理；不另增免锁、免罚金或免手续费政策。完整计提使用终态冻结点，退本前须验证全池B本金物理覆盖并保护转出后的剩余本金。
 
-**统一奖励没收助手**（也供§5.5调用）：先完成相关池计提与本人settle，`F = rewardsX[user]`；要求pending与booked均能覆盖F。令`E=max(requiredB-balanceB-badDebtA-badDebtB,0)`（实现须按安全加减顺序计算）、`m=min(F,badDebtX)`、`released=F-m`、`lossAbsorbed=min(released,E)`。`rewardsX`清零，`pendingX/bookedX`各减F，`badDebtX`减m，仅`released-lossAbsorbed`加入`availableRewardsB`。核销已记录债务、吸收既存物理缺口、真实预算回流须分别发事件；禁止把未出资奖励变预算或增加badDebt掩盖外部损失。
+**统一奖励没收助手**（也供§5.5调用）：先完成相关池计提与本人settle，`F = rewardsX[user]`；要求pending与booked均能覆盖F。令`E=max(requiredB-balanceB-badDebtA-badDebtB,0)`（实现须按安全加减顺序计算）、`m=min(F,badDebtX)`、`released=F-m`、`lossAbsorbed=min(released,E)`、`budgetReturned=released-lossAbsorbed`。`rewardsX`清零，`pendingX/bookedX`各减F，`badDebtX`减m，仅`budgetReturned`加入`availableRewardsB`。必须通过 `RewardForfeited(user, pool, forfeited=F, debtCancelled=m, lossAbsorbed, budgetReturned)` 事件同时记录三个分量；禁止把未出资奖励变预算或增加badDebt掩盖外部损失。
 
 ```solidity
 // 前置状态检查同上...
@@ -794,11 +842,19 @@ userRewardPaidB[user] = accRewardPerTokenB;
 
 // 步骤 6：扣减本金与净额转账
 uint256 net = amount - penalty;
+require(rewardTokenB.balanceOf(address(this)) >= totalStakedB, "PRINCIPAL_DEFICIT_B");
 userStakedB[user] -= amount;
 totalStakedB -= amount;
 
+// 全额退出时必须清理锁与 WADP 起点，避免旧状态影响下一次 stake
+if (userStakedB[user] == 0) {
+    unlockTimeB[user] = 0;
+    stakeTimestampB[user] = 0;
+}
+
 // 步骤 7：执行转账与不变量终检
 FOTTransferLib.transferGross(rewardTokenB, user, net, maxTransferFeeBP, BASIS_POINTS);
+require(rewardTokenB.balanceOf(address(this)) >= totalStakedB, "PRINCIPAL_DEFICIT_B_AFTER");
 _assertInvariantB();
 emit Withdrawn(user, amount, penalty, true, Pool.B);  
 
@@ -815,9 +871,15 @@ emit Withdrawn(user, amount, penalty, true, Pool.B);
 _updateGlobalB();
 _settleUserB(user);
 
-// 步骤 2：费率匹配与持仓时长计算（仅 B：stakeTimestampB / unlockTimeB）
+// 步骤 2：持仓时长与费率匹配（仅 B：stakeTimestampB / unlockTimeB）
+require(stakeTimestampB[user] > 0, "INVALID_STAKE_TIMESTAMP");
+require(amount > 0 && amount <= userStakedB[user], "INVALID_AMOUNT");
+
 uint256 holdingDuration = block.timestamp - stakeTimestampB[user];
-// 费率匹配: < 90d (withdrawFeeBP) | 90-180d (midTermFeeBP) | >= 180d (0%)
+uint256 currentFeeBP = holdingDuration < FEE_TIER_1
+    ? withdrawFeeBP
+    : (holdingDuration < FEE_TIER_2 ? midTermFeeBP : 0);
+
 uint256 fee = amount * currentFeeBP / BASIS_POINTS;
 uint256 net = amount - fee;
 
@@ -826,13 +888,23 @@ if (fee > 0) {
     unclaimedFeesB += fee;
 }
 
-// 步骤 4：强固化快照并在后扣减本金 (Fail-safe)
+// 步骤 4：转出前确认全池 B 本金覆盖（使用扣减前的 totalStakedB）
+require(rewardTokenB.balanceOf(address(this)) >= totalStakedB, "PRINCIPAL_DEFICIT_B");
+
+// 步骤 5：强固化快照并在后扣减本金 (Fail-safe)
 userRewardPaidB[user] = accRewardPerTokenB;
 userStakedB[user] -= amount;
 totalStakedB -= amount;
 
-// 步骤 5：执行转账与终检
+// 全额退出时必须清理锁与 WADP 起点，避免旧状态影响下一次 stake
+if (userStakedB[user] == 0) {
+    unlockTimeB[user] = 0;
+    stakeTimestampB[user] = 0;
+}
+
+// 步骤 6：执行转账与终检
 FOTTransferLib.transferGross(rewardTokenB, user, net, maxTransferFeeBP, BASIS_POINTS);
+require(rewardTokenB.balanceOf(address(this)) >= totalStakedB, "PRINCIPAL_DEFICIT_B_AFTER");
 _assertInvariantB();
 emit Withdrawn(user, amount, fee, false, Pool.B);
 
@@ -847,16 +919,43 @@ emit Withdrawn(user, amount, fee, false, Pool.B);
 ```solidity
 require(shutdownMode || !paused, "PAUSED");
 require(!emergencyMode || shutdownMode, "EMERGENCY_MODE");
-require(lastClaimTime[msg.sender] == 0 || block.timestamp >= lastClaimTime[msg.sender] + claimCooldown, "COOLDOWN");
-// _updateGlobalX(); _settleUserX(msg.sender);
+require(lastClaimTime[msg.sender] == 0 ||
+    block.timestamp >= lastClaimTime[msg.sender] + CLAIM_COOLDOWN, "COOLDOWN");
+
+// 【强制】跨池 badDebt 检查要求两池都已完整计提；settle 只针对目标池。
+// 这与 §10.2 "claim 结算对应池" 不冲突：对应池指 settle 目标，计提更新需要两池。
+_updateGlobalA();
+_updateGlobalB();
+_settleUserX(msg.sender);
+
 require(badDebtA == 0 && badDebtB == 0, "BAD_DEBT_EXISTS"); // 任一池坏账则两池标准 claim 均阻断
+
 uint256 reward = rewardsX[msg.sender];
-require(reward > 0 && reward >= minClaimAmount, "BELOW_MIN_CLAIM");
-// 足额物理覆盖检查通过后：rewardsX[user]=0; totalPendingX -= reward; bookedUserRewardsX -= reward;
-// lastClaimTime[user]=block.timestamp；使用§4.6 transferGross支付，转账失败整笔回滚。
-emit Claimed(user, paidA, paidB, timestamp);  // 单池路径另一侧为 0
+require(reward > 0, "NOTHING_TO_CLAIM");
+// Shutdown 下豁免最小领取额；非 Shutdown 仍严格校验。
+// 存在 badDebt 时本入口已被上面的 badDebt 守卫阻断，不属于此分支。
+if (!shutdownMode) {
+    require(reward >= minClaimAmount, "BELOW_MIN_CLAIM");
+}
+
+// 足额物理覆盖检查通过后，先改账本再转账（CEI）
+rewardsX[msg.sender] = 0;
+totalPendingX -= reward;
+bookedUserRewardsX -= reward;
+lastClaimTime[msg.sender] = block.timestamp;
+
+FOTTransferLib.transferGross(rewardTokenB, msg.sender, reward, maxTransferFeeBP, BASIS_POINTS);
+_assertInvariantB();   // 此时两池 badDebt 已确认为 0
+
+uint256 paidA = X == Pool.A ? reward : 0;
+uint256 paidB = X == Pool.B ? reward : 0;
+emit Claimed(msg.sender, paidA, paidB, block.timestamp);
 
 ```
+
+> **为什么 `claimA/claimB` 要更新两池**：`badDebtA == 0 && badDebtB == 0` 是跨池守卫。若只更新目标池，另一池的 `badDebt` 可能是旧值，导致"看起来没坏账、实际有"时错误放行领取。
+>
+> **代价**：单池 claim 的 gas 会包含另一池的 catch-up。这是正确性优先于 gas 的取舍。若未来要优化，只能改为"只检查目标池 badDebt"，不能保留跨池检查却只更新单池。
 
 **`forceClaimAll()`：跨池领取 / 坏账逃生舱**
 
@@ -867,7 +966,7 @@ function forceClaimAll() external nonReentrant {
     require(shutdownMode || !paused, "PAUSED");
     require(!emergencyMode || shutdownMode, "EMERGENCY_MODE");
     require(lastClaimTime[msg.sender] == 0 ||
-        block.timestamp >= lastClaimTime[msg.sender] + claimCooldown, "COOLDOWN");
+        block.timestamp >= lastClaimTime[msg.sender] + CLAIM_COOLDOWN, "COOLDOWN");
 
     _updateGlobalA(); _updateGlobalB(); // 状态判断包含本次完整计提新产生的坏账
     _settleUserA(msg.sender); _settleUserB(msg.sender);
@@ -904,8 +1003,18 @@ function forceClaimAll() external nonReentrant {
     lastClaimTime[msg.sender] = block.timestamp;
 
     FOTTransferLib.transferGross(rewardTokenB, msg.sender, paid, maxTransferFeeBP, BASIS_POINTS);
-    // 检查逐池booked<=pending、badDebt<=pending及保留桶；原有未记录缺口不得扩大。
-    // 健康路径须通过完整B覆盖断言；降级路径报告原有缺口，不回滚合法实付。
+
+    // 健康路径：完整 B 覆盖断言（余额 + 账本）。
+    // 降级路径：只做账本内部一致性检查，不查真实余额，避免既有缺口阻断合法部分兑付。
+    if (!shutdownMode && badDebtA == 0 && badDebtB == 0) {
+        _assertInvariantB();
+    } else {
+        require(bookedUserRewardsA <= totalPendingA && bookedUserRewardsB <= totalPendingB,
+                "BOOKED_EXCEEDS_PENDING");
+        require(badDebtA <= totalPendingA && badDebtB <= totalPendingB,
+                "DEBT_EXCEEDS_PENDING");
+    }
+
     emit ForceClaimed(msg.sender, payA, payB,
         rewardsA[msg.sender], rewardsB[msg.sender], block.timestamp);
 }
@@ -932,7 +1041,29 @@ emit EmergencyWithdrawn(user, principal, forfeited, Pool.A, block.timestamp);
 // B奖励账目缺口只报告，不回滚足额A退本；A本金和转账扣款检查仍强制执行。
 ```
 
-`emergencyWithdrawB`同理退出本人全部B本金、免锁免协议费，明确放弃本池全部未领奖励并调用同一核销助手；退本前要求`balanceB>=totalStakedB`，保护全池本金，不在本金不足时让先到者全额领走；全退后清零B锁/WADP。另一池本金与奖励保持不变。终态回流不触发重排，既存奖励缺口只报告，不能豁免本金覆盖、sender扣款、完整计提或账本核销正确性。
+`emergencyWithdrawB` 与 A 对称：退出本人全部 B 本金、免锁免协议费，明确放弃本池全部未领奖励并调用同一核销助手；退本前要求 `balanceB >= totalStakedB`，保护全池本金，不在本金不足时让先到者全额领走；全退后清零 B 锁/WADP。另一池本金与奖励保持不变。终态回流不触发重排，既存奖励缺口只报告，不能豁免本金覆盖、sender扣款、完整计提或账本核销正确性。
+
+```solidity
+require(emergencyMode == true && !shutdownMode, "NOT_EMERGENCY"); // 忽略 paused
+_updateGlobalB();
+_settleUserB(user);
+
+uint256 principalB = userStakedB[user];
+require(principalB > 0, "NO_STAKE");
+require(rewardTokenB.balanceOf(address(this)) >= totalStakedB, "PRINCIPAL_DEFICIT_B");
+
+uint256 forfeitedB = rewardsB[user];
+_forfeitRewards(Pool.B, user); // 核销 debt / 吸收既有缺口，仅有支持部分回流 availableRewardsB
+
+userStakedB[user] = 0;
+totalStakedB -= principalB;
+unlockTimeB[user] = 0;        // 全退后清零 B 锁
+stakeTimestampB[user] = 0;    // 全退后清零 WADP 起点
+
+FOTTransferLib.transferGross(rewardTokenB, user, principalB, maxTransferFeeBP, BASIS_POINTS);
+require(rewardTokenB.balanceOf(address(this)) >= totalStakedB, "PRINCIPAL_DEFICIT_B_AFTER");
+emit EmergencyWithdrawn(user, principalB, forfeitedB, Pool.B, block.timestamp);
+```
 
 ---
 
@@ -988,7 +1119,7 @@ require(actualAmount >= Math.mulDiv(amount, BASIS_POINTS - maxTransferFeeBP,
 availableRewardsX += actualAmount;
 // rewardRate / periodFinish不变；lastUpdateTime仅按步骤1推进。
 _assertInvariantB();
-emit RewardFunded(Pool.X, payer, amount, actualAmount);
+emit RewardsFunded(Pool.X, payer, amount, actualAmount,currentTime);
 ```
 
 **治理开启、重排与取消周期（≥48h Timelock）**
@@ -1299,13 +1430,15 @@ event RewardForfeited(address indexed user, Pool indexed pool, uint256 forfeited
 // ── 管理员与系统操作事件 ──────────────────────────────────────────────────
 // RewardNotified仅保留旧ABI记录；修订后的fund与schedule用独立事件，不混用旧语义。
 event RewardNotified(Pool indexed pool, uint256 amount, uint256 duration, uint256 rate);
-event RewardFunded(Pool indexed pool, address indexed payer, uint256 requested, uint256 received);
+event RewardsFunded(Pool indexed pool, address indexed payer, uint256 requested, uint256 received, uint256 currentTime);
 event RewardScheduled(Pool indexed pool, uint256 duration, uint256 rate, uint256 effectiveStart, uint256 finish);
 event RewardScheduleCancelled(Pool indexed pool, uint256 remainingBudget, uint256 at);
 event PoolCatchUpCranked(Pool indexed pool, uint256 lastUpdateTime, bool complete, uint256 at);
 event BudgetRebalanced(Pool indexed from, Pool indexed to, uint256 amount, uint256 at);
-event Paused(address indexed by, uint256 at);
-event Unpaused(address indexed by, uint256 at);
+// Paused / Unpaused 沿用 OZ Pausable 原生事件，不重新声明：
+//   event Paused(address account);
+//   event Unpaused(address account);
+// 暂停时间点通过公开状态 pausedAt / unpauseAt 读取，不写入事件。
 event UserModuleUpdated(address indexed oldModule, address indexed newModule, uint256 at);
 event AdminModuleUpdated(address indexed oldModule, address indexed newModule, uint256 at);
 event SuperAdminTransferred(address indexed oldSuperAdmin, address indexed newSuperAdmin, uint256 at);
@@ -1460,7 +1593,7 @@ error RewardIndexCapacityExceeded();
 ### 10.2 上线前必须调整/确认的实现项
 
 1. **全入口 catch-up 规则**
-   stake/fund/分池withdraw/claim/取消排期结算对应池；schedule/reanchor、compound、forceClaimAll、rebalance、resolve、claimFees和finalize结算两池；Emergency A回流B前结算两池，Emergency B结算B。Normal/Shutdown A退本不依赖B计提。活跃/过期均完整推进至各自min(effectiveTime,finish)，分片不足先公开crank；防御开关及shutdown激活不依赖计提，recover按完整账面保护excess。
+   stake/fund/分池withdraw/取消排期结算对应池；**claimA/claimB 计提两池、settle 目标池**（跨池 badDebt 守卫要求两池都先计提，见 §5.4）；schedule/reanchor、compound、forceClaimAll、rebalance、resolve、claimFees和finalize结算两池；Emergency A回流B前结算两池，Emergency B结算B。Normal/Shutdown A退本不依赖B计提。活跃/过期均完整推进至各自min(effectiveTime,finish)，分片不足先公开crank；防御开关及shutdown激活不依赖计提，recover按完整账面保护excess。
 
 2. **活跃预算不可直接搬走**
    两池先完整结算，无badDebt；只能搬走source.available−rate×max(finish−effectiveTime,0)之外的预算。需搬走未来承诺时，≥48h治理先显式取消旧周期再调拨；调入、fund、罚金或没收回流均不自动重排。

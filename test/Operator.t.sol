@@ -80,7 +80,7 @@ contract TestOperator is BaseTest {
         assertEq(core.terminalRewardTime(), core.pausedAt());
     }
 
-    function _expectRewardFunded(Pool pool, address payer, uint256 amount, uint256 received) internal {
+    function _expectRewardsFunded(Pool pool, address payer, uint256 amount, uint256 received) internal {
         vm.expectEmit(true, false, false, true, address(core));
         emit DualPoolStaking.RewardsFunded(pool, payer, amount, received, block.timestamp);
     }
@@ -90,7 +90,7 @@ contract TestOperator is BaseTest {
         vm.startPrank(ops);
         deal(address(tokenB), ops, amount);
         tokenB.approve(address(core), amount);
-        _expectRewardFunded(Pool.A, ops, amount, amount);
+        _expectRewardsFunded(Pool.A, ops, amount, amount);
         core.fundRewards(Pool.A, amount);
         assertEq(core.getPool(Pool.A).availableRewards, amount);
         assertEq(tokenB.balanceOf(address(core)), amount);
@@ -103,7 +103,7 @@ contract TestOperator is BaseTest {
         vm.startPrank(ops);
         deal(address(tokenB), ops, amount);
         tokenB.approve(address(core), amount);
-        _expectRewardFunded(Pool.B, ops, amount, amount);
+        _expectRewardsFunded(Pool.B, ops, amount, amount);
         core.fundRewards(Pool.B, amount);
         assertEq(core.getPool(Pool.B).availableRewards, amount);
         assertEq(tokenB.balanceOf(address(core)), amount);
@@ -124,7 +124,7 @@ contract TestOperator is BaseTest {
 
     function testFundRewardsRevertZeroAmount() public {
         vm.prank(ops);
-        vm.expectRevert(DualPoolStaking.ZeroAmount.selector);
+        vm.expectRevert(DualPoolRewardEngine.ZeroAmount.selector);
         core.fundRewards(Pool.B, 0);
     }
 
@@ -152,7 +152,7 @@ contract TestOperator is BaseTest {
         vm.startPrank(ops);
         fotToken.approve(address(fotCore), amount);
         uint256 expectReceived = amount * (BASIS_POINTS - feeBP) / BASIS_POINTS;
-        vm.expectEmit(true, false, false, true, address(fotCore));
+        vm.expectEmit(true, true, false, true, address(fotCore));
         emit DualPoolStaking.RewardsFunded(Pool.A, ops, amount, expectReceived, block.timestamp);
         fotCore.fundRewards(Pool.A, amount);
         assertEq(fotCore.getPool(Pool.A).availableRewards, expectReceived);
@@ -169,7 +169,7 @@ contract TestOperator is BaseTest {
         vm.startPrank(ops);
         fotToken.approve(address(fotCore), amount);
         uint256 expectReceived = amount * (BASIS_POINTS - feeBP) / BASIS_POINTS;
-        vm.expectEmit(true, false, false, true, address(fotCore));
+        vm.expectEmit(true, true, false, true, address(fotCore));
         emit DualPoolStaking.RewardsFunded(Pool.A, ops, amount, expectReceived, block.timestamp);
         fotCore.fundRewards(Pool.A, amount);
         assertEq(fotCore.getPool(Pool.A).availableRewards, expectReceived);
@@ -185,7 +185,7 @@ contract TestOperator is BaseTest {
         fotToken.mint(ops, amount);
         vm.startPrank(ops);
         fotToken.approve(address(fotCore), amount);
-        vm.expectRevert(DualPoolStaking.FeeExceedsCap.selector);
+        vm.expectRevert(DualPoolRewardEngine.FeeExceedsCap.selector);
         fotCore.fundRewards(Pool.A, amount);
         vm.stopPrank();
     }
@@ -228,7 +228,7 @@ contract TestOperator is BaseTest {
         fotToken.mint(ops, amount);
         vm.startPrank(ops);
         fotToken.approve(address(fotCore), amount);
-        vm.expectRevert(DualPoolStaking.ReceivedExceedsAmount.selector);
+        vm.expectRevert(DualPoolRewardEngine.ReceivedExceedsAmount.selector);
         fotCore.fundRewards(Pool.A, amount);
         vm.stopPrank();
     }
@@ -241,7 +241,7 @@ contract TestOperator is BaseTest {
         fotToken.mint(ops, amount + fee);
         vm.startPrank(ops);
         fotToken.approve(address(fotCore), amount);
-        vm.expectRevert(DualPoolStaking.PayerDeductionMismatch.selector);
+        vm.expectRevert(DualPoolRewardEngine.PayerDeductionMismatch.selector);
         fotCore.fundRewards(Pool.A, amount);
         vm.stopPrank();
     }

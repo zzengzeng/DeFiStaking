@@ -20,8 +20,6 @@ contract DualPoolStaking is DualPoolRoles {
     address public adminModule;
     address public userModule;
 
-    error ZeroAmount();
-
     error SameToken();
     error NotAContract();
     error InvalidTokenDecimals();
@@ -33,14 +31,11 @@ contract DualPoolStaking is DualPoolRoles {
 
     error ContractPaused();
     error AlreadyEmergencyMode();
-    error PayerDeductionMismatch();
-    error ReceivedExceedsAmount();
-    error FeeExceedsCap();
 
     event AdminModuleUpdated(address indexed oldAdminModule, address indexed newAdminModule, uint256 currentTime);
     event UserModuleUpdated(address indexed oldUserModule, address indexed newUserModule, uint256 currentTime);
-    event EmergencyModeActivated(address sender, uint256 currentTime);
-    event RewardsFunded(Pool indexed pool, address sender, uint256 amount, uint256 received, uint256 currentTime);
+    event EmergencyModeActivated(address indexed sender, uint256 currentTime);
+    event RewardsFunded(Pool indexed pool, address indexed sender, uint256 amount, uint256 received, uint256 currentTime);
 
     constructor(address _tokenA, address _tokenB, uint256 _cap, uint256 unpause_cooldown) {
         if (_tokenA == address(0) || _tokenB == address(0)) revert ZeroAddress();
@@ -165,6 +160,8 @@ contract DualPoolStaking is DualPoolRoles {
     function fundRewards(Pool pool, uint256 amount) external onlyRole(OPERATOR_ROLE) nonReentrant {
         if (paused() || emergencyMode || shutdownMode) revert WrongState();
         if (amount == 0) revert ZeroAmount();
+
+        _updateGlobal(pool);
 
         IERC20 token = rewardTokenB;
         uint256 payerBefore = token.balanceOf(msg.sender);
