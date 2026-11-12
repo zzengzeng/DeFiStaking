@@ -10,6 +10,8 @@ import {MockSenderFeeERC20} from "./mocks/MockSenderFeeERC20.sol";
 
 import {DualPoolStaking} from "../src/core/DualPoolStaking.sol";
 import {DualPoolAdminModule} from "../src/core/DualPoolAdminModule.sol";
+import {DualPoolUserModule} from "../src/core/DualPoolUserModule.sol";
+
 import {Constants} from "./utils/Constants.sol";
 
 abstract contract BaseTest is Test, Constants {
@@ -17,6 +19,7 @@ abstract contract BaseTest is Test, Constants {
     MockERC20 public tokenB;
     DualPoolStaking public core;
     DualPoolAdminModule public adminModule;
+    DualPoolUserModule public userModule;
 
     address deployer = makeAddr("deployer");
     address alice = makeAddr("alice");
@@ -32,7 +35,9 @@ abstract contract BaseTest is Test, Constants {
         vm.startPrank(deployer);
         core = new DualPoolStaking(address(tokenA), address(tokenB), CAP, 24 hours);
         adminModule = new DualPoolAdminModule();
+        userModule = new DualPoolUserModule();
         core.setAdminModule(address(adminModule));
+        core.setUserModule(address(userModule));
         core.setAdmin(alice, true);
         core.setOperator(ops, true);
         ADMIN_ROLE = core.ADMIN_ROLE();

@@ -20,8 +20,16 @@ abstract contract DualPoolRewardEngine is DualPoolStorageLayout, Pausable {
     error ReceivedExceedsAmount();
     error FeeExceedsCap();
 
+    error BelowMinStake();
+    error CapExceeded();
+    error InsufficientCoverage();
+
+    error InvalidStakeTimestamp();
+
     event InsufficientBudget(Pool indexed pool, uint256 shortfall, uint256 currentTime);
     event PoolCatchUpCranked(Pool indexed pool, uint256 lastUpdateTime, bool isCatchUp, uint256 currentTime);
+
+    event Staked(address indexed sender, Pool indexed pool, uint256 received, uint256 time);
 
     function _effectiveTime() internal view returns (uint256) {
         if (emergencyMode || shutdownMode) return terminalRewardTime;

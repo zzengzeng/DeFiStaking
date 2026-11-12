@@ -11,7 +11,7 @@ import {DualPoolRoles} from "./DualPoolRoles.sol";
 import {Pool, PoolInfo} from "../StakeTypes.sol";
 
 import {IDualPoolAdminModule} from "../interfaces/IDualPoolAdminModule.sol";
-import {DualPoolUserModule} from "../core/DualPoolUserModule.sol";
+import {IDualPoolUserModule} from "../interfaces/IDualPoolUserModule.sol";
 
 contract DualPoolStaking is DualPoolRoles {
     using Address for address;
@@ -35,7 +35,9 @@ contract DualPoolStaking is DualPoolRoles {
     event AdminModuleUpdated(address indexed oldAdminModule, address indexed newAdminModule, uint256 currentTime);
     event UserModuleUpdated(address indexed oldUserModule, address indexed newUserModule, uint256 currentTime);
     event EmergencyModeActivated(address indexed sender, uint256 currentTime);
-    event RewardsFunded(Pool indexed pool, address indexed sender, uint256 amount, uint256 received, uint256 currentTime);
+    event RewardsFunded(
+        Pool indexed pool, address indexed sender, uint256 amount, uint256 received, uint256 currentTime
+    );
 
     constructor(address _tokenA, address _tokenB, uint256 _cap, uint256 unpause_cooldown) {
         if (_tokenA == address(0) || _tokenB == address(0)) revert ZeroAddress();
@@ -205,5 +207,13 @@ contract DualPoolStaking is DualPoolRoles {
 
     function scheduleRewards(Pool pool, uint256 duration) external onlyRole(ADMIN_ROLE) nonReentrant {
         _delegateTo(adminModule, abi.encodeCall(IDualPoolAdminModule.scheduleRewards, (pool, duration)));
+    }
+
+    function stakeA(uint256 amount) external nonReentrant {
+        _delegateTo(userModule, abi.encodeCall(IDualPoolUserModule.stakeA, (amount)));
+    }
+
+    function stakeB(uint256 amount) external nonReentrant {
+        _delegateTo(userModule, abi.encodeCall(IDualPoolUserModule.stakeB, (amount)));
     }
 }
