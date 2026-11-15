@@ -49,6 +49,7 @@ abstract contract BaseTest is Test, Constants {
         vm.startPrank(deployer);
         newCore = new DualPoolStaking(address(tokenA), _tokenB, CAP, 24 hours);
         newCore.setAdminModule(address(adminModule));
+        newCore.setUserModule(address(userModule));
         newCore.setOperator(ops, true);
         vm.stopPrank();
     }
@@ -57,6 +58,39 @@ abstract contract BaseTest is Test, Constants {
         fotToken = new MockFOTERC20("FOT", "FOT", GOOD_DECIMALS);
         fotToken.setFee(feeBP);
         fotCore = _deployCoreWithToken(address(fotToken));
+    }
+
+    function _deployFOTACore(uint256 feeBP) internal returns (DualPoolStaking fotCore, MockFOTERC20 fotToken) {
+        fotToken = new MockFOTERC20("FOTA", "FOTA", GOOD_DECIMALS);
+        fotToken.setFee(feeBP);
+        vm.startPrank(deployer);
+        fotCore = new DualPoolStaking(
+            address(fotToken), // ← TokenA = FOT
+            address(tokenB), // ← TokenB = 标准
+            CAP,
+            24 hours
+        );
+        fotCore.setAdminModule(address(adminModule));
+        fotCore.setUserModule(address(userModule));
+        fotCore.setOperator(ops, true);
+        vm.stopPrank();
+    }
+
+    function _deployFOTBCore(uint256 feeBP) internal returns (DualPoolStaking fotCore, MockFOTERC20 fotToken) {
+        fotToken = new MockFOTERC20("FOTB", "FOTB", GOOD_DECIMALS);
+        fotToken.setFee(feeBP);
+        vm.startPrank(deployer);
+        fotCore = new DualPoolStaking(
+            address(tokenA), // ← TokenA = 标准
+            address(fotToken), // ← TokenB = FOT
+            CAP,
+            24 hours
+        );
+        fotCore.setAdminModule(address(adminModule));
+        fotCore.setUserModule(address(userModule));
+        fotCore.setOperator(ops, true);
+        fotCore.setAdmin(alice, true);
+        vm.stopPrank();
     }
 
     function _deployMintOnTransferCore(uint256 mintExtraBP)

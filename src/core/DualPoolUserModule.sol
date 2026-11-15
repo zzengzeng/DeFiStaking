@@ -7,8 +7,9 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {DualPoolRewardEngine} from "./DualPoolRewardEngine.sol";
 import {Pool, PoolInfo} from "../StakeTypes.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {IDualPoolUserModule} from "../interfaces/IDualPoolUserModule.sol";
 
-contract DualPoolUserModule is DualPoolRewardEngine {
+contract DualPoolUserModule is DualPoolRewardEngine, IDualPoolUserModule {
     using SafeERC20 for IERC20;
 
     function stakeA(uint256 amount) external {
@@ -108,5 +109,26 @@ contract DualPoolUserModule is DualPoolRewardEngine {
     {
         uint256 fromNow = block.timestamp + _lockDuration;
         return _oldUnlockTime > fromNow ? _oldUnlockTime : fromNow;
+    }
+
+    function withdrawA(uint256 amount) external {
+        if (!shutdownMode && paused()) revert PausedStatus();
+        if (emergencyMode && !shutdownMode) revert EmergencyStatus();
+        if (amount == 0 || amount > userInfoA[msg.sender].staked) revert InvalidAmount();
+
+        _updateGlobalA();
+        _settleUserA(msg.sender);
+
+        uint256 balance = poolA.stakingToken.balanceOf(address(this));
+        if (balance < poolA.totalStaked) {
+            revert PrincipalDeficit(Pool.A, balance, poolA.totalStaked);
+        }
+
+        userInfoA[msg.sender].staked -= amount;
+        poolA.totalStaked -= amount;
+
+        _transferGross(poolA.stakingToken, msg.sender, amount);
+
+        emit Withdrawn(msg.sender, Pool.A, amount, 0, false);
     }
 }

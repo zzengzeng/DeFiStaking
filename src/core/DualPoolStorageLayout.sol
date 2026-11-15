@@ -26,6 +26,9 @@ abstract contract DualPoolStorageLayout {
     uint256 public constant MAX_CATCHUP_ITERATIONS = 50;
     uint256 public constant MAX_REWARD_SHARES_A = 1e45;
     uint256 public constant MAX_REWARD_SHARES_B = 1e45;
+    uint256 public constant CLAIM_COOLDOWN = 24 hours;
+    uint256 public constant FEE_TIER_1 = 90 days;
+    uint256 public constant FEE_TIER_2 = 180 days;
 
     uint256 public maxTotalSupplyBForRewardRateCap;
     uint256 public maxRewardRateA;
@@ -80,4 +83,7 @@ abstract contract DualPoolStorageLayout {
     );
     event FeesUpdated(uint256 penaltyBP, uint256 withdrawBP, uint256 midTermBP, uint256 currentTime);
     event MinEarlyExitAmountBUpdated(uint256 oldEarlyExitAmount, uint256 newEarlyExitAmount, uint256 currentTime);
+
+    error VaultDebitMismatch(uint256 expected, uint256 actual);
+    error InvalidNetReceived(uint256 gross, uint256 net);
 }

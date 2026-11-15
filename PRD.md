@@ -1,5 +1,11 @@
-# ERC20 (Staking) 协议需求规格说明书 v1.1.4
+# ERC20 (Staking) 协议需求规格说明书 v1.1.5
 
+> **v1.1.5 修订说明（2026-11-06）**
+>
+> - **§8**：`Staked` 事件对齐当前实现签名 `Staked(address indexed sender, Pool indexed pool, uint256 received, uint256 time)`。
+> - **§5.3.2**：Early Exit 显式补 `amount > 0 && amount <= userStakedB[user]`；明确 `penaltyFeeBP == 0` 时仍没收全部未领 B 奖励，并要求前端披露。
+> - **§5.3.3**：`stakeTimestampB` 防御检查补充 `<= block.timestamp`，避免下溢。
+>
 > **v1.1.4 修订说明（2026-11-06）**
 >
 > - **§8**：明确 `Paused` / `Unpaused` 沿用 OZ `Pausable` 原生签名 `(address account)`；暂停时间点通过 `pausedAt` / `unpauseAt` 读取，不写入事件。
@@ -812,14 +818,24 @@ if (block.timestamp < unlockTimeB[user]) {
 - **Emergency（非 Shutdown）禁止 `withdrawB`**，必须走 `emergencyWithdrawB`。
 - **全额退出清理**：任一分支在 `userStakedB[user] == 0` 时必须清零 `unlockTimeB[user]` 与 `stakeTimestampB[user]`，避免旧锁/旧 WADP 影响下一次 stake。
 
-**Early Exit 的奖励没收语义（强制）**：只要走 Early Exit 分支，无论 `amount` 是全部还是部分本金，都会**放弃本池全部未领 B 奖励**（`rewardsB[user]` 全量进入 `_forfeitRewards`）。`amount` 本身仍须满足 `amount >= minEarlyExitAmountB`。
+**Early Exit 的奖励没收语义（强制）**：只要走 Early Exit 分支，无论 `amount` 是全部还是部分本金，都会**放弃本池全部未领 B 奖励**（`rewardsB[user]` 全量进入 `_forfeitRewards`）。`amount` 本身仍须满足 `0 < amount <= userStakedB[user]` 且 `amount >= minEarlyExitAmountB`。
+
+**零罚金语义（强制）**：Early Exit 由 `block.timestamp < unlockTimeB[user]` 定义，**与 `penaltyFeeBP` 取值无关**。当 `penaltyFeeBP == 0` 时：
+
+- 本金罚金为 0
+- **未领 B 奖励仍然全部没收**
+
+前端与公告必须披露该语义，避免用户把"零罚金"误解为"免费提前退出"。若治理希望允许免费提前退出，应调小 `lockDuration`（仍需 > 0），而不是把 `penaltyFeeBP` 设为 0。
 
 **Shutdown状态守卫**：`withdrawB`在Shutdown下忽略paused，仍按既有unlockTime、Early Exit和Mature费率分支处理；不另增免锁、免罚金或免手续费政策。完整计提使用终态冻结点，退本前须验证全池B本金物理覆盖并保护转出后的剩余本金。
 
 **统一奖励没收助手**（也供§5.5调用）：先完成相关池计提与本人settle，`F = rewardsX[user]`；要求pending与booked均能覆盖F。令`E=max(requiredB-balanceB-badDebtA-badDebtB,0)`（实现须按安全加减顺序计算）、`m=min(F,badDebtX)`、`released=F-m`、`lossAbsorbed=min(released,E)`、`budgetReturned=released-lossAbsorbed`。`rewardsX`清零，`pendingX/bookedX`各减F，`badDebtX`减m，仅`budgetReturned`加入`availableRewardsB`。必须通过 `RewardForfeited(user, pool, forfeited=F, debtCancelled=m, lossAbsorbed, budgetReturned)` 事件同时记录三个分量；禁止把未出资奖励变预算或增加badDebt掩盖外部损失。
 
 ```solidity
-// 前置状态检查同上...
+// 前置状态检查（显式写出，不再用"同上"）
+require(shutdownMode || !paused(), "PAUSED");
+require(!emergencyMode || shutdownMode, "EMERGENCY_MODE");
+require(amount > 0 && amount <= userStakedB[user], "INVALID_AMOUNT");
 require(amount >= minEarlyExitAmountB, "BELOW_MIN_EARLY_EXIT_B");
 
 // 步骤 1：结算 B 池收益
@@ -856,7 +872,7 @@ if (userStakedB[user] == 0) {
 FOTTransferLib.transferGross(rewardTokenB, user, net, maxTransferFeeBP, BASIS_POINTS);
 require(rewardTokenB.balanceOf(address(this)) >= totalStakedB, "PRINCIPAL_DEFICIT_B_AFTER");
 _assertInvariantB();
-emit Withdrawn(user, amount, penalty, true, Pool.B);  
+emit Withdrawn(user, Pool.B, amount, penalty, true);  
 
 ```
 
@@ -872,7 +888,7 @@ _updateGlobalB();
 _settleUserB(user);
 
 // 步骤 2：持仓时长与费率匹配（仅 B：stakeTimestampB / unlockTimeB）
-require(stakeTimestampB[user] > 0, "INVALID_STAKE_TIMESTAMP");
+require(stakeTimestampB[user] > 0 && stakeTimestampB[user] <= block.timestamp, "INVALID_STAKE_TIMESTAMP");
 require(amount > 0 && amount <= userStakedB[user], "INVALID_AMOUNT");
 
 uint256 holdingDuration = block.timestamp - stakeTimestampB[user];
@@ -906,7 +922,7 @@ if (userStakedB[user] == 0) {
 FOTTransferLib.transferGross(rewardTokenB, user, net, maxTransferFeeBP, BASIS_POINTS);
 require(rewardTokenB.balanceOf(address(this)) >= totalStakedB, "PRINCIPAL_DEFICIT_B_AFTER");
 _assertInvariantB();
-emit Withdrawn(user, amount, fee, false, Pool.B);
+emit Withdrawn(user,  Pool.B, amount, fee, false);
 
 ```
 
@@ -1037,7 +1053,7 @@ _forfeitRewards(Pool.A, user); // 按§5.3.2核销debt/吸收缺口，仅有支�
 userStakedA[user] = 0;
 totalStakedA -= principal;
 FOTTransferLib.transferGross(stakingTokenA, user, principal, maxTransferFeeBP, BASIS_POINTS);
-emit EmergencyWithdrawn(user, principal, forfeited, Pool.A, block.timestamp);
+emit EmergencyWithdrawn(user,Pool.A, principal, forfeited, block.timestamp);
 // B奖励账目缺口只报告，不回滚足额A退本；A本金和转账扣款检查仍强制执行。
 ```
 
@@ -1062,7 +1078,7 @@ stakeTimestampB[user] = 0;    // 全退后清零 WADP 起点
 
 FOTTransferLib.transferGross(rewardTokenB, user, principalB, maxTransferFeeBP, BASIS_POINTS);
 require(rewardTokenB.balanceOf(address(this)) >= totalStakedB, "PRINCIPAL_DEFICIT_B_AFTER");
-emit EmergencyWithdrawn(user, principalB, forfeitedB, Pool.B, block.timestamp);
+emit EmergencyWithdrawn(user,Pool.B,  principalB, forfeitedB, block.timestamp);
 ```
 
 ---
@@ -1416,13 +1432,13 @@ emit TokenRecovered(token, amount, to);
 enum Pool { A, B }
 
 // ── 用户操作事件 ──────────────────────────────────────────────────────────
-event Staked(address indexed user, uint256 amount, uint256 newUnlockTime, Pool indexed pool);
-event Withdrawn(address indexed user, uint256 amount, uint256 feeOrPenalty, bool isEarly, Pool indexed pool);
+event Staked(address indexed sender, Pool indexed pool, uint256 received, uint256 time);
+event Withdrawn(address indexed user, Pool indexed pool,uint256 amount, uint256 feeOrPenalty, bool isEarly);
 event Claimed(address indexed user, uint256 paidA, uint256 paidB, uint256 timestamp);
 event ForceClaimed(address indexed user, uint256 paidA, uint256 paidB, uint256 unpaidA, uint256 unpaidB, uint256 timestamp); 
 event Compounded(address indexed user, uint256 amountA, uint256 amountB, uint256 newUserStakedB, uint256 newUnlockTimeB);
 event EmergencyWithdrawn(
-    address indexed user, uint256 principal, uint256 rewardsForfeited, Pool indexed pool, uint256 at
+    address indexed user,Pool indexed pool, uint256 principal, uint256 rewardsForfeited,  uint256 at
 );
 event RewardForfeited(address indexed user, Pool indexed pool, uint256 forfeited,
     uint256 debtCancelled, uint256 lossAbsorbed, uint256 budgetReturned);

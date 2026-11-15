@@ -5,8 +5,12 @@ import {DualPoolStorageLayout} from "./DualPoolStorageLayout.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {Pool, PoolInfo, UserInfo} from "../StakeTypes.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 abstract contract DualPoolRewardEngine is DualPoolStorageLayout, Pausable {
+    using SafeERC20 for IERC20;
+
     error ZeroAmount();
     error RewardShareLimit();
     error WrongState();
@@ -26,10 +30,16 @@ abstract contract DualPoolRewardEngine is DualPoolStorageLayout, Pausable {
 
     error InvalidStakeTimestamp();
 
+    error PausedStatus();
+    error EmergencyStatus();
+    error InvalidAmount();
+    error PrincipalDeficit(Pool pool, uint256 balance, uint256 required);
+
     event InsufficientBudget(Pool indexed pool, uint256 shortfall, uint256 currentTime);
     event PoolCatchUpCranked(Pool indexed pool, uint256 lastUpdateTime, bool isCatchUp, uint256 currentTime);
 
     event Staked(address indexed sender, Pool indexed pool, uint256 received, uint256 time);
+    event Withdrawn(address indexed user, Pool indexed pool, uint256 amount, uint256 feeOrPenalty, bool isEarly);
 
     function _effectiveTime() internal view returns (uint256) {
         if (emergencyMode || shutdownMode) return terminalRewardTime;
@@ -137,5 +147,29 @@ abstract contract DualPoolRewardEngine is DualPoolStorageLayout, Pausable {
 
     function _settleUserB(address user) internal {
         _settleUser(Pool.B, user);
+    }
+
+    function _transferGross(IERC20 token, address to, uint256 gross) internal {
+        if (gross == 0) revert ZeroAmount();
+
+        uint256 vaultBefore = token.balanceOf(address(this));
+        uint256 toBefore = token.balanceOf(to);
+
+        token.safeTransfer(to, gross);
+
+        uint256 vaultAfter = token.balanceOf(address(this));
+        uint256 toAfter = token.balanceOf(to);
+
+        uint256 debited = vaultBefore - vaultAfter;
+        if (debited != gross) {
+            revert VaultDebitMismatch(gross, debited);
+        }
+        uint256 netReceived = toAfter - toBefore;
+        if (netReceived == 0 || netReceived > gross) {
+            revert InvalidNetReceived(gross, netReceived);
+        }
+        if ((gross - netReceived) * BASIS_POINTS > gross * maxTransferFeeBP) {
+            revert FeeExceedsCap();
+        }
     }
 }
