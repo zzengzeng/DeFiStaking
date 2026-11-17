@@ -182,7 +182,7 @@ contract TestRewardSchedule is BaseTest {
         core.fundRewards(Pool.A, amount);
 
         vm.prank(alice);
-        vm.expectRevert(DualPoolAdminModule.BadDebtExists.selector);
+        vm.expectRevert(DualPoolRewardEngine.BadDebtExists.selector);
         core.scheduleRewards(Pool.A, 0);
     }
 

@@ -220,4 +220,12 @@ contract DualPoolStaking is DualPoolRoles {
     function withdrawA(uint256 amount) external nonReentrant {
         _delegateTo(userModule, abi.encodeCall(IDualPoolUserModule.withdrawA, (amount)));
     }
+
+    function claimA() external nonReentrant {
+        _delegateTo(userModule, abi.encodeCall(IDualPoolUserModule.claimA, ()));
+    }
+
+    function claimB() external nonReentrant {
+        _delegateTo(userModule, abi.encodeCall(IDualPoolUserModule.claimB, ()));
+    }
 }

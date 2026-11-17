@@ -65,4 +65,20 @@ contract EngineHarness is DualPoolStaking {
     function getUserB(address user) public view returns (UserInfo memory) {
         return userInfoB[user];
     }
+
+    function seedDebt(Pool pool, uint256 debt) external {
+        _pool(pool).badDebt = debt;
+    }
+
+    function seedBooked(Pool pool, uint256 booked) external {
+        _pool(pool).bookedUserRewards = booked;
+    }
+
+    function seedUserRewards(Pool pool, address user, uint256 rewards) external {
+        if (pool == Pool.A) {
+            userInfoA[user].rewards = rewards;
+        } else {
+            userInfoB[user].rewards = rewards;
+        }
+    }
 }

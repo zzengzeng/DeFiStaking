@@ -110,4 +110,12 @@ abstract contract BaseTest is Test, Constants {
         fotToken.setFee(feeBP);
         fotCore = _deployCoreWithToken(address(fotToken));
     }
+
+    function _forceShutdown() internal virtual {
+        vm.store(address(core), bytes32(uint256(44)), bytes32(uint256(0x0101)));
+        vm.store(address(core), bytes32(uint256(48)), bytes32(block.timestamp));
+        assertTrue(core.emergencyMode());
+        assertTrue(core.shutdownMode());
+        assertEq(core.terminalRewardTime(), block.timestamp);
+    }
 }

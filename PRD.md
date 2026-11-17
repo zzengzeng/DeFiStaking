@@ -1,5 +1,12 @@
-# ERC20 (Staking) 协议需求规格说明书 v1.1.5
+# ERC20 (Staking) 协议需求规格说明书 v1.1.6
 
+> **v1.1.6 修订说明（2026-11-06）**
+>
+> - **§5.4**：`claimA/claimB` 增加 `totalPendingX >= reward`、`bookedUserRewardsX >= reward` 显式守卫，避免异常状态下抛底层 panic。
+> - **§5.4**：明确 `forceClaimAll` 健康态是"全有或全无"：任一非零池低于 `minClaimAmount` 则整笔回滚，用户应改用 `claimA/claimB`。
+> - **§5.4**：明确 Shutdown 下 `forceClaimAll` 一律走降级分支，即使 `badDebt == 0` 也不调用 `_assertInvariantB`。
+> - **§5.4**：明确任一池 `badDebt > 0` 会同时阻断 `claimA`/`claimB`，前端必须提示用户改用 `forceClaimAll`。
+>
 > **v1.1.5 修订说明（2026-11-06）**
 >
 > - **§8**：`Staked` 事件对齐当前实现签名 `Staked(address indexed sender, Pool indexed pool, uint256 received, uint256 time)`。
@@ -954,6 +961,10 @@ if (!shutdownMode) {
     require(reward >= minClaimAmount, "BELOW_MIN_CLAIM");
 }
 
+// 异常状态下的账本下溢守卫（正常流程不会触发）
+require(totalPendingX >= reward, "INSUFFICIENT_PENDING");
+require(bookedUserRewardsX >= reward, "INSUFFICIENT_BOOKED");
+
 // 足额物理覆盖检查通过后，先改账本再转账（CEI）
 rewardsX[msg.sender] = 0;
 totalPendingX -= reward;
@@ -972,10 +983,14 @@ emit Claimed(msg.sender, paidA, paidB, block.timestamp);
 > **为什么 `claimA/claimB` 要更新两池**：`badDebtA == 0 && badDebtB == 0` 是跨池守卫。若只更新目标池，另一池的 `badDebt` 可能是旧值，导致"看起来没坏账、实际有"时错误放行领取。
 >
 > **代价**：单池 claim 的 gas 会包含另一池的 catch-up。这是正确性优先于 gas 的取舍。若未来要优化，只能改为"只检查目标池 badDebt"，不能保留跨池检查却只更新单池。
+>
+> **跨池风险联动（强制披露）**：任一池 `badDebt > 0` 时，`claimA` 和 `claimB` 都会被阻断，即使目标池完全健康。这是有意的风险隔离；用户只能改用 `forceClaimAll`（按降级路径部分兑付）。前端必须提示该行为，不能只展示"你的 A 池奖励正常"。
 
 **`forceClaimAll()`：跨池领取 / 坏账逃生舱**
 
 > **UX 指引**：Normal健康态保留跨池足额领取，各非零池奖励须独立达到`minClaimAmount`；仅在`shutdownMode`或任一池`badDebt>0`时豁免最小额并允许部分兑付。本入口**只核销实际支付的gross，未支付债权保留**，不会默认替用户放弃余款。仍遵守首次成功领取后的共享冷却。
+>
+> **健康态"全有或全无"（强制）**：`!shutdownMode && badDebtA == 0 && badDebtB == 0` 时，任一非零池奖励低于 `minClaimAmount` 都会导致整笔 `forceClaimAll` 回滚；用户应改用 `claimA` / `claimB` 分池领取。
 
 ```solidity
 function forceClaimAll() external nonReentrant {
@@ -1022,6 +1037,9 @@ function forceClaimAll() external nonReentrant {
 
     // 健康路径：完整 B 覆盖断言（余额 + 账本）。
     // 降级路径：只做账本内部一致性检查，不查真实余额，避免既有缺口阻断合法部分兑付。
+    // 注意：Shutdown 一律走降级路径，即使 badDebt == 0 也不调用 _assertInvariantB。
+    // 原因：Shutdown 允许部分兑付，未记录的物理缺口不得阻断合法实付；
+    // 需要严格足额领取的用户应使用 claimA/claimB（它们要求 badDebt==0 并跑完整不变量）。
     if (!shutdownMode && badDebtA == 0 && badDebtB == 0) {
         _assertInvariantB();
     } else {

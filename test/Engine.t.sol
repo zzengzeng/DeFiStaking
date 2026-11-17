@@ -18,6 +18,7 @@ contract TestEngine is BaseTest {
         vm.startPrank(deployer);
         harness.setOperator(ops, true);
         harness.setAdmin(alice, true);
+        harness.setUserModule(address(userModule));
         vm.stopPrank();
     }
 
@@ -186,5 +187,18 @@ contract TestEngine is BaseTest {
         assertEq(harness.getPool(Pool.A).lastUpdateTime, 1500 days); // 50 × 30 天
         harness.crankCatchUpPool(Pool.A);
         assertEq(harness.getPool(Pool.A).lastUpdateTime, far); // 50 × 30 天
+    }
+
+    function testClaimRevertsWhenBadDebtExists() public {
+        harness.seedPending(Pool.A, 1);
+        harness.seedDebt(Pool.A, 1);
+
+        PoolInfo memory p = harness.getPool(Pool.A);
+        assertEq(p.badDebt, 1);
+        assertEq(p.totalPending, 1);
+
+        vm.prank(bob);
+        vm.expectRevert(abi.encodeWithSelector(DualPoolRewardEngine.BadDebtExists.selector));
+        harness.claimA();
     }
 }

@@ -177,12 +177,6 @@ contract TestStake is BaseTest {
         core.stakeB(20e18);
     }
 
-    function _forceShutdown() internal {
-        // slot 44: emergencyMode(byte0), shutdownMode(byte1)
-        vm.store(address(core), bytes32(uint256(44)), bytes32(uint256(0x0101)));
-        assertTrue(core.shutdownMode());
-    }
-
     function testStakeBRevertsInShutdown() public {
         vm.prank(alice);
         _forceShutdown();

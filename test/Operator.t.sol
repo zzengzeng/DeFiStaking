@@ -190,13 +190,6 @@ contract TestOperator is BaseTest {
         vm.stopPrank();
     }
 
-    function _forceShutdown() internal {
-        // slot 4: emergencyMode (byte 0), shutdownMode (byte 1)
-        vm.store(address(core), bytes32(uint256(44)), bytes32(uint256(0x0101)));
-        assertTrue(core.emergencyMode());
-        assertTrue(core.shutdownMode());
-    }
-
     function testPauseRevertShutdownMode() public {
         vm.startPrank(ops);
         _forceShutdown();

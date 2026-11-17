@@ -35,11 +35,20 @@ abstract contract DualPoolRewardEngine is DualPoolStorageLayout, Pausable {
     error InvalidAmount();
     error PrincipalDeficit(Pool pool, uint256 balance, uint256 required);
 
+    error BadDebtExists();
+    error ClaimCooldownActive(uint256 availableAt);
+    error NothingToClaim();
+    error BelowMinClaim();
+    error InsufficientPending();
+    error InsufficientBooked();
+
     event InsufficientBudget(Pool indexed pool, uint256 shortfall, uint256 currentTime);
     event PoolCatchUpCranked(Pool indexed pool, uint256 lastUpdateTime, bool isCatchUp, uint256 currentTime);
 
     event Staked(address indexed sender, Pool indexed pool, uint256 received, uint256 time);
     event Withdrawn(address indexed user, Pool indexed pool, uint256 amount, uint256 feeOrPenalty, bool isEarly);
+
+    event Claimed(address indexed user, uint256 paidA, uint256 paidB, uint256 timestamp);
 
     function _effectiveTime() internal view returns (uint256) {
         if (emergencyMode || shutdownMode) return terminalRewardTime;

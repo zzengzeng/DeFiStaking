@@ -5,7 +5,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {DualPoolRewardEngine} from "./DualPoolRewardEngine.sol";
-import {Pool, PoolInfo} from "../StakeTypes.sol";
+import {Pool, PoolInfo, UserInfo} from "../StakeTypes.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IDualPoolUserModule} from "../interfaces/IDualPoolUserModule.sol";
 
@@ -130,5 +130,51 @@ contract DualPoolUserModule is DualPoolRewardEngine, IDualPoolUserModule {
         _transferGross(poolA.stakingToken, msg.sender, amount);
 
         emit Withdrawn(msg.sender, Pool.A, amount, 0, false);
+    }
+
+    function _claim(Pool pool) internal {
+        if (emergencyMode && !shutdownMode) revert EmergencyStatus();
+        if (!shutdownMode && paused()) revert PausedStatus();
+
+        uint256 last = lastClaimTime[msg.sender];
+        if (last != 0 && block.timestamp < last + CLAIM_COOLDOWN) {
+            revert ClaimCooldownActive(last + CLAIM_COOLDOWN);
+        }
+
+        _updateGlobalA();
+        _updateGlobalB();
+        _settleUser(pool, msg.sender);
+
+        PoolInfo storage pInfo = _pool(pool);
+        UserInfo storage uInfo = pool == Pool.A ? userInfoA[msg.sender] : userInfoB[msg.sender];
+        if (poolA.badDebt != 0 || poolB.badDebt != 0) revert BadDebtExists();
+
+        uint256 reward = uInfo.rewards;
+        if (reward == 0) revert NothingToClaim();
+        if (!shutdownMode && reward < minClaimAmount) revert BelowMinClaim();
+
+        if (pInfo.totalPending < reward) revert InsufficientPending();
+        if (pInfo.bookedUserRewards < reward) revert InsufficientBooked();
+
+        uInfo.rewards = 0;
+        pInfo.totalPending -= reward;
+        pInfo.bookedUserRewards -= reward;
+        lastClaimTime[msg.sender] = block.timestamp;
+
+        _transferGross(rewardTokenB, msg.sender, reward);
+
+        _assertInvariantB();
+
+        uint256 paidA = pool == Pool.A ? reward : 0;
+        uint256 paidB = pool == Pool.B ? reward : 0;
+        emit Claimed(msg.sender, paidA, paidB, block.timestamp);
+    }
+
+    function claimA() external {
+        _claim(Pool.A);
+    }
+
+    function claimB() external {
+        _claim(Pool.B);
     }
 }

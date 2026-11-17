@@ -6,7 +6,6 @@ import {DualPoolRewardEngine} from "./DualPoolRewardEngine.sol";
 import {Pool, PoolInfo} from "../StakeTypes.sol";
 
 contract DualPoolAdminModule is DualPoolRewardEngine, IDualPoolAdminModule {
-    error BadDebtExists();
     error WindowActive();
     error InvalidRate();
     error UnderfundedSchedule();

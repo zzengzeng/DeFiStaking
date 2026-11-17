@@ -5,4 +5,6 @@ interface IDualPoolUserModule {
     function stakeA(uint256 amount) external;
     function stakeB(uint256 amount) external;
     function withdrawA(uint256 amount) external;
+    function claimA() external;
+    function claimB() external;
 }
