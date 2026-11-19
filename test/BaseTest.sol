@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Test} from "forge-std/Test.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockFOTERC20} from "./mocks/MockFOTERC20.sol";
@@ -13,6 +12,7 @@ import {DualPoolAdminModule} from "../src/core/DualPoolAdminModule.sol";
 import {DualPoolUserModule} from "../src/core/DualPoolUserModule.sol";
 
 import {Constants} from "./utils/Constants.sol";
+import {Pool} from "../src/StakeTypes.sol";
 
 abstract contract BaseTest is Test, Constants {
     MockERC20 public tokenA;
@@ -112,10 +112,22 @@ abstract contract BaseTest is Test, Constants {
     }
 
     function _forceShutdown() internal virtual {
-        vm.store(address(core), bytes32(uint256(44)), bytes32(uint256(0x0101)));
-        vm.store(address(core), bytes32(uint256(48)), bytes32(block.timestamp));
-        assertTrue(core.emergencyMode());
-        assertTrue(core.shutdownMode());
-        assertEq(core.terminalRewardTime(), block.timestamp);
+        vm.prank(ops);
+        core.enableEmergencyMode();
+
+        vm.prank(alice);
+        core.activateShutdown();
+    }
+
+    function _fundAndSchedule(Pool pool, uint256 amount, uint256 duration) internal {
+        deal(address(tokenB), ops, amount);
+        vm.prank(ops);
+        tokenB.approve(address(core), amount);
+
+        vm.prank(ops);
+        core.fundRewards(pool, amount);
+
+        vm.prank(alice);
+        core.scheduleRewards(pool, duration);
     }
 }

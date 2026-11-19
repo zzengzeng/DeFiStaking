@@ -191,27 +191,28 @@ contract TestOperator is BaseTest {
     }
 
     function testPauseRevertShutdownMode() public {
-        vm.startPrank(ops);
         _forceShutdown();
+
+        vm.prank(ops);
         vm.expectRevert(DualPoolRewardEngine.WrongState.selector);
         core.pause();
         vm.stopPrank();
     }
 
     function testEnableEmergencyModeRevertShutdownMode() public {
-        vm.startPrank(ops);
         _forceShutdown();
+
+        vm.prank(ops);
         vm.expectRevert(DualPoolStaking.AlreadyEmergencyMode.selector);
         core.enableEmergencyMode();
-        vm.stopPrank();
     }
 
     function testFundRewardsRevertShutdownMode() public {
-        vm.startPrank(ops);
         _forceShutdown();
+
+        vm.prank(ops);
         vm.expectRevert(DualPoolRewardEngine.WrongState.selector);
         core.fundRewards(Pool.A, 100);
-        vm.stopPrank();
     }
 
     function testFundRewardsRevertReceivedExceedsAmount() public {

@@ -41,6 +41,10 @@ abstract contract DualPoolRewardEngine is DualPoolStorageLayout, Pausable {
     error BelowMinClaim();
     error InsufficientPending();
     error InsufficientBooked();
+    error BelowMinEarlyExitB();
+
+    error AlreadyShutDown();
+    error UnpauseCooldownActive(uint256 unpauseAt);
 
     event InsufficientBudget(Pool indexed pool, uint256 shortfall, uint256 currentTime);
     event PoolCatchUpCranked(Pool indexed pool, uint256 lastUpdateTime, bool isCatchUp, uint256 currentTime);
@@ -49,6 +53,18 @@ abstract contract DualPoolRewardEngine is DualPoolStorageLayout, Pausable {
     event Withdrawn(address indexed user, Pool indexed pool, uint256 amount, uint256 feeOrPenalty, bool isEarly);
 
     event Claimed(address indexed user, uint256 paidA, uint256 paidB, uint256 timestamp);
+    event ShutdownActivated(address indexed sender, uint256 shutdownAt, uint256 currentTime);
+
+    event RewardForfeited(
+        address indexed user,
+        Pool indexed pool,
+        uint256 forfeited,
+        uint256 debtCancelled,
+        uint256 lossAvsorbed,
+        uint256 budgetReturned
+    );
+
+    event UnpausedAt(address indexed sender, uint256 frozenAt, uint256 delta, uint256 currentTime);
 
     function _effectiveTime() internal view returns (uint256) {
         if (emergencyMode || shutdownMode) return terminalRewardTime;
@@ -125,9 +141,8 @@ abstract contract DualPoolRewardEngine is DualPoolStorageLayout, Pausable {
     }
 
     function _assertInvariantB() internal view {
-        uint256 actual = rewardTokenB.balanceOf(address(this)) + poolA.badDebt + poolB.badDebt;
-        uint256 required = poolB.totalStaked + poolA.totalPending + poolB.totalPending + poolA.availableRewards
-            + poolB.availableRewards + unclaimedFeesB;
+        uint256 actual = _tokenBActual();
+        uint256 required = _tokenBRequired();
 
         if (actual < required) revert InvariantViolation(actual, required);
         if (poolA.bookedUserRewards > poolA.totalPending) revert BookedRewardsExceedPending();
@@ -180,5 +195,14 @@ abstract contract DualPoolRewardEngine is DualPoolStorageLayout, Pausable {
         if ((gross - netReceived) * BASIS_POINTS > gross * maxTransferFeeBP) {
             revert FeeExceedsCap();
         }
+    }
+
+    function _tokenBRequired() internal view returns (uint256) {
+        return poolB.totalStaked + poolA.totalPending + poolB.totalPending + poolA.availableRewards
+            + poolB.availableRewards + unclaimedFeesB;
+    }
+
+    function _tokenBActual() internal view returns (uint256) {
+        return rewardTokenB.balanceOf(address(this)) + poolA.badDebt + poolB.badDebt;
     }
 }

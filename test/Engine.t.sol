@@ -201,4 +201,82 @@ contract TestEngine is BaseTest {
         vm.expectRevert(abi.encodeWithSelector(DualPoolRewardEngine.BadDebtExists.selector));
         harness.claimA();
     }
+
+    function _seedForfeit(uint256 forfeited, uint256 badDebt, uint256 tokenBalance) internal returns (EngineHarness) {
+        EngineHarness h = new EngineHarness(address(tokenA), address(tokenB), CAP, 24 hours);
+        // 必要的权限授予（如果后面要 admin 操作）
+        // vm.prank(deployer);
+        // h.setAdmin(alice, true);
+
+        h.seedUserRewards(Pool.B, bob, forfeited);
+        h.seedPending(Pool.B, forfeited + badDebt);
+        h.seedBooked(Pool.B, forfeited);
+        h.seedDebt(Pool.B, badDebt);
+
+        deal(address(tokenB), address(h), tokenBalance);
+
+        harness = h; // 让 TestEngine 的 state variable 也指向新的
+        return h;
+    }
+
+    function testForfeitNoDebtNoDeficit() public {
+        (EngineHarness h) = _seedForfeit(100e18, 0, 100e18);
+
+        vm.expectEmit(true, true, false, true, address(h));
+
+        emit DualPoolRewardEngine.RewardForfeited(
+            bob,
+            Pool.B,
+            100e18, // forfeited
+            0, // debtCancelled = 0
+            0, // lossAbsorbed = 0
+            100e18 // budgetReturned = forfeited
+        );
+
+        h.forfeitRewards(Pool.B, bob);
+    }
+
+    function testForfeitCancelsDebt() public {
+        (EngineHarness h) = _seedForfeit(100e18, 5e18, 100e18);
+        vm.expectEmit(true, true, false, true, address(h));
+        emit DualPoolRewardEngine.RewardForfeited(
+            bob,
+            Pool.B,
+            100e18, // forfeited
+            5e18, // debtCancelled = 5e18
+            0, // lossAbsorbed = 0
+            95e18 // budgetReturned = forfeited - debtCancelled
+        );
+
+        h.forfeitRewards(Pool.B, bob);
+    }
+
+    function testForfeitAbsorbsPhysicalDeficit() public {
+        (EngineHarness h) = _seedForfeit(100e18, 0, 90e18);
+        vm.expectEmit(true, true, false, true, address(h));
+        emit DualPoolRewardEngine.RewardForfeited(
+            bob,
+            Pool.B,
+            100e18, // forfeited
+            0, // debtCancelled = 0
+            10e18, // lossAbsorbed = 10e18
+            90e18 // budgetReturned = forfeited - lossAbsorbed
+        );
+
+        h.forfeitRewards(Pool.B, bob);
+    }
+
+    function testForfeitDebtAndDeficit() public {
+        (EngineHarness h) = _seedForfeit(100e18, 5e18, 90e18);
+        vm.expectEmit(true, true, false, true, address(h));
+        emit DualPoolRewardEngine.RewardForfeited(
+            bob,
+            Pool.B,
+            100e18, // forfeited
+            5e18, // debtCancelled = 5e18
+            10e18, // lossAbsorbed = 10e18
+            85e18 // budgetReturned = forfeited - debtCancelled - lossAbsorbed
+        );
+        h.forfeitRewards(Pool.B, bob);
+    }
 }

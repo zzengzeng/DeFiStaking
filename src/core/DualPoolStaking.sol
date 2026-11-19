@@ -144,6 +144,37 @@ contract DualPoolStaking is DualPoolRoles {
         unpauseAt = block.timestamp + UNPAUSE_COOLDOWN;
     }
 
+    function unpause() external onlyRole(ADMIN_ROLE) nonReentrant {
+        if (!paused() || emergencyMode || shutdownMode) revert WrongState();
+        if (block.timestamp < unpauseAt) revert UnpauseCooldownActive(unpauseAt);
+        if (pausedAt == 0) revert WrongState();
+
+        uint256 frozenAt = pausedAt;
+        uint256 delta = block.timestamp - frozenAt;
+
+        _updateGlobalA();
+        _updateGlobalB();
+
+        _restorePoolClock(poolA, frozenAt, delta);
+        _restorePoolClock(poolB, frozenAt, delta);
+
+        pausedAt = 0;
+        unpauseAt = 0;
+        _unpause();
+
+        emit UnpausedAt(msg.sender, frozenAt, delta, block.timestamp);
+    }
+
+    function _restorePoolClock(PoolInfo storage p, uint256 frozenAt, uint256 delta) internal {
+        if (p.periodFinish > frozenAt) {
+            if (p.lastUpdateTime != frozenAt) revert CatchUpIncomplete();
+            p.periodFinish += delta;
+            p.lastUpdateTime += delta;
+        } else {
+            if (p.lastUpdateTime != p.periodFinish) revert WrongState();
+        }
+    }
+
     function enableEmergencyMode() external onlyRole(OPERATOR_ROLE) nonReentrant {
         if (emergencyMode) revert AlreadyEmergencyMode();
         if (shutdownMode) revert WrongState();
@@ -209,6 +240,10 @@ contract DualPoolStaking is DualPoolRoles {
         _delegateTo(adminModule, abi.encodeCall(IDualPoolAdminModule.scheduleRewards, (pool, duration)));
     }
 
+    function activateShutdown() external onlyRole(ADMIN_ROLE) nonReentrant {
+        _delegateTo(adminModule, abi.encodeCall(IDualPoolAdminModule.activateShutdown, ()));
+    }
+
     function stakeA(uint256 amount) external nonReentrant {
         _delegateTo(userModule, abi.encodeCall(IDualPoolUserModule.stakeA, (amount)));
     }
@@ -219,6 +254,10 @@ contract DualPoolStaking is DualPoolRoles {
 
     function withdrawA(uint256 amount) external nonReentrant {
         _delegateTo(userModule, abi.encodeCall(IDualPoolUserModule.withdrawA, (amount)));
+    }
+
+    function withdrawB(uint256 amount) external nonReentrant {
+        _delegateTo(userModule, abi.encodeCall(IDualPoolUserModule.withdrawB, (amount)));
     }
 
     function claimA() external nonReentrant {

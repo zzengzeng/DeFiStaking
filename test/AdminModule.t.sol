@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 import {BaseTest} from "./BaseTest.sol";
 import {DualPoolStorageLayout} from "../src/core/DualPoolStorageLayout.sol";
 import {Pool} from "../src/StakeTypes.sol";
+import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 
 contract TestAdminModule is BaseTest {
     function testSetLockDurationSucceeds() public {
@@ -206,5 +207,17 @@ contract TestAdminModule is BaseTest {
         core.setFees(0, 100, 50);
         core.setMinEarlyExitAmountB(0);
         assertEq(core.minEarlyExitAmountB(), 0);
+    }
+
+    function testActivateShutdownRevertsForNonAdmin() public {
+        vm.prank(ops);
+        core.enableEmergencyMode();
+
+        bytes memory err =
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, bob, ADMIN_ROLE);
+
+        vm.prank(bob);
+        vm.expectRevert(err);
+        core.activateShutdown();
     }
 }

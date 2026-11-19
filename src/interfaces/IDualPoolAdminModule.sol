@@ -13,4 +13,5 @@ interface IDualPoolAdminModule {
     function setFees(uint256 penaltyBP, uint256 withdrawBP, uint256 midTermBP) external;
     function setMinEarlyExitAmountB(uint256 newMinEarlyExitAmountB) external;
     function scheduleRewards(Pool pool, uint256 duration) external;
+    function activateShutdown() external;
 }

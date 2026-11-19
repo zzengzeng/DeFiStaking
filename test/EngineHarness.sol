@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 import {DualPoolStaking} from "../src/core/DualPoolStaking.sol";
 import {Pool, PoolInfo, UserInfo} from "../src/StakeTypes.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 contract EngineHarness is DualPoolStaking {
     constructor(address _tokenA, address _tokenB, uint256 _cap, uint256 _cooldown)
@@ -80,5 +81,39 @@ contract EngineHarness is DualPoolStaking {
         } else {
             userInfoB[user].rewards = rewards;
         }
+    }
+
+    function forfeitRewards(Pool pool, address user) external {
+        _forfeitRewards(pool, user);
+    }
+
+    function _forfeitRewards(Pool pool, address user) internal {
+        UserInfo storage userInfo = pool == Pool.A ? userInfoA[user] : userInfoB[user];
+        uint256 forfeited = userInfo.rewards;
+        if (forfeited == 0) return;
+
+        PoolInfo storage poolInfo = _pool(pool);
+        if (poolInfo.totalPending < forfeited) revert InsufficientPending();
+        if (poolInfo.bookedUserRewards < forfeited) revert InsufficientBooked();
+
+        uint256 requiredTokenB = _tokenBRequired();
+        uint256 actualTokenB = _tokenBActual();
+
+        uint256 physicalDeficit = requiredTokenB > actualTokenB ? requiredTokenB - actualTokenB : 0;
+        uint256 debtCancelled = Math.min(forfeited, poolInfo.badDebt);
+        uint256 released = forfeited - debtCancelled;
+        uint256 lossAbsorbed = Math.min(released, physicalDeficit);
+        uint256 budgetReturned = released - lossAbsorbed;
+
+        userInfo.rewards = 0;
+        poolInfo.totalPending -= forfeited;
+        poolInfo.bookedUserRewards -= forfeited;
+        poolInfo.badDebt -= debtCancelled;
+
+        if (budgetReturned > 0) {
+            poolB.availableRewards += budgetReturned;
+        }
+
+        emit RewardForfeited(user, pool, forfeited, debtCancelled, lossAbsorbed, budgetReturned);
     }
 }

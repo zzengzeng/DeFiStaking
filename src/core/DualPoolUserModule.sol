@@ -112,8 +112,9 @@ contract DualPoolUserModule is DualPoolRewardEngine, IDualPoolUserModule {
     }
 
     function withdrawA(uint256 amount) external {
-        if (!shutdownMode && paused()) revert PausedStatus();
         if (emergencyMode && !shutdownMode) revert EmergencyStatus();
+        if (!shutdownMode && paused()) revert PausedStatus();
+
         if (amount == 0 || amount > userInfoA[msg.sender].staked) revert InvalidAmount();
 
         _updateGlobalA();
@@ -130,6 +131,100 @@ contract DualPoolUserModule is DualPoolRewardEngine, IDualPoolUserModule {
         _transferGross(poolA.stakingToken, msg.sender, amount);
 
         emit Withdrawn(msg.sender, Pool.A, amount, 0, false);
+    }
+
+    function withdrawB(uint256 amount) external {
+        if (emergencyMode && !shutdownMode) revert EmergencyStatus();
+        if (!shutdownMode && paused()) revert PausedStatus();
+
+        if (amount == 0 || amount > userInfoB[msg.sender].staked) revert InvalidAmount();
+
+        _updateGlobalB();
+        _settleUserB(msg.sender);
+
+        PoolInfo storage poolInfo = _pool(Pool.B);
+        UserInfo storage userInfo = userInfoB[msg.sender];
+
+        uint256 feeOrPenalty;
+        bool isEarly = block.timestamp < unlockTimeB[msg.sender];
+
+        if (isEarly) {
+            // early exit
+            if (amount < minEarlyExitAmountB) revert BelowMinEarlyExitB();
+            _forfeitRewards(Pool.B, msg.sender);
+            feeOrPenalty = amount * penaltyFeeBP / BASIS_POINTS;
+            poolInfo.availableRewards += feeOrPenalty;
+        } else {
+            uint256 stakeTs = stakeTimestampB[msg.sender];
+            if (stakeTs == 0 || stakeTs > block.timestamp) {
+                revert InvalidStakeTimestamp();
+            }
+            feeOrPenalty = amount * _feeBP(stakeTs) / BASIS_POINTS;
+            if (feeOrPenalty > 0) unclaimedFeesB += feeOrPenalty;
+        }
+
+        uint256 net = amount - feeOrPenalty;
+
+        userInfo.rewardPaid = poolInfo.accRewardPerToken;
+
+        _requirePrincipalCoverageB(poolInfo.totalStaked);
+
+        userInfo.staked -= amount;
+        poolInfo.totalStaked -= amount;
+
+        if (userInfo.staked == 0) {
+            unlockTimeB[msg.sender] = 0;
+            stakeTimestampB[msg.sender] = 0;
+        }
+        _transferGross(rewardTokenB, msg.sender, net);
+
+        _requirePrincipalCoverageB(poolInfo.totalStaked);
+
+        _assertInvariantB();
+
+        emit Withdrawn(msg.sender, Pool.B, amount, feeOrPenalty, isEarly);
+    }
+
+    function _requirePrincipalCoverageB(uint256 required) internal view {
+        uint256 balance = rewardTokenB.balanceOf(address(this));
+        if (balance < required) revert PrincipalDeficit(Pool.B, balance, required);
+    }
+
+    function _feeBP(uint256 stakeTs) internal view returns (uint256) {
+        uint256 holding = block.timestamp - stakeTs;
+        if (holding < FEE_TIER_1) return withdrawFeeBP;
+        if (holding < FEE_TIER_2) return midTermFeeBP;
+        return 0;
+    }
+
+    function _forfeitRewards(Pool pool, address user) internal {
+        UserInfo storage userInfo = pool == Pool.A ? userInfoA[user] : userInfoB[user];
+        uint256 forfeited = userInfo.rewards;
+        if (forfeited == 0) return;
+
+        PoolInfo storage poolInfo = _pool(pool);
+        if (poolInfo.totalPending < forfeited) revert InsufficientPending();
+        if (poolInfo.bookedUserRewards < forfeited) revert InsufficientBooked();
+
+        uint256 requiredTokenB = _tokenBRequired();
+        uint256 actualTokenB = _tokenBActual();
+
+        uint256 physicalDeficit = requiredTokenB > actualTokenB ? requiredTokenB - actualTokenB : 0;
+        uint256 debtCancelled = Math.min(forfeited, poolInfo.badDebt);
+        uint256 released = forfeited - debtCancelled;
+        uint256 lossAbsorbed = Math.min(released, physicalDeficit);
+        uint256 budgetReturned = released - lossAbsorbed;
+
+        userInfo.rewards = 0;
+        poolInfo.totalPending -= forfeited;
+        poolInfo.bookedUserRewards -= forfeited;
+        poolInfo.badDebt -= debtCancelled;
+
+        if (budgetReturned > 0) {
+            poolB.availableRewards += budgetReturned;
+        }
+
+        emit RewardForfeited(user, pool, forfeited, debtCancelled, lossAbsorbed, budgetReturned);
     }
 
     function _claim(Pool pool) internal {

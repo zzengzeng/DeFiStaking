@@ -136,4 +136,12 @@ contract DualPoolAdminModule is DualPoolRewardEngine, IDualPoolAdminModule {
 
         emit RewardScheduled(pool, effectiveDuration, newRate, time, p.periodFinish);
     }
+
+    function activateShutdown() external {
+        if (!emergencyMode) revert WrongState();
+        if (shutdownMode) revert AlreadyShutDown();
+        shutdownMode = true;
+        shutdownAt = block.timestamp;
+        emit ShutdownActivated(msg.sender, shutdownAt, block.timestamp);
+    }
 }

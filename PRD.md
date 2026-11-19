@@ -1,5 +1,12 @@
-# ERC20 (Staking) 协议需求规格说明书 v1.1.6
+# ERC20 (Staking) 协议需求规格说明书 v1.1.7
 
+> **v1.1.7 修订说明（2026-11-07）**
+>
+> - **§5.2**：`bookedUserRewardsA/B` 的扣减从步骤 10 前移到步骤 6，与 `totalPending` 同步，保持 CEI 与账本一致性。
+> - **§5.2**：`compoundB` 增加 `bookedUserRewardsA >= rA`、`bookedUserRewardsB >= rB` 显式守卫。
+> - **§5.2**：明确 `compoundB` **豁免 `minClaimAmount`**（无现金流出、无 dust 攻击面）。
+> - **§5.2**：补充"负债转本金"的不变量守恒说明（pending 减少 = totalStakedB 增加，available 不变）。
+>
 > **v1.1.6 修订说明（2026-11-06）**
 >
 > - **§5.4**：`claimA/claimB` 增加 `totalPendingX >= reward`、`bookedUserRewardsX >= reward` 显式守卫，避免异常状态下抛底层 panic。
@@ -317,7 +324,7 @@ uint256 public minClaimAmount;        // 合约初始值为 0（无门槛）；A
 | `rewardDurationA / B`（`PoolInfo.rewardDuration`） | uint256 | 各池默认排放时长（秒）；仅供48h治理 `scheduleRewards*(0)` 使用；`0` 表示未设默认，治理须传显式duration或先设置默认；Operator注资不使用此值 | seconds |
 | `bookedUserRewardsA / B` | uint256 | 链上汇总：该池所有 `userInfo*.rewards` 之和；在 settle / claim / compound / forfeit / emergency 路径增减；用于停机清算 | weiB |
 
-> **实现形态（允许但需固定）**：上述 per-pool 字段可用单个 `PoolInfo` struct 或独立全局变量实现。若采用 struct，必须把 `bookedUserRewards` 一并纳入（现有 `StakeTypes.PoolInfo` 尚未包含该字段），且字段顺序在首次部署后不可变更（delegatecall 模块与 Core 共享槽位）。对外 getter 形状须固定：`PoolInfo public poolA` 自动生成的 getter 返回整条字段元组，**不能按字段单独调用 `poolA.tvlCap()`**；若希望 ABI 与 PRD 名称一致（如 `maxTVLCapA()` / `totalStakedA()`），必须额外编写显式 view getter。两种方式的 ABI 须在部署清单中固定并同步前端/索引器。
+> **实现形态（允许但需固定）**：上述 per-pool 字段可用单个 `PoolInfo` struct 或独立全局变量实现。若采用 struct，必须把 `bookedUserRewards` 一并纳入（`StakeTypes.PoolInfo` 现已包含 `bookedUserRewards`，字段顺序已冻结），且字段顺序在首次部署后不可变更（delegatecall 模块与 Core 共享槽位）。对外 getter 形状须固定：`PoolInfo public poolA` 自动生成的 getter 返回整条字段元组，**不能按字段单独调用 `poolA.tvlCap()`**；若希望 ABI 与 PRD 名称一致（如 `maxTVLCapA()` / `totalStakedA()`），必须额外编写显式 view getter。两种方式的 ABI 须在部署清单中固定并同步前端/索引器。
 
 > **`bookedUserRewards` 与 `totalPending`**
 > * `totalPendingX`：池级已排放未兑付奖励的**保守预留**（主要由 `_updateGlobalX` 增加），不要求精确等于当前所有 `rewards` 字段之和。必须覆盖已记账奖励和未 settle 但用户已可结算的奖励；仍有本金时不得按 `booked` 裁剪预留。
@@ -744,6 +751,11 @@ require(maxTVLCapX == 0 || totalStakedX + received <= maxTVLCapX, "CAP_EXCEEDED"
   // 必须先校验负债可用性，revert 时无需回滚清零操作
   require(totalPendingA >= rA, "INSUFFICIENT_PENDING_A")
   require(totalPendingB >= rB, "INSUFFICIENT_PENDING_B")
+  // 单用户 rewards 不应超过 booked（异常状态的防御性检查）
+  require(bookedUserRewardsA >= rA, "INSUFFICIENT_BOOKED_A")
+  require(bookedUserRewardsB >= rB, "INSUFFICIENT_BOOKED_B")
+  // compoundB 豁免 minClaimAmount：无现金流出、无 dust 攻击面；
+  // 该门槛仅用于 claimA/claimB/forceClaimAll 的现金支付路径。
 
 步骤 5：清零收益（Effect：校验通过后再清零，与合约实现一致）
   rewardsA[user] = 0; rewardsB[user] = 0
@@ -751,6 +763,8 @@ require(maxTVLCapX == 0 || totalStakedX + received <= maxTVLCapX, "CAP_EXCEEDED"
 步骤 6：核销负债（effects 先于 transfer）
   totalPendingA -= rA
   totalPendingB -= rB
+  bookedUserRewardsA -= rA     // 与 rewards 清零、pending 扣减同步
+  bookedUserRewardsB -= rB
 
 步骤 7：更新 rewardDebt 快照 (Fail-safe 强拦截)
   // 【核心修复】必须在增加本金前更新 A/B 两池快照！
@@ -771,9 +785,10 @@ require(maxTVLCapX == 0 || totalStakedX + received <= maxTVLCapX, "CAP_EXCEEDED"
   unlockTimeB[user] = _updateRollingLock(unlockTimeB[user], lockDuration)
   stakeTimestampB[user] = _updateWADP(userStakedB_before, stakeTimestampB[user], rA + rB)
 
-步骤 10：保持B池排期不变
+步骤 10：保持B池排期不变 + 负债转本金的守恒说明
   // 复投只将已确权奖励转为本金，不因空池/过期/预算存在而隐式重排。
-  bookedUserRewardsA -= rA; bookedUserRewardsB -= rB;  // 与 rewards 清零同步
+  // 守恒：pendingA/pendingB 各减 rA/rB，totalStakedB 增加 rA+rB，两者等额；
+  //       availableRewards 不参与，balance 不变，因此不变量两侧不变。
 
 步骤 11：更新冷却与终检
   lastClaimTime[user] = block.timestamp
@@ -824,6 +839,7 @@ if (block.timestamp < unlockTimeB[user]) {
 - **Shutdown 不改变分支**：仍按 `unlockTimeB` 判断 Early / Mature，只忽略 `paused`。
 - **Emergency（非 Shutdown）禁止 `withdrawB`**，必须走 `emergencyWithdrawB`。
 - **全额退出清理**：任一分支在 `userStakedB[user] == 0` 时必须清零 `unlockTimeB[user]` 与 `stakeTimestampB[user]`，避免旧锁/旧 WADP 影响下一次 stake。
+- **部分退出的锁与 WADP 语义（明确）**：仅部分退出（`userStakedB[user] > 0`）时，`unlockTimeB[user]` 与 `stakeTimestampB[user]` **均保持不变**：不缩短或重置滚动锁，也不按反向 WADP 重算持仓起点。剩余本金继续沿用原锁期与原始时间加权起点；再次 `stakeB` 时按 §5.1 的 rolling lock 与 WADP 规则延长锁期并重算起点。本约束同时适用于 Early Exit 与 Mature 两个分支。
 
 **Early Exit 的奖励没收语义（强制）**：只要走 Early Exit 分支，无论 `amount` 是全部还是部分本金，都会**放弃本池全部未领 B 奖励**（`rewardsB[user]` 全量进入 `_forfeitRewards`）。`amount` 本身仍须满足 `0 < amount <= userStakedB[user]` 且 `amount >= minEarlyExitAmountB`。
 
@@ -837,6 +853,12 @@ if (block.timestamp < unlockTimeB[user]) {
 **Shutdown状态守卫**：`withdrawB`在Shutdown下忽略paused，仍按既有unlockTime、Early Exit和Mature费率分支处理；不另增免锁、免罚金或免手续费政策。完整计提使用终态冻结点，退本前须验证全池B本金物理覆盖并保护转出后的剩余本金。
 
 **统一奖励没收助手**（也供§5.5调用）：先完成相关池计提与本人settle，`F = rewardsX[user]`；要求pending与booked均能覆盖F。令`E=max(requiredB-balanceB-badDebtA-badDebtB,0)`（实现须按安全加减顺序计算）、`m=min(F,badDebtX)`、`released=F-m`、`lossAbsorbed=min(released,E)`、`budgetReturned=released-lossAbsorbed`。`rewardsX`清零，`pendingX/bookedX`各减F，`badDebtX`减m，仅`budgetReturned`加入`availableRewardsB`。必须通过 `RewardForfeited(user, pool, forfeited=F, debtCancelled=m, lossAbsorbed, budgetReturned)` 事件同时记录三个分量；禁止把未出资奖励变预算或增加badDebt掩盖外部损失。
+
+> **跨池快照与 E 的计算范围（明确）**：`withdrawB` 按 §5.3.2 第 1 步**只执行 `_updateGlobalB()`，不 crank Pool A**。`_forfeitRewards` 的 `E` 基于当前链上快照计算，他池项（`totalPendingA` / `availableRewardsA` / `badDebtA`）可能未刷新，这是有意为之且偏保守：
+> * accrual 过程中 `availableRewardsX + totalPendingX` 近似守恒（差额仅为 `Ceil` 取整的若干 wei），是否 crank 不改变缺口的本质；
+> * 未 crank 的他池若存在尚未记账的 shortfall，`badDebtA` 偏小会使 `E` 偏大、`budgetReturned` 偏小——即更多没收奖励被计为吸收缺口，而不会虚增预算；
+> * 运营若需要更精确的 `E`，应在调用前由治理/keeper 先执行 `crankCatchUpPool(Pool.A)`。
+> 不得为了让 `E` 更小而让 `withdrawB` 隐式 crank A，也不得从公式中删除跨池项。
 
 ```solidity
 // 前置状态检查（显式写出，不再用"同上"）
@@ -1464,36 +1486,37 @@ event RewardForfeited(address indexed user, Pool indexed pool, uint256 forfeited
 // ── 管理员与系统操作事件 ──────────────────────────────────────────────────
 // RewardNotified仅保留旧ABI记录；修订后的fund与schedule用独立事件，不混用旧语义。
 event RewardNotified(Pool indexed pool, uint256 amount, uint256 duration, uint256 rate);
-event RewardsFunded(Pool indexed pool, address indexed payer, uint256 requested, uint256 received, uint256 currentTime);
-event RewardScheduled(Pool indexed pool, uint256 duration, uint256 rate, uint256 effectiveStart, uint256 finish);
+event RewardsFunded(Pool indexed pool, address indexed sender, uint256 amount, uint256 received, uint256 currentTime);
+event RewardScheduled(Pool indexed pool, uint256 effectiveDuration, uint256 newRate, uint256 time, uint256 periodFinish);
 event RewardScheduleCancelled(Pool indexed pool, uint256 remainingBudget, uint256 at);
-event PoolCatchUpCranked(Pool indexed pool, uint256 lastUpdateTime, bool complete, uint256 at);
+event PoolCatchUpCranked(Pool indexed pool, uint256 lastUpdateTime, bool isCatchUp, uint256 currentTime);
 event BudgetRebalanced(Pool indexed from, Pool indexed to, uint256 amount, uint256 at);
 // Paused / Unpaused 沿用 OZ Pausable 原生事件，不重新声明：
 //   event Paused(address account);
 //   event Unpaused(address account);
 // 暂停时间点通过公开状态 pausedAt / unpauseAt 读取，不写入事件。
-event UserModuleUpdated(address indexed oldModule, address indexed newModule, uint256 at);
-event AdminModuleUpdated(address indexed oldModule, address indexed newModule, uint256 at);
-event SuperAdminTransferred(address indexed oldSuperAdmin, address indexed newSuperAdmin, uint256 at);
-event EmergencyModeActivated(address indexed by, uint256 at);
+event UserModuleUpdated(address indexed oldUserModule, address indexed newUserModule, uint256 currentTime);
+event AdminModuleUpdated(address indexed oldAdminModule, address indexed newAdminModule, uint256 currentTime);
+event SuperAdminTransferred(address indexed oldSuperAdmin, address indexed newSuperAdmin, uint256 currentTime);
+event EmergencyModeActivated(address indexed sender, uint256 currentTime);
 event ShutdownActivated(address indexed by, uint256 at); 
 event ProtocolShutdownComplete(uint256 at);
 event ShutdownResidualSwept(uint256 protectedB, uint256 bookResidual, uint256 swept, uint256 protocolResidualWrittenDown, uint256 at);
 event BadDebtResolved(Pool indexed pool, uint256 amount, uint256 at); 
 event BadDebtResolvedTotal(uint256 totalRepaid, uint256 at);
 event InvariantViolated(uint256 actual, uint256 required, uint256 at);
-event InsufficientBudget(Pool indexed pool, uint256 shortfall, uint256 at); 
+event InsufficientBudget(Pool indexed pool, uint256 shortfall, uint256 currentTime); 
 event TokenRecovered(address indexed token, uint256 amount, address indexed to);
 
 // ── 参数变更事件 ──────────────────────────────────────────────────────────
-event FeeRecipientUpdated(address indexed oldAddr, address indexed newAddr, uint256 at);
-event FeesUpdated(uint256 penaltyBP, uint256 withdrawBP, uint256 midTermBP, uint256 at);
-event LockDurationUpdated(uint256 oldDuration, uint256 newDuration, uint256 at);
-event MinClaimAmountUpdated(uint256 oldVal, uint256 newVal, uint256 at); 
-event MaxTVLCapUpdated(Pool indexed pool, uint256 oldCap, uint256 newCap, uint256 at);
-event MinStakeAmountUpdated(Pool indexed pool, uint256 oldAmount, uint256 newAmount, uint256 at);
-event RewardDurationUpdated(Pool indexed pool, uint256 oldDuration, uint256 newDuration, uint256 at);
+event FeeRecipientUpdated(address indexed oldAddr, address indexed newAddr, uint256 currentTime);
+event FeesUpdated(uint256 penaltyBP, uint256 withdrawBP, uint256 midTermBP, uint256 currentTime);
+event LockDurationUpdated(uint256 oldLockDuration, uint256 newLockDuration, uint256 currentTime);
+event MinClaimAmountUpdated(uint256 oldMinClaimAmount, uint256 newMinClaimAmount, uint256 currentTime); 
+event MaxTVLCapUpdated(Pool indexed pool, uint256 oldCap, uint256 newCap, uint256 currentTime);
+event MinStakeAmountUpdated(Pool indexed pool, uint256 oldAmount, uint256 newAmount, uint256 currentTime);
+event RewardDurationUpdated(Pool indexed pool, uint256 oldRewardDuration, uint256 newRewardDuration, uint256 currentTime);
+event MinEarlyExitAmountBUpdated(uint256 oldEarlyExitAmount, uint256 newEarlyExitAmount, uint256 currentTime);
 
 ```
 

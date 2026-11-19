@@ -178,7 +178,6 @@ contract TestStake is BaseTest {
     }
 
     function testStakeBRevertsInShutdown() public {
-        vm.prank(alice);
         _forceShutdown();
 
         deal(address(tokenB), bob, 30e18);

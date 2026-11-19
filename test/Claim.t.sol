@@ -362,8 +362,6 @@ contract TestClaim is BaseTest {
         _setupBobSoleStaker();
 
         vm.warp(block.timestamp + 1000);
-        vm.prank(ops);
-        core.enableEmergencyMode();
 
         _forceShutdown();
         vm.warp(block.timestamp + 500);
@@ -377,8 +375,6 @@ contract TestClaim is BaseTest {
         _setupBobSoleStakerB();
 
         vm.warp(block.timestamp + 1000);
-        vm.prank(ops);
-        core.enableEmergencyMode();
 
         _forceShutdown();
         vm.warp(block.timestamp + 500);
