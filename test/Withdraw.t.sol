@@ -667,4 +667,255 @@ contract TestWithdraw is BaseTest {
 
         return harness;
     }
+
+    function testEmergencyWithdrawAReturnsPrincipal() public {
+        uint256 amount = 100e18;
+        _stakeA(alice, amount);
+
+        vm.prank(ops);
+        core.enableEmergencyMode();
+
+        vm.prank(alice);
+        core.emergencyWithdrawA();
+
+        PoolInfo memory pA = core.getPool(Pool.A);
+        (uint256 staked,,) = core.userInfoB(alice);
+        assertEq(staked, 0);
+        assertEq(pA.totalStaked, 0);
+    }
+
+    function testEmergencyWithdrawAForfeitsRewards() public {
+        uint256 amount = 100e18;
+        _stakeA(alice, amount);
+
+        _fundAndSchedule(Pool.A, 86400e18, 8640000);
+
+        vm.warp(block.timestamp + 1000);
+
+        vm.prank(ops);
+        core.enableEmergencyMode();
+
+        vm.prank(alice);
+        core.emergencyWithdrawA();
+
+        vm.prank(alice);
+        PoolInfo memory pA = core.getPool(Pool.A);
+        (, uint256 rewards,) = core.userInfoA(alice);
+        assertEq(rewards, 0);
+        assertEq(pA.availableRewards, 86390e18);
+    }
+
+    function testEmergencyWithdrawADoesNotTouchB() public {
+        uint256 amount = 100e18;
+        _stakeA(bob, amount);
+
+        _fundAndSchedule(Pool.A, 86400e18, 8640000);
+
+        vm.warp(block.timestamp + 1000);
+
+        vm.prank(ops);
+        core.enableEmergencyMode();
+
+        PoolInfo memory beforePoolInfoB = core.getPool(Pool.B);
+
+        vm.prank(bob);
+        core.emergencyWithdrawA();
+
+        PoolInfo memory afterPoolInfoB = core.getPool(Pool.B);
+
+        assertEq(beforePoolInfoB.totalStaked, afterPoolInfoB.totalStaked);
+    }
+
+    function testEmergencyWithdrawBClearsLockAndWadp() public {
+        uint256 amount = 100e18;
+        _stakeB(bob, amount);
+
+        _fundAndSchedule(Pool.B, 86400e18, 8640000);
+
+        vm.warp(block.timestamp + 1000);
+
+        vm.prank(ops);
+        core.enableEmergencyMode();
+
+        vm.prank(bob);
+        core.emergencyWithdrawB();
+
+        assertEq(core.unlockTimeB(msg.sender), 0);
+        assertEq(core.stakeTimestampB(msg.sender), 0);
+    }
+
+    function testEmergencyWithdrawBForfeitsRewards() public {
+        uint256 amount = 100e18;
+        _stakeB(bob, amount);
+
+        _fundAndSchedule(Pool.B, 86400e18, 8640000);
+
+        vm.warp(block.timestamp + 1000);
+
+        vm.prank(ops);
+        core.enableEmergencyMode();
+
+        vm.prank(bob);
+        core.emergencyWithdrawB();
+
+        PoolInfo memory pB = core.getPool(Pool.B);
+        (, uint256 rewards,) = core.userInfoB(msg.sender);
+        assertEq(rewards, 0);
+        assertEq(pB.availableRewards, 86400e18);
+    }
+
+    function testEmergencyWithdrawIgnoresPaused() public {
+        uint256 amount = 100e18;
+        _stakeB(bob, amount);
+
+        _fundAndSchedule(Pool.B, 86400e18, 8640000);
+
+        vm.warp(block.timestamp + 1000);
+
+        vm.prank(ops);
+        core.enableEmergencyMode();
+
+        assertTrue(core.paused());
+        assertTrue(core.emergencyMode());
+
+        vm.prank(bob);
+        core.emergencyWithdrawB();
+        (, uint256 rewards,) = core.userInfoB(msg.sender);
+        assertEq(rewards, 0);
+    }
+
+    function testEmergencyWithdrawRevertsWhenNotEmergency() public {
+        uint256 amount = 100e18;
+        _stakeB(bob, amount);
+
+        _fundAndSchedule(Pool.B, 86400e18, 8640000);
+
+        vm.warp(block.timestamp + 1000);
+
+        vm.prank(bob);
+        vm.expectRevert(DualPoolRewardEngine.WrongState.selector);
+        core.emergencyWithdrawB();
+    }
+
+    function testEmergencyWithdrawRevertsInShutdown() public {
+        uint256 amount = 100e18;
+        _stakeB(bob, amount);
+
+        _fundAndSchedule(Pool.B, 86400e18, 8640000);
+
+        vm.warp(block.timestamp + 1000);
+
+        _forceShutdown();
+
+        vm.prank(bob);
+        vm.expectRevert(DualPoolRewardEngine.WrongState.selector);
+        core.emergencyWithdrawB();
+    }
+
+    function testEmergencyWithdrawRevertsWithoutStake() public {
+        _fundAndSchedule(Pool.A, 86400e18, 8640000);
+
+        vm.prank(ops);
+        core.enableEmergencyMode();
+
+        vm.prank(bob);
+        vm.expectRevert(DualPoolRewardEngine.NoStake.selector);
+        core.emergencyWithdrawA();
+    }
+
+    function testEmergencyWithdrawRevertsOnPrincipalDeficit() public {
+        uint256 amount = 100e18;
+        _stakeA(bob, amount);
+
+        _fundAndSchedule(Pool.A, 86400e18, 8640000);
+
+        deal(address(tokenA), address(core), 0);
+
+        PoolInfo memory pA = core.getPool(Pool.A);
+
+        uint256 balance = pA.stakingToken.balanceOf(address(core));
+
+        vm.prank(ops);
+        core.enableEmergencyMode();
+
+        bytes memory err =
+            abi.encodeWithSelector(DualPoolRewardEngine.PrincipalDeficit.selector, Pool.A, balance, pA.totalStaked);
+        vm.prank(bob);
+        vm.expectRevert(err);
+        core.emergencyWithdrawA();
+    }
+
+    function testEmergencyWithdrawNotBlockedByBadDebt() public {
+        uint256 amount = 1000e18;
+        deal(address(tokenB), ops, amount);
+
+        vm.prank(ops);
+        tokenB.approve(address(core), amount);
+
+        vm.prank(ops);
+        core.fundRewards(Pool.A, amount);
+
+        vm.prank(alice);
+        core.scheduleRewards(Pool.A, 30 days);
+
+        // poolB.badDebt = slot 31, poolB.totalPending = slot 32
+        vm.store(address(core), bytes32(uint256(31)), bytes32(uint256(1)));
+        vm.store(address(core), bytes32(uint256(32)), bytes32(uint256(1)));
+
+        _stakeA(bob, 100e18);
+
+        vm.warp(block.timestamp + 1000);
+
+        vm.prank(ops);
+        core.enableEmergencyMode();
+
+        vm.prank(bob);
+        core.emergencyWithdrawA();
+
+        (uint256 staked,,) = core.userInfoA(bob);
+        assertEq(staked, 0);
+    }
+
+    function testEmergencyWithdrawAWithFOTWithinCap() public {
+        uint256 feeBP = 500;
+        (DualPoolStaking fotCore, MockFOTERC20 fotToken) = _deployFOTACore(feeBP);
+        vm.prank(deployer);
+        fotCore.setAdmin(alice, true);
+
+        deal(address(fotToken), bob, 100e18);
+
+        vm.prank(bob);
+        fotToken.approve(address(fotCore), 100e18);
+        vm.prank(bob);
+        fotCore.stakeA(100e18);
+        (uint256 staked,,) = fotCore.userInfoA(bob);
+        assertEq(staked, 95e18);
+
+        vm.prank(ops);
+        core.enableEmergencyMode();
+
+        vm.prank(bob);
+        fotCore.withdrawA(95e18);
+        (uint256 stakedAfter,,) = fotCore.userInfoA(bob);
+        assertEq(stakedAfter, 0);
+        assertEq(fotToken.balanceOf(bob), 90.25e18);
+        assertEq(fotToken.balanceOf(address(core)), 0);
+    }
+
+    function testEmergencyWithdrawEmitsEvent() public {
+        uint256 amount = 100e18;
+        _stakeB(bob, amount);
+
+        _fundAndSchedule(Pool.B, 86400e18, 8640000);
+
+        vm.warp(block.timestamp + 1000);
+
+        vm.prank(ops);
+        core.enableEmergencyMode();
+
+        vm.prank(bob);
+        vm.expectEmit(true, true, false, true, address(core));
+        emit DualPoolRewardEngine.EmergencyWithdrawn(bob, Pool.B, 100e18, 10e18, block.timestamp);
+        core.emergencyWithdrawB();
+    }
 }

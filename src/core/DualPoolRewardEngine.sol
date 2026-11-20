@@ -40,8 +40,11 @@ abstract contract DualPoolRewardEngine is DualPoolStorageLayout, Pausable {
     error NothingToClaim();
     error BelowMinClaim();
     error InsufficientPending();
+    error InsufficientLiquidity();
     error InsufficientBooked();
     error BelowMinEarlyExitB();
+    error NoPayableLiquidity();
+    error NoStake();
 
     error AlreadyShutDown();
     error UnpauseCooldownActive(uint256 unpauseAt);
@@ -51,7 +54,9 @@ abstract contract DualPoolRewardEngine is DualPoolStorageLayout, Pausable {
 
     event Staked(address indexed sender, Pool indexed pool, uint256 received, uint256 time);
     event Withdrawn(address indexed user, Pool indexed pool, uint256 amount, uint256 feeOrPenalty, bool isEarly);
-
+    event EmergencyWithdrawn(
+        address indexed sender, Pool indexed pool, uint256 principal, uint256 rewardsForfeited, uint256 currentTime
+    );
     event Claimed(address indexed user, uint256 paidA, uint256 paidB, uint256 timestamp);
     event ShutdownActivated(address indexed sender, uint256 shutdownAt, uint256 currentTime);
 
@@ -60,11 +65,15 @@ abstract contract DualPoolRewardEngine is DualPoolStorageLayout, Pausable {
         Pool indexed pool,
         uint256 forfeited,
         uint256 debtCancelled,
-        uint256 lossAvsorbed,
+        uint256 lossAbsorbed,
         uint256 budgetReturned
     );
 
     event UnpausedAt(address indexed sender, uint256 frozenAt, uint256 delta, uint256 currentTime);
+
+    event ForceClaimedAll(
+        address indexed sender, uint256 payA, uint256 payB, uint256 rewardsA, uint256 rewardsB, uint256 currentTime
+    );
 
     function _effectiveTime() internal view returns (uint256) {
         if (emergencyMode || shutdownMode) return terminalRewardTime;
@@ -145,6 +154,10 @@ abstract contract DualPoolRewardEngine is DualPoolStorageLayout, Pausable {
         uint256 required = _tokenBRequired();
 
         if (actual < required) revert InvariantViolation(actual, required);
+        _assertLedgerConsistency();
+    }
+
+    function _assertLedgerConsistency() internal view {
         if (poolA.bookedUserRewards > poolA.totalPending) revert BookedRewardsExceedPending();
         if (poolB.bookedUserRewards > poolB.totalPending) revert BookedRewardsExceedPending();
         if (poolA.badDebt > poolA.totalPending) revert DebtExceedsPending();

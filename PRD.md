@@ -1,5 +1,22 @@
-# ERC20 (Staking) 协议需求规格说明书 v1.1.7
+# ERC20 (Staking) 协议需求规格说明书 v1.1.9
 
+> **v1.1.9 修订说明（2026-11-07）**
+>
+> - **§5.3.1 / §5.3.2 / §5.4 / §5.5**：状态守卫顺序统一为「先 Emergency，再 Paused」，与代码一致；Emergency 状态下错误类型从 `PausedStatus` 改为更精确的 `EmergencyStatus`。
+> - **§8**：事件 `ForceClaimed` 更名为 `ForceClaimedAll`，与代码一致。
+> - **§8**：`ShutdownActivated` 增加 `currentTime` 字段，与代码一致。
+> - **§8**：新增自定义事件 `UnpausedAt(address indexed sender, uint256 frozenAt, uint256 delta, uint256 currentTime)`，替代 OZ 的 `Unpaused`（记录完整的恢复信息）。
+> - **§8**：修正 `RewardForfeited` 参数名拼写 `lossAvsorbed` → `lossAbsorbed`（与代码一致）。
+>
+> **v1.1.8 修订说明（2026-11-07）**
+>
+> - **§5.5**：明确 `_forfeitRewards` 的 `pending/booked` 覆盖检查在账本损坏时 revert，属于 §7.3「边界」的账本损坏场景，不属于"既有 badDebt 缺口只报告"。
+> - **§5.5**：明确**跨池吸收**语义：`E` 同时包含两池 badDebt，放弃的奖励不按池隔离。
+> - **§5.5**：明确伪代码中的 `user` 均指 `msg.sender`，紧急退出不允许代他人操作。
+> - **§5.5**：`emergencyWithdrawA` 补转出后 TokenA 本金覆盖检查。
+> - **§5.5**：补充完整计提失败时先 `crankCatchUpPool` 再重试的说明。
+> - **§5.5**：明确紧急退出不更新 `lastClaimTime`，共享冷却只在 claim/compound/forceClaim 成功时更新。
+>
 > **v1.1.7 修订说明（2026-11-07）**
 >
 > - **§5.2**：`bookedUserRewardsA/B` 的扣减从步骤 10 前移到步骤 6，与 `totalPending` 同步，保持 CEI 与账本一致性。
@@ -804,9 +821,9 @@ require(maxTVLCapX == 0 || totalStakedX + received <= maxTVLCapX, "CAP_EXCEEDED"
 与业务决策一致：**Pool A 正常提款无锁、无本金手续费**（合约侧无 `unlockTimeA` / `minEarlyExitAmountA` 等状态）。示意代码仅反映 `withdrawA` 实际守卫逻辑：
 
 ```solidity
-// 完整状态机检查，顺序不可交换（与实现一致：无 Early Exit / 无 Mature Fee 分支）
-require(shutdownMode || !paused, "PAUSED");
+// 完整状态机检查，顺序不可交换（与实现一致：先 Emergency 后 Paused，Emergency 给出更精确的错误类型）
 require(!emergencyMode || shutdownMode, "EMERGENCY_MODE: use emergencyWithdraw");
+require(shutdownMode || !paused, "PAUSED");
 require(amount > 0 && amount <= userStakedA[user], "INVALID_AMOUNT");
 
 _updateGlobalA();
@@ -861,9 +878,9 @@ if (block.timestamp < unlockTimeB[user]) {
 > 不得为了让 `E` 更小而让 `withdrawB` 隐式 crank A，也不得从公式中删除跨池项。
 
 ```solidity
-// 前置状态检查（显式写出，不再用"同上"）
-require(shutdownMode || !paused(), "PAUSED");
+// 前置状态检查（显式写出，不再用"同上"；先 Emergency 后 Paused）
 require(!emergencyMode || shutdownMode, "EMERGENCY_MODE");
+require(shutdownMode || !paused(), "PAUSED");
 require(amount > 0 && amount <= userStakedB[user], "INVALID_AMOUNT");
 require(amount >= minEarlyExitAmountB, "BELOW_MIN_EARLY_EXIT_B");
 
@@ -962,8 +979,8 @@ emit Withdrawn(user,  Pool.B, amount, fee, false);
 两函数共享 `lastClaimTime` 与 `claimCooldown`（首次成功 claim/compound/forceClaim 后生效）。各自只结算并支付对应池的 `rewards`（均为 TokenB）。
 
 ```solidity
-require(shutdownMode || !paused, "PAUSED");
 require(!emergencyMode || shutdownMode, "EMERGENCY_MODE");
+require(shutdownMode || !paused, "PAUSED");
 require(lastClaimTime[msg.sender] == 0 ||
     block.timestamp >= lastClaimTime[msg.sender] + CLAIM_COOLDOWN, "COOLDOWN");
 
@@ -1016,8 +1033,8 @@ emit Claimed(msg.sender, paidA, paidB, block.timestamp);
 
 ```solidity
 function forceClaimAll() external nonReentrant {
-    require(shutdownMode || !paused, "PAUSED");
     require(!emergencyMode || shutdownMode, "EMERGENCY_MODE");
+    require(shutdownMode || !paused, "PAUSED");
     require(lastClaimTime[msg.sender] == 0 ||
         block.timestamp >= lastClaimTime[msg.sender] + CLAIM_COOLDOWN, "COOLDOWN");
 
@@ -1071,7 +1088,7 @@ function forceClaimAll() external nonReentrant {
                 "DEBT_EXCEEDS_PENDING");
     }
 
-    emit ForceClaimed(msg.sender, payA, payB,
+    emit ForceClaimedAll(msg.sender, payA, payB,
         rewardsA[msg.sender], rewardsB[msg.sender], block.timestamp);
 }
 ```
@@ -1079,6 +1096,14 @@ function forceClaimAll() external nonReentrant {
 零支付、转账税或sender扣款异常均整笔回滚，不核销债权、不刷新冷却。付款不减少badDebt，不把未付部分转预算；资金不足的余款继续留在rewards/booked/pending，补款后可再领取。事件中的remaining/unpaid字段改为“仍保留债权”，ABI/索引器不得沿用旧“已放弃”的含义。
 
 ### 5.5 EmergencyWithdrawA / EmergencyWithdrawB
+
+**通用约定（强制）**：
+
+- 伪代码中的 `user` 均指 `msg.sender`；紧急退出不允许代他人操作。
+- `_forfeitRewards` 的 `pendingX >= F` / `bookedX >= F` 检查在账本损坏时会 revert。这属于 §7.3「边界」中的历史账本损坏场景，需要修复或迁移；**不属于**"既有 badDebt 缺口只报告、不阻断本金"的范畴。
+- **跨池吸收**：`_forfeitRewards` 的 `E = max(requiredB - balanceB - badDebtA - badDebtB, 0)` 同时包含两池 badDebt；A/B 用户放弃的奖励不严格按池隔离，先抵本池 `badDebt`，再按 `E` 吸收两池既存物理缺口，余款进入 `availableRewardsB`。
+- **完整计提失败**：若 `_updateGlobalX()` 超过 `MAX_CATCHUP_ITERATIONS`，用户应先调用 `crankCatchUpPool`（Emergency 下可用），再重试紧急退出。
+- **冷却**：紧急退出不更新 `lastClaimTime`；共享冷却只在 claim / compound / forceClaim 成功时更新。
 
 ```solidity
 require(emergencyMode == true && !shutdownMode, "NOT_EMERGENCY"); // 忽略paused
@@ -1093,6 +1118,7 @@ _forfeitRewards(Pool.A, user); // 按§5.3.2核销debt/吸收缺口，仅有支�
 userStakedA[user] = 0;
 totalStakedA -= principal;
 FOTTransferLib.transferGross(stakingTokenA, user, principal, maxTransferFeeBP, BASIS_POINTS);
+require(stakingTokenA.balanceOf(address(this)) >= totalStakedA, "PRINCIPAL_DEFICIT_A_AFTER");
 emit EmergencyWithdrawn(user,Pool.A, principal, forfeited, block.timestamp);
 // B奖励账目缺口只报告，不回滚足额A退本；A本金和转账扣款检查仍强制执行。
 ```
@@ -1263,8 +1289,8 @@ function setMinClaimAmount(uint256 newAmount)
 普通Withdraw与Claim操作的状态校验为：
 
 ```solidity
-require(shutdownMode || !paused, "PAUSED");
 require(!emergencyMode || shutdownMode, "EMERGENCY_MODE");
+require(shutdownMode || !paused, "PAUSED");
 ```
 
 其语义等价于：
@@ -1475,7 +1501,7 @@ enum Pool { A, B }
 event Staked(address indexed sender, Pool indexed pool, uint256 received, uint256 time);
 event Withdrawn(address indexed user, Pool indexed pool,uint256 amount, uint256 feeOrPenalty, bool isEarly);
 event Claimed(address indexed user, uint256 paidA, uint256 paidB, uint256 timestamp);
-event ForceClaimed(address indexed user, uint256 paidA, uint256 paidB, uint256 unpaidA, uint256 unpaidB, uint256 timestamp); 
+event ForceClaimedAll(address indexed sender, uint256 payA, uint256 payB, uint256 rewardsA, uint256 rewardsB, uint256 currentTime); 
 event Compounded(address indexed user, uint256 amountA, uint256 amountB, uint256 newUserStakedB, uint256 newUnlockTimeB);
 event EmergencyWithdrawn(
     address indexed user,Pool indexed pool, uint256 principal, uint256 rewardsForfeited,  uint256 at
@@ -1491,15 +1517,15 @@ event RewardScheduled(Pool indexed pool, uint256 effectiveDuration, uint256 newR
 event RewardScheduleCancelled(Pool indexed pool, uint256 remainingBudget, uint256 at);
 event PoolCatchUpCranked(Pool indexed pool, uint256 lastUpdateTime, bool isCatchUp, uint256 currentTime);
 event BudgetRebalanced(Pool indexed from, Pool indexed to, uint256 amount, uint256 at);
-// Paused / Unpaused 沿用 OZ Pausable 原生事件，不重新声明：
+// Paused 沿用 OZ Pausable 原生事件；Unpaused 改用自定义事件以记录完整恢复信息：
 //   event Paused(address account);
-//   event Unpaused(address account);
-// 暂停时间点通过公开状态 pausedAt / unpauseAt 读取，不写入事件。
+event UnpausedAt(address indexed sender, uint256 frozenAt, uint256 delta, uint256 currentTime);
+// 暂停时间点通过公开状态 pausedAt 读取。
 event UserModuleUpdated(address indexed oldUserModule, address indexed newUserModule, uint256 currentTime);
 event AdminModuleUpdated(address indexed oldAdminModule, address indexed newAdminModule, uint256 currentTime);
 event SuperAdminTransferred(address indexed oldSuperAdmin, address indexed newSuperAdmin, uint256 currentTime);
 event EmergencyModeActivated(address indexed sender, uint256 currentTime);
-event ShutdownActivated(address indexed by, uint256 at); 
+event ShutdownActivated(address indexed sender, uint256 shutdownAt, uint256 currentTime); 
 event ProtocolShutdownComplete(uint256 at);
 event ShutdownResidualSwept(uint256 protectedB, uint256 bookResidual, uint256 swept, uint256 protocolResidualWrittenDown, uint256 at);
 event BadDebtResolved(Pool indexed pool, uint256 amount, uint256 at); 
@@ -1520,7 +1546,7 @@ event MinEarlyExitAmountBUpdated(uint256 oldEarlyExitAmount, uint256 newEarlyExi
 
 ```
 
-**事件语义修订**：`ForceClaimed.unpaidA/unpaidB` 表示本次未支付、仍保留在用户rewards中的债权，**不表示已放弃**；实际支付才减少pending/booked，不因部分付款减少badDebt。零支付回滚，不发成功事件；健康Normal跨池足额领取仍逐池检查minClaim，只有坏账/Shutdown部分路径豁免该门槛。索引器、前端与ABI须随实现更新，不能沿用旧版“未付即没收”的解释。
+**事件语义修订**：`ForceClaimedAll.rewardsA/rewardsB` 表示支付后仍保留在用户rewards中的债权，**不表示已放弃**；实际支付才减少pending/booked，不因部分付款减少badDebt。零支付回滚，不发成功事件；健康Normal跨池足额领取仍逐池检查minClaim，只有坏账/Shutdown部分路径豁免该门槛。索引器、前端与ABI须随实现更新，不能沿用旧版”未付即没收”的解释。
 
 **事件时间字段约定（强制）**：所有事件的 `at` / `currentTime` 字段一律使用**真实 `block.timestamp`**。会计与奖励计算使用 `_effectiveTime()`；在 Paused / Emergency / Shutdown 下两者可能不同。监控与索引器不得把事件时间用于奖励计算，只能用于展示与审计。
 

@@ -625,4 +625,181 @@ contract TestClaim is BaseTest {
         assertEq(core.getPool(Pool.A).lastUpdateTime, block.timestamp);
         assertEq(core.getPool(Pool.B).lastUpdateTime, block.timestamp);
     }
+
+    function testForceClaimAllHealthy() public {
+        _setupBobSoleStaker();
+        _setupBobSoleStakerB();
+
+        vm.warp(block.timestamp + 1000);
+
+        core.crankCatchUpPool(Pool.A);
+        core.crankCatchUpPool(Pool.B);
+
+        PoolInfo memory beforePoolInfoA = core.getPool(Pool.A);
+        PoolInfo memory beforePoolInfoB = core.getPool(Pool.B);
+
+        vm.prank(bob);
+        core.forceClaimAll();
+
+        PoolInfo memory afterPoolInfoA = core.getPool(Pool.A);
+        PoolInfo memory afterPoolInfoB = core.getPool(Pool.B);
+
+        assertGt(beforePoolInfoA.totalPending, afterPoolInfoA.totalPending);
+        assertGt(beforePoolInfoB.totalPending, afterPoolInfoB.totalPending);
+    }
+
+    function testForceClaimAllRevertsHealthyBelowMinClaim() public {
+        _setupBobSoleStaker();
+        _setupBobSoleStakerB();
+
+        vm.warp(block.timestamp + 1);
+
+        vm.prank(alice);
+        core.setMinClaimAmount(1e16 + 1);
+
+        vm.prank(bob);
+        vm.expectRevert(DualPoolRewardEngine.BelowMinClaim.selector);
+        core.forceClaimAll();
+    }
+
+    function testForceClaimAllRevertsHealthyNoLiquidity() public {
+        _setupBobSoleStaker();
+        _setupBobSoleStakerB();
+
+        vm.warp(block.timestamp + 864000);
+
+        deal(address(tokenB), address(core), 0);
+
+        vm.prank(bob);
+        vm.expectRevert(DualPoolRewardEngine.InsufficientLiquidity.selector);
+        core.forceClaimAll();
+    }
+
+    function testForceClaimAllShutdownPartial() public {
+        _setupBobSoleStaker();
+        _setupBobSoleStakerB();
+
+        vm.warp(block.timestamp + 1000);
+        _forceShutdown();
+
+        deal(address(tokenB), address(core), 1813e18);
+        uint256 beforeBal = tokenB.balanceOf(bob);
+
+        vm.prank(bob);
+        core.forceClaimAll();
+
+        assertEq(tokenB.balanceOf(bob) - beforeBal, 5e18);
+
+        (, uint256 remA,) = core.userInfoA(bob);
+        (, uint256 remB,) = core.userInfoB(bob);
+
+        assertEq(remA, 5e18);
+        assertEq(remB, 10e18);
+    }
+
+    function testForceClaimAllNoPayableLiquidity() public {
+        _setupBobSoleStaker();
+        _setupBobSoleStakerB();
+
+        vm.warp(block.timestamp + 1000);
+
+        core.crankCatchUpPool(Pool.A);
+        core.crankCatchUpPool(Pool.B);
+
+        _forceShutdown();
+
+        deal(address(tokenB), address(core), 1808e18);
+
+        vm.prank(bob);
+        vm.expectRevert(DualPoolRewardEngine.NoPayableLiquidity.selector);
+        core.forceClaimAll();
+    }
+
+    function testForceClaimAllPreservesRemaining() public {
+        _setupBobSoleStaker();
+        _setupBobSoleStakerB();
+        vm.warp(block.timestamp + 1000);
+
+        core.crankCatchUpPool(Pool.A);
+        core.crankCatchUpPool(Pool.B);
+
+        _forceShutdown();
+
+        deal(address(tokenB), address(core), 1813e18);
+
+        vm.prank(bob);
+        core.forceClaimAll();
+
+        (, uint256 remA,) = core.userInfoA(bob);
+        (, uint256 remB,) = core.userInfoB(bob);
+
+        assertEq(remA, 5e18);
+        assertEq(remB, 10e18);
+
+        PoolInfo memory pA = core.getPool(Pool.A);
+        PoolInfo memory pB = core.getPool(Pool.B);
+
+        assertEq(pA.totalPending, 5e18);
+        assertEq(pB.totalPending, 10e18);
+        assertEq(pB.totalPending, 10e18);
+        assertEq(pB.bookedUserRewards, 10e18);
+
+        assertEq(pA.badDebt, 0);
+        assertEq(pB.badDebt, 0);
+        assertEq(core.lastClaimTime(bob), block.timestamp);
+    }
+
+    function testForceClaimAllEmitsForceClaimedAll() public {
+        _setupBobSoleStaker();
+        _setupBobSoleStakerB();
+
+        vm.warp(block.timestamp + 1000);
+
+        core.crankCatchUpPool(Pool.A);
+        core.crankCatchUpPool(Pool.B);
+
+        vm.prank(bob);
+        vm.expectEmit(true, false, false, true, address(core));
+        emit DualPoolRewardEngine.ForceClaimedAll(bob, 10e18, 10e18, 0, 0, block.timestamp);
+        core.forceClaimAll();
+    }
+
+    function testForceClaimAllCooldown() public {
+        _setupBobSoleStaker();
+        _setupBobSoleStakerB();
+
+        vm.warp(block.timestamp + 1000);
+
+        core.crankCatchUpPool(Pool.A);
+        core.crankCatchUpPool(Pool.B);
+
+        vm.prank(bob);
+        core.claimA();
+
+        uint256 last = core.lastClaimTime(bob);
+        bytes memory err =
+            abi.encodeWithSelector(DualPoolRewardEngine.ClaimCooldownActive.selector, last + core.CLAIM_COOLDOWN());
+
+        vm.prank(bob);
+        vm.expectRevert(err);
+        core.forceClaimAll();
+    }
+
+    function testForceClaimAllRevertsPaused() public {
+        vm.prank(ops);
+        core.pause();
+
+        vm.prank(bob);
+        vm.expectRevert(DualPoolRewardEngine.PausedStatus.selector);
+        core.forceClaimAll();
+    }
+
+    function testForceClaimAllRevertsEmergency() public {
+        vm.prank(ops);
+        core.enableEmergencyMode();
+
+        vm.prank(bob);
+        vm.expectRevert(DualPoolRewardEngine.EmergencyStatus.selector);
+        core.forceClaimAll();
+    }
 }

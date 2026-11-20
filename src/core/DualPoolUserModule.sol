@@ -228,13 +228,8 @@ contract DualPoolUserModule is DualPoolRewardEngine, IDualPoolUserModule {
     }
 
     function _claim(Pool pool) internal {
-        if (emergencyMode && !shutdownMode) revert EmergencyStatus();
-        if (!shutdownMode && paused()) revert PausedStatus();
-
-        uint256 last = lastClaimTime[msg.sender];
-        if (last != 0 && block.timestamp < last + CLAIM_COOLDOWN) {
-            revert ClaimCooldownActive(last + CLAIM_COOLDOWN);
-        }
+        _requireClaimableState();
+        _requireCooldown();
 
         _updateGlobalA();
         _updateGlobalB();
@@ -271,5 +266,154 @@ contract DualPoolUserModule is DualPoolRewardEngine, IDualPoolUserModule {
 
     function claimB() external {
         _claim(Pool.B);
+    }
+
+    function _requireClaimableState() internal view {
+        if (emergencyMode && !shutdownMode) revert EmergencyStatus();
+        if (!shutdownMode && paused()) revert PausedStatus();
+    }
+
+    function _requireCooldown() internal view {
+        uint256 last = lastClaimTime[msg.sender];
+        if (last != 0 && block.timestamp < last + CLAIM_COOLDOWN) {
+            revert ClaimCooldownActive(last + CLAIM_COOLDOWN);
+        }
+    }
+
+    function forceClaimAll() external {
+        _requireClaimableState();
+        _requireCooldown();
+
+        _updateGlobalA();
+        _updateGlobalB();
+
+        _settleUserA(msg.sender);
+        _settleUserB(msg.sender);
+
+        if (poolA.totalPending < poolA.badDebt || poolB.totalPending < poolB.badDebt) {
+            revert DebtExceedsPending();
+        }
+
+        uint256 rA = userInfoA[msg.sender].rewards;
+        uint256 rB = userInfoB[msg.sender].rewards;
+        if (rA + rB == 0) revert NothingToClaim();
+
+        uint256 payA;
+        uint256 payB;
+        uint256 paid;
+
+        uint256 reserved = poolB.totalStaked + unclaimedFeesB + poolA.availableRewards + poolB.availableRewards;
+        uint256 balanceB = rewardTokenB.balanceOf(address(this));
+
+        uint256 liquid = balanceB > reserved ? balanceB - reserved : 0;
+
+        if (!shutdownMode && poolA.badDebt == 0 && poolB.badDebt == 0) {
+            if (rA > 0 && rA < minClaimAmount) revert BelowMinClaim();
+            if (rB > 0 && rB < minClaimAmount) revert BelowMinClaim();
+            if (poolA.totalPending < rA || poolB.totalPending < rB) revert InsufficientPending();
+            if (liquid < rA + rB) revert InsufficientLiquidity();
+            payA = rA;
+            payB = rB;
+        } else {
+            uint256 eligibleA = Math.min(rA, poolA.totalPending - poolA.badDebt);
+            uint256 eligibleB = Math.min(rB, poolB.totalPending - poolB.badDebt);
+            payA = Math.min(eligibleA, liquid);
+            payB = Math.min(eligibleB, liquid - payA);
+        }
+
+        paid = payA + payB;
+        if (paid == 0) revert NoPayableLiquidity();
+
+        // 防御性检查：账本异常时 booked 可能小于 pay，避免 Panic(0x11)
+        if (poolA.bookedUserRewards < payA || poolB.bookedUserRewards < payB) {
+            revert InsufficientBooked();
+        }
+
+        userInfoA[msg.sender].rewards -= payA;
+        userInfoB[msg.sender].rewards -= payB;
+        poolA.totalPending -= payA;
+        poolA.bookedUserRewards -= payA;
+        poolB.totalPending -= payB;
+        poolB.bookedUserRewards -= payB;
+        lastClaimTime[msg.sender] = block.timestamp;
+
+        _transferGross(rewardTokenB, msg.sender, paid);
+
+        if (!shutdownMode && poolA.badDebt == 0 && poolB.badDebt == 0) {
+            _assertInvariantB();
+        } else {
+            if (poolA.bookedUserRewards > poolA.totalPending || poolB.bookedUserRewards > poolB.totalPending) {
+                revert BookedRewardsExceedPending();
+            }
+            if (poolA.badDebt > poolA.totalPending || poolB.badDebt > poolB.totalPending) {
+                revert DebtExceedsPending();
+            }
+        }
+
+        emit ForceClaimedAll(
+            msg.sender, payA, payB, userInfoA[msg.sender].rewards, userInfoB[msg.sender].rewards, block.timestamp
+        );
+    }
+
+    function emergencyWithdrawA() external {
+        if (!emergencyMode || shutdownMode) revert WrongState();
+        _updateGlobalA();
+        _settleUserA(msg.sender);
+        _advanceGlobal(Pool.B, false);
+        uint256 principal = userInfoA[msg.sender].staked;
+        if (principal == 0) revert NoStake();
+
+        uint256 balance = poolA.stakingToken.balanceOf(address(this));
+        if (balance < poolA.totalStaked) {
+            revert PrincipalDeficit(Pool.A, balance, poolA.totalStaked);
+        }
+
+        uint256 forfeited = userInfoA[msg.sender].rewards;
+
+        _forfeitRewards(Pool.A, msg.sender);
+
+        userInfoA[msg.sender].staked = 0;
+        poolA.totalStaked -= principal;
+
+        _transferGross(poolA.stakingToken, msg.sender, principal);
+
+        _assertLedgerConsistency();
+
+        emit EmergencyWithdrawn(msg.sender, Pool.A, principal, forfeited, block.timestamp);
+    }
+
+    function emergencyWithdrawB() external {
+        if (!emergencyMode || shutdownMode) revert WrongState();
+
+        _updateGlobalB();
+        _settleUserB(msg.sender);
+
+        uint256 principal = userInfoB[msg.sender].staked;
+        if (principal == 0) revert NoStake();
+
+        uint256 beforeBalance = rewardTokenB.balanceOf(address(this));
+        if (beforeBalance < poolB.totalStaked) {
+            revert PrincipalDeficit(Pool.B, beforeBalance, poolB.totalStaked);
+        }
+
+        uint256 forfeited = userInfoB[msg.sender].rewards;
+        _forfeitRewards(Pool.B, msg.sender);
+
+        userInfoB[msg.sender].staked = 0;
+        poolB.totalStaked -= principal;
+
+        unlockTimeB[msg.sender] = 0;
+        stakeTimestampB[msg.sender] = 0;
+
+        _transferGross(rewardTokenB, msg.sender, principal);
+
+        _assertLedgerConsistency();
+
+        uint256 afterBalance = rewardTokenB.balanceOf(address(this));
+        if (afterBalance < poolB.totalStaked) {
+            revert PrincipalDeficit(Pool.B, afterBalance, poolB.totalStaked);
+        }
+
+        emit EmergencyWithdrawn(msg.sender, Pool.B, principal, forfeited, block.timestamp);
     }
 }
