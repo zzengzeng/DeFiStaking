@@ -416,4 +416,57 @@ contract DualPoolUserModule is DualPoolRewardEngine, IDualPoolUserModule {
 
         emit EmergencyWithdrawn(msg.sender, Pool.B, principal, forfeited, block.timestamp);
     }
+
+    function compoundB() external {
+        if (paused() || emergencyMode || shutdownMode) revert WrongState();
+        _requireCooldown();
+
+        _updateGlobalA();
+        _updateGlobalB();
+
+        if (poolA.badDebt != 0 || poolB.badDebt != 0) revert BadDebtExists();
+
+        _settleUserA(msg.sender);
+        _settleUserB(msg.sender);
+
+        uint256 rA = userInfoA[msg.sender].rewards;
+        uint256 rB = userInfoB[msg.sender].rewards;
+        if (rA + rB == 0) revert NothingToCompound();
+
+        if (poolB.totalStaked > MAX_REWARD_SHARES_B) revert RewardShareLimit();
+
+        if (rA + rB > MAX_REWARD_SHARES_B - poolB.totalStaked) revert RewardShareLimit();
+
+        if (poolA.totalPending < rA || poolB.totalPending < rB) {
+            revert InsufficientPending();
+        }
+
+        if (poolA.bookedUserRewards < rA || poolB.bookedUserRewards < rB) {
+            revert InsufficientBooked();
+        }
+
+        userInfoA[msg.sender].rewards = 0;
+        userInfoB[msg.sender].rewards = 0;
+
+        poolA.totalPending -= rA;
+        poolB.totalPending -= rB;
+        poolA.bookedUserRewards -= rA;
+        poolB.bookedUserRewards -= rB;
+
+        uint256 oldStaked = userInfoB[msg.sender].staked;
+        uint256 oldTs = stakeTimestampB[msg.sender];
+
+        poolB.totalStaked += rA + rB;
+        userInfoB[msg.sender].staked += rA + rB;
+
+        unlockTimeB[msg.sender] = _updateRollingLock(unlockTimeB[msg.sender], lockDuration);
+
+        stakeTimestampB[msg.sender] = _updateWADP(oldStaked, oldTs, rA + rB);
+
+        lastClaimTime[msg.sender] = block.timestamp;
+
+        _assertInvariantB();
+
+        emit Compounded(msg.sender, rA, rB, userInfoB[msg.sender].staked, unlockTimeB[msg.sender]);
+    }
 }

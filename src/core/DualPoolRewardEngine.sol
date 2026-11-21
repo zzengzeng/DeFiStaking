@@ -38,6 +38,7 @@ abstract contract DualPoolRewardEngine is DualPoolStorageLayout, Pausable {
     error BadDebtExists();
     error ClaimCooldownActive(uint256 availableAt);
     error NothingToClaim();
+    error NothingToCompound();
     error BelowMinClaim();
     error InsufficientPending();
     error InsufficientLiquidity();
@@ -74,6 +75,8 @@ abstract contract DualPoolRewardEngine is DualPoolStorageLayout, Pausable {
     event ForceClaimedAll(
         address indexed sender, uint256 payA, uint256 payB, uint256 rewardsA, uint256 rewardsB, uint256 currentTime
     );
+
+    event Compounded(address indexed sender, uint256 rewardA, uint256 rewardB, uint256 staked, uint256 newUnlockTime);
 
     function _effectiveTime() internal view returns (uint256) {
         if (emergencyMode || shutdownMode) return terminalRewardTime;

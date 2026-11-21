@@ -11,4 +11,5 @@ interface IDualPoolUserModule {
     function claimA() external;
     function claimB() external;
     function forceClaimAll() external;
+    function compoundB() external;
 }
