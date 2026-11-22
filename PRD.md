@@ -1226,7 +1226,7 @@ emit RewardScheduled(Pool.X, effectiveDuration, newRate, T, periodFinishX);
 
 > **`MAX_REWARD_RATE_X` 上界**：须使用部署时一次性写入的 **`maxTotalSupplyBForRewardRateCap`**（见§3.1）按附录公式推导，禁止使用运行时`rewardTokenB.totalSupply()`。旧周期leftover及carryStranded已包含在available，不再重复相加，也不重复增加available；已确权pending不能重新排期。
 
-`reanchorRewardsA/B()`同属≥48h治理，仅Normal/Paused可用，先完整结算两池并确认两池badDebt清零及B物理覆盖正常，再按§4.5保留的活跃窗口或过期窗口算法处理现有预算；活跃窗按原remainingTime重算，rawRate为0时使用原1 wei/秒微排放，过期窗按ceil选时长后重新floor速率。该入口中的微排放可短于1天，是显式schedule周期下限的既有例外，不改变治理等待期限。`cancelRewardScheduleA/B()`仅Normal/Paused可用，先完整结算，再将rate设0、finish与lastUpdate设T，未确权预算保留available。三种排期入口均不得由用户路径、Operator、注资或回流预算间接调用。
+`reanchorRewardsA/B()`同属≥48h治理，仅Normal/Paused可用，先完整结算两池并确认两池badDebt清零及B物理覆盖正常，再按§4.5保留的活跃窗口或过期窗口算法处理现有预算；活跃窗按原remainingTime重算，rawRate为0时使用原1 wei/秒微排放，过期窗按ceil选时长后重新floor速率。该入口中的微排放可短于1天，是显式schedule周期下限的既有例外，不改变治理等待期限。`cancelRewardScheduleA/B()`仅Normal/Paused可用，先完整结算，再将rate设0、finish与lastUpdate设T，未确权预算保留available。**不要求 badDebt 清零**——cancel 不移动任何资金、不新增任何排放承诺，坏债时反而更需要立即停止排放以防止继续 accrue（与 §10.3 显式列举的 recover/rebalance 阻断策略一致）。**当 `availableRewards == 0` 但周期仍活跃（`periodFinish > _effectiveTime()`）时允许执行**，event `RewardScheduleCancelled` 的 `remainingBudget = 0`；仅当 `periodFinish ≤ _effectiveTime()` 时（无活跃排放承诺可取消）回滚 `NoActiveWindow`。三种排期入口均不得由用户路径、Operator、注资或回流预算间接调用。
 
 重锚各分支均执行§4.5的最终候选headroom检查；取消窗口不建立新排放，不因无新窗口表示空间而失败。
 
@@ -1586,6 +1586,7 @@ error UserLiabilitiesUnfunded();
 error UnexpectedSenderDebit();
 error RewardShareLimitExceeded();
 error RewardIndexCapacityExceeded();
+error NoActiveWindow();
 
 ```
 
@@ -1679,7 +1680,7 @@ error RewardIndexCapacityExceeded();
    stake/fund/分池withdraw/取消排期结算对应池；**claimA/claimB 计提两池、settle 目标池**（跨池 badDebt 守卫要求两池都先计提，见 §5.4）；schedule/reanchor、compound、forceClaimAll、rebalance、resolve、claimFees和finalize结算两池；Emergency A回流B前结算两池，Emergency B结算B。Normal/Shutdown A退本不依赖B计提。活跃/过期均完整推进至各自min(effectiveTime,finish)，分片不足先公开crank；防御开关及shutdown激活不依赖计提，recover按完整账面保护excess。
 
 2. **活跃预算不可直接搬走**
-   两池先完整结算，无badDebt；只能搬走source.available−rate×max(finish−effectiveTime,0)之外的预算。需搬走未来承诺时，≥48h治理先显式取消旧周期再调拨；调入、fund、罚金或没收回流均不自动重排。
+   两池先完整结算，无badDebt；只能搬走source.available−rate×max(finish−effectiveTime,0)之外的预算。需搬走未来承诺时，≥48h治理先显式取消旧周期再调拨；调入、fund、罚金或没收回流均不自动重排。**`cancelRewardSchedule` 不在 badDebt 阻断列表中**——cancel 是"紧急止血"类操作，只改 rate/periodFinish/lastUpdateTime，不移动任何资金，坏债时应当优先可用；具体语义见 §6.2。
 
 3. **FOT 出账可观测性**
    出账路径必须记录 gross 与 net，用户承担税费，但协议必须让前端和索引器能证明差额来自 Token 税费，而不是协议少付。

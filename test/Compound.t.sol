@@ -587,12 +587,12 @@ contract TestCompound is BaseTest {
         assertEq(stakedA, 100e18);
     }
 
-    function testCompoundBExtendsLockWhenOldIsShorter() public{
+    function testCompoundBExtendsLockWhenOldIsShorter() public {
         vm.prank(alice);
         core.setLockDuration(90 days);
 
-        _stakeA(bob,100e18);
-        _stakeB(bob,100e18);
+        _stakeA(bob, 100e18);
+        _stakeB(bob, 100e18);
 
         uint256 farUnlock = core.unlockTimeB(bob);
         assertEq(farUnlock, block.timestamp + 90 days);

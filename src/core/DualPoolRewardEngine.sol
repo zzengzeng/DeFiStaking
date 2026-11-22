@@ -49,6 +49,7 @@ abstract contract DualPoolRewardEngine is DualPoolStorageLayout, Pausable {
 
     error AlreadyShutDown();
     error UnpauseCooldownActive(uint256 unpauseAt);
+    error NoActiveWindow();
 
     event InsufficientBudget(Pool indexed pool, uint256 shortfall, uint256 currentTime);
     event PoolCatchUpCranked(Pool indexed pool, uint256 lastUpdateTime, bool isCatchUp, uint256 currentTime);
@@ -77,6 +78,12 @@ abstract contract DualPoolRewardEngine is DualPoolStorageLayout, Pausable {
     );
 
     event Compounded(address indexed sender, uint256 rewardA, uint256 rewardB, uint256 staked, uint256 newUnlockTime);
+
+    event FeesClaimed(address indexed sender, address indexed feeRecipient, uint256 amount, uint256 currentTime);
+
+    event OutboundTransfer(address token, address to, uint256 grossAmount, uint256 netReceived);
+
+    event RewardScheduleCancelled(Pool indexed pool, uint256 remainingBudget, uint256 time);
 
     function _effectiveTime() internal view returns (uint256) {
         if (emergencyMode || shutdownMode) return terminalRewardTime;
@@ -211,6 +218,8 @@ abstract contract DualPoolRewardEngine is DualPoolStorageLayout, Pausable {
         if ((gross - netReceived) * BASIS_POINTS > gross * maxTransferFeeBP) {
             revert FeeExceedsCap();
         }
+
+        emit OutboundTransfer(address(token), to, gross, netReceived);
     }
 
     function _tokenBRequired() internal view returns (uint256) {

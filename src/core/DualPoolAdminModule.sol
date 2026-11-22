@@ -137,11 +137,55 @@ contract DualPoolAdminModule is DualPoolRewardEngine, IDualPoolAdminModule {
         emit RewardScheduled(pool, effectiveDuration, newRate, time, p.periodFinish);
     }
 
-    function activateShutdown() external {
+    function activateShutdown() external override {
         if (!emergencyMode) revert WrongState();
         if (shutdownMode) revert AlreadyShutDown();
         shutdownMode = true;
         shutdownAt = block.timestamp;
         emit ShutdownActivated(msg.sender, shutdownAt, block.timestamp);
+    }
+
+    function claimFees() external override {
+        if (emergencyMode || shutdownMode) revert WrongState();
+
+        if (feeRecipient == address(0)) revert ZeroAddress();
+
+        _updateGlobalA();
+        _updateGlobalB();
+
+        if (poolA.badDebt != 0 || poolB.badDebt != 0) revert BadDebtExists();
+
+        _assertInvariantB();
+
+        uint256 amount = unclaimedFeesB;
+
+        if (amount == 0) revert NothingToClaim();
+
+        unclaimedFeesB = 0;
+
+        _transferGross(rewardTokenB, feeRecipient, amount);
+
+        _assertInvariantB();
+
+        emit FeesClaimed(msg.sender, feeRecipient, amount, block.timestamp);
+    }
+
+    function cancelRewardSchedule(Pool pool) external override {
+        if (emergencyMode || shutdownMode) revert WrongState();
+
+        _updateGlobalA();
+        _updateGlobalB();
+
+        uint256 time = _effectiveTime();
+        PoolInfo storage poolInfo = _pool(pool);
+        if (poolInfo.periodFinish <= time) revert NoActiveWindow();
+
+        uint256 remainingBudget = poolInfo.availableRewards;
+
+        poolInfo.rewardRate = 0;
+        poolInfo.periodFinish = time;
+        poolInfo.lastUpdateTime = time;
+
+        emit RewardScheduleCancelled(pool, remainingBudget, time);
     }
 }
