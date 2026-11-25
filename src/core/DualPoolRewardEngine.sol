@@ -51,6 +51,17 @@ abstract contract DualPoolRewardEngine is DualPoolStorageLayout, Pausable {
     error UnpauseCooldownActive(uint256 unpauseAt);
     error NoActiveWindow();
 
+    error SamePool();
+    error ScheduleUnderfunded();
+    error InsufficientFreeBudget();
+
+    error InvalidRecovery();
+    error TokenRecoveryRestricted();
+    error NoExcessTokenA();
+    error CannotRecoverStakedTokenA();
+    error NoExcessTokenB();
+    error ExceedsExcess();
+
     event InsufficientBudget(Pool indexed pool, uint256 shortfall, uint256 currentTime);
     event PoolCatchUpCranked(Pool indexed pool, uint256 lastUpdateTime, bool isCatchUp, uint256 currentTime);
 
@@ -84,6 +95,10 @@ abstract contract DualPoolRewardEngine is DualPoolStorageLayout, Pausable {
     event OutboundTransfer(address token, address to, uint256 grossAmount, uint256 netReceived);
 
     event RewardScheduleCancelled(Pool indexed pool, uint256 remainingBudget, uint256 time);
+
+    event BudgetRebalanced(Pool indexed from, Pool indexed to, uint256 amt, uint256 time);
+
+    event TokenRecovered(address indexed token, address indexed to, uint256 amount);
 
     function _effectiveTime() internal view returns (uint256) {
         if (emergencyMode || shutdownMode) return terminalRewardTime;

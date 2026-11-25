@@ -248,8 +248,16 @@ contract DualPoolStaking is DualPoolRoles {
         _delegateTo(adminModule, abi.encodeCall(IDualPoolAdminModule.claimFees, ()));
     }
 
+    function rebalanceBudgets(Pool from, Pool to, uint256 amt) external onlyRole(ADMIN_ROLE) nonReentrant {
+        _delegateTo(adminModule, abi.encodeCall(IDualPoolAdminModule.rebalanceBudgets, (from, to, amt)));
+    }
+
     function cancelRewardSchedule(Pool pool) external onlyRole(ADMIN_ROLE) nonReentrant {
         _delegateTo(adminModule, abi.encodeCall(IDualPoolAdminModule.cancelRewardSchedule, (pool)));
+    }
+
+    function recoverToken(IERC20 token, address to, uint256 amount) external onlyRole(ADMIN_ROLE) nonReentrant {
+        _delegateTo(adminModule, abi.encodeCall(IDualPoolAdminModule.recoverToken, (token, to, amount)));
     }
 
     function stakeA(uint256 amount) external nonReentrant {

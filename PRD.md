@@ -1,5 +1,12 @@
-# ERC20 (Staking) 协议需求规格说明书 v1.1.9
+# ERC20 (Staking) 协议需求规格说明书 v1.1.10
 
+> **v1.1.10 修订说明（2026-11-24）**
+>
+> - **§6.2**：明确 `cancelRewardScheduleA/B` **不要求 badDebt 清零**（紧急止血语义：只改 rate/finish/lastUpdate，不移动资金）；`availableRewards == 0` 但 `periodFinish > effectiveTime` 时仍允许执行（`remainingBudget = 0`）；无活跃窗口回滚 `NoActiveWindow`。
+> - **§7.1**：状态矩阵补充 `recoverToken` 行：**不设状态守卫**，任何状态均按 ≥48h Admin 路径可调用。
+> - **§2.2 / §7.6 / §10.2**：明确 `recoverToken` 结算策略——**TokenA 路径不结算**（独立于 B 账本），**TokenB 路径先完整结算两池**再检查 `badDebt` 与 `required`。
+> - **§8.2**：自定义错误表按当前实现（`src/core/*.sol`）重新整理并统一命名；正文伪代码中的字符串错误消息仅作示意，规范错误名以 §8.2 为准。
+>
 > **v1.1.9 修订说明（2026-11-07）**
 >
 > - **§5.3.1 / §5.3.2 / §5.4 / §5.5**：状态守卫顺序统一为「先 Emergency，再 Paused」，与代码一致；Emergency 状态下错误类型从 `PausedStatus` 改为更精确的 `EmergencyStatus`。
@@ -236,7 +243,7 @@ $$BalanceB + BadDebt_{A} + BadDebt_{B} \ge TotalStakedB + TotalPending_{A+B} + A
 
 **recoverToken 受限规则（坏账敏感型）**
 
-> 在系统存在坏账（`badDebt > 0`）时，严禁回收任何 TokenB，必须先通过 `resolveBadDebt` 补齐缺口。
+> 在系统存在坏账（`badDebt > 0`）时，严禁回收任何 TokenB，必须先通过 `resolveBadDebt` 补齐缺口。recover **不设状态守卫**（任何状态可调用），但 **TokenB 路径必须先完整结算两池**再检查 `badDebt` 与 `required`，避免 stale 账本放过本应阻断的回收；**TokenA 路径独立于 B 账本、不要求结算**。详见 §7.6。
 
 ```solidity
 // TokenB：仅允许回收超额部分，且必须在 badDebt 清零前提下
@@ -1272,6 +1279,7 @@ function setMinClaimAmount(uint256 newAmount)
 | stake / compound | ✅ | ❌ | ❌ | ❌ | ❌ |
 | fund / 兼容仅注资notify | ✅ | ❌ | ❌ | ❌ | ❌ |
 | 治理开启 / 取消 / 重排周期、预算调拨 | ⚠≥48h | ⚠≥48h，冻结时钟 | ❌ | ❌ | ❌ |
+| recoverToken（仅账本外盈余，无状态守卫） | ⚠≥48h | ⚠≥48h | ⚠≥48h | ⚠≥48h | ⚠≥48h |
 | withdraw / claim | ✅ | ❌ | ❌ | ❌ | ✅，忽略paused |
 | forceClaimAll | ✅，健康足额 / 坏账部分 | ❌ | ❌ | ❌ | ✅，可部分 |
 | emergencyWithdraw | ❌ | ❌ | ✅ | ✅ | ❌ |
@@ -1461,15 +1469,19 @@ function resolveBadDebt(address payer, uint256 amount) external onlyAdmin nonRee
 
 仅允许回收 **Pool A 质押代币（TokenA）** 或 **Pool B / 奖励代币（TokenB）**；其他 ERC20 一律 `TokenRecoveryRestricted`。
 
+**状态与结算策略（强制）**：`recoverToken` **不设状态守卫**——Normal/Paused/Emergency/Shutdown 均可调用。recover 只移动账本之外的盈余，其安全边界由 excess 覆盖检查保证，而非状态机；紧急/停机状态下清理误转或外部转入代币的需求反而更高（与 §2.2「治理模块/权限修复不应被资产缺口阻断」一致）。**TokenA 路径不要求结算**：`totalStakedA` 不随 accrual 变化，A 的覆盖检查独立于 B 账本，B 的 catch-up 不得阻断 A 回收。**TokenB 路径必须先完整结算两池**（`_updateGlobalA(); _updateGlobalB();`），确保 `badDebtA/B`、`totalPendingA/B`、`availableRewardsA/B` 均为最新，再按完整 `required` 保护；分片不足时治理应先公开 `crankCatchUpPool` 再重试。
+
 ```solidity
 require(amount > 0 && to != address(0) && to != address(this), "INVALID_RECOVERY");
-// TokenA只恢复全池本金之外的真实盈余，不用B不变量阻断独立A资产检查。
+// TokenA只恢复全池本金之外的真实盈余，不用B不变量阻断独立A资产检查；A路径不结算。
 if (token == address(stakingTokenA)) {
     uint256 balanceA = stakingTokenA.balanceOf(address(this));
     require(balanceA > totalStakedA, "NO_EXCESS_TOKEN_A");
     require(amount <= balanceA - totalStakedA, "CANNOT_RECOVER_STAKED_TOKEN_A");
 }
 else if (token == address(rewardTokenB)) {
+    // TokenB路径先完整结算两池，确保badDebt与required为最新
+    _updateGlobalA(); _updateGlobalB();
     require(badDebtA == 0 && badDebtB == 0, "BAD_DEBT_EXISTS");
     // 必须保护本金、待付负债、预算与手续费（与 _assertInvariantB required 一致）
     uint256 required = totalStakedB + totalPendingA + totalPendingB
@@ -1483,7 +1495,7 @@ else if (token == address(rewardTokenB)) {
 
 FOTTransferLib.transferGross(IERC20(token), to, amount, maxTransferFeeBP, BASIS_POINTS);
 // 转后再次校验对应资产保护；TokenB必须仍覆盖完整required，不能用booked替代pending。
-emit TokenRecovered(token, amount, to);
+emit TokenRecovered(token, to, amout);
 ```
 
 > **`forceShutdownFinalize`** 清扫同样经 `FOTTransferLib.transferGross` 转至 `feeRecipient`。recover不重排、不改份额或预算；全部pending（含未settle债权和保守保留的orphan）均计入required，且TokenB须无badDebt。
@@ -1532,7 +1544,7 @@ event BadDebtResolved(Pool indexed pool, uint256 amount, uint256 at);
 event BadDebtResolvedTotal(uint256 totalRepaid, uint256 at);
 event InvariantViolated(uint256 actual, uint256 required, uint256 at);
 event InsufficientBudget(Pool indexed pool, uint256 shortfall, uint256 currentTime); 
-event TokenRecovered(address indexed token, uint256 amount, address indexed to);
+event TokenRecovered(address indexed token,address indexed to, uint256 amount);
 
 // ── 参数变更事件 ──────────────────────────────────────────────────────────
 event FeeRecipientUpdated(address indexed oldAddr, address indexed newAddr, uint256 currentTime);
@@ -1559,36 +1571,99 @@ event MinEarlyExitAmountBUpdated(uint256 oldEarlyExitAmount, uint256 newEarlyExi
 ### 8.2 自定义错误定义
 
 ```solidity
-error ContractPaused();
-error EmergencyModeActive();
-error ShutdownModeActive();
-error InsufficientBalance(uint256 requested, uint256 available);
-error InsufficientPending(uint256 requested, uint256 available); 
-error UnlockTimePending(uint256 unlockTime, uint256 now_);
-error BelowMinClaim(uint256 claimable, uint256 minAmount);
-error BelowMinEarlyExit(uint256 requested, uint256 minAmount); 
-error RewardRateExceedsMax(uint256 rate, uint256 maxRate);
-error UnpauseCooldownPending(uint256 unpauseAt, uint256 now_);
-error InvariantViolation(uint256 actual, uint256 required);
-error ZeroDuration();
+// ── 通用 / 状态 ────────────────────────────────────────────
 error ZeroAmount();
-error Unauthorized(address caller);
-error TokenRecoveryRestricted();
+error ZeroAddress();
+error WrongState();
+error ContractPaused();
+error PausedStatus();
+error EmergencyStatus();
+error AlreadyEmergencyMode();
+error AlreadyShutDown();
+error CatchUpIncomplete();
+error UnpauseCooldownActive(uint256 unpauseAt);
+error InvariantViolation(uint256 actual, uint256 required);
+
+// ── 权限与模块 ────────────────────────────────────────────
+error SelfTransferForbidden();
+error RoleUpdateForbidden(bytes32 role, address account);
+error RenounceForbidden(bytes32 role, address callerConfirm);
+error RenounceOwnershipForbidden();
+error ModuleNotSet();
+error ModuleNotContract();
+
+// ── 部署构造 ──────────────────────────────────────────────
+error SameToken();
+error NotAContract();
+error InvalidTokenDecimals();
+error CapZero();
+error RateTooSmall();
+
+// ── 参数 setter ───────────────────────────────────────────
+error InvalidLockDuration();
+error InvalidFeeRecipient();
+error InvalidMaxTransferFeeBP();
+error InvalidMinClaimAmount();
+error InvalidRewardDuration();
+error InvalidPenaltyFee();
+error InvalidWithdrawFee();
+error InvalidMidTermFee();
+error InvalidMinEarlyExitAmount();
+
+// ── 质押 / 提现 / 奖励账本 ────────────────────────────────
+error BelowMinStake();
+error CapExceeded();
+error InsufficientCoverage();
+error RewardShareLimit();
+error InvalidStakeTimestamp();
+error InvalidAmount();
+error PrincipalDeficit(Pool pool, uint256 balance, uint256 required);
+error PayerDeductionMismatch();
+error ReceivedExceedsAmount();
+error FeeExceedsCap();
+error VaultDebitMismatch(uint256 expected, uint256 actual);
+error InvalidNetReceived(uint256 gross, uint256 net);
 error BadDebtExists();
 error BookedRewardsExceedPending();
-error NoRewardsToClaim();
-error ZeroRewardRate(uint256 mergedBudget, uint256 duration);
-error StillStaked();
-error CatchUpIncomplete();
-error InvalidPayer();
+error DebtExceedsPending();
+
+// ── claim / compound / emergency ──────────────────────────
+error ClaimCooldownActive(uint256 availableAt);
+error NothingToClaim();
+error NothingToCompound();
+error BelowMinClaim();
+error InsufficientPending();
+error InsufficientBooked();
+error InsufficientLiquidity();
 error NoPayableLiquidity();
+error BelowMinEarlyExitB();
+error NoStake();
+
+// ── 排期治理 / 预算调拨 ───────────────────────────────────
+error WindowActive();
+error NoActiveWindow();
+error InvalidRate();
+error UnderfundedSchedule();
+error RewardIndexCapacity();
+error SamePool();
+error ScheduleUnderfunded();
+error InsufficientFreeBudget();
+
+// ── 代币回收 ──────────────────────────────────────────────
+error TokenRecoveryRestricted();
+error InvalidRecovery();
+error NoExcessTokenA();
+error CannotRecoverStakedTokenA();
+error NoExcessTokenB();
+error ExceedsExcess();
+
+// ── 预留：resolveBadDebt 待实现时启用（§7.5）───────────────
+error InvalidPayer();
 error UserLiabilitiesUnfunded();
 error UnexpectedSenderDebit();
-error RewardShareLimitExceeded();
-error RewardIndexCapacityExceeded();
-error NoActiveWindow();
-
 ```
+
+> **实现一致性说明**：本节错误名与当前实现（`src/core/*.sol`）。正文伪代码中出现的字符串错误消息（如 `"BAD_DEBT_EXISTS"`、`"PAUSED"`）仅用于说明语义，规范错误名以本节为准。
 
 > **部署角色交接（Core + 模块 + 门面）**：标准顺序为
 > 1. 部署 48h / 72h 两个 `TimelockController`，配置 proposer / executor / canceller，`minDelay` 分别为 ≥48h / ≥72h。
@@ -1677,7 +1752,7 @@ error NoActiveWindow();
 ### 10.2 上线前必须调整/确认的实现项
 
 1. **全入口 catch-up 规则**
-   stake/fund/分池withdraw/取消排期结算对应池；**claimA/claimB 计提两池、settle 目标池**（跨池 badDebt 守卫要求两池都先计提，见 §5.4）；schedule/reanchor、compound、forceClaimAll、rebalance、resolve、claimFees和finalize结算两池；Emergency A回流B前结算两池，Emergency B结算B。Normal/Shutdown A退本不依赖B计提。活跃/过期均完整推进至各自min(effectiveTime,finish)，分片不足先公开crank；防御开关及shutdown激活不依赖计提，recover按完整账面保护excess。
+   stake/fund/分池withdraw/取消排期结算对应池；**claimA/claimB 计提两池、settle 目标池**（跨池 badDebt 守卫要求两池都先计提，见 §5.4）；schedule/reanchor、compound、forceClaimAll、rebalance、resolve、claimFees和finalize结算两池；Emergency A回流B前结算两池，Emergency B结算B。Normal/Shutdown A退本不依赖B计提。活跃/过期均完整推进至各自min(effectiveTime,finish)，分片不足先公开crank；防御开关及shutdown激活不依赖计提，recover按完整账面保护excess（**TokenB 路径先结算两池、TokenA 路径不结算，且不设状态守卫**，见§7.6）。
 
 2. **活跃预算不可直接搬走**
    两池先完整结算，无badDebt；只能搬走source.available−rate×max(finish−effectiveTime,0)之外的预算。需搬走未来承诺时，≥48h治理先显式取消旧周期再调拨；调入、fund、罚金或没收回流均不自动重排。**`cancelRewardSchedule` 不在 badDebt 阻断列表中**——cancel 是"紧急止血"类操作，只改 rate/periodFinish/lastUpdateTime，不移动任何资金，坏债时应当优先可用；具体语义见 §6.2。

@@ -4,6 +4,7 @@ import {IDualPoolAdminModule} from "../interfaces/IDualPoolAdminModule.sol";
 
 import {DualPoolRewardEngine} from "./DualPoolRewardEngine.sol";
 import {Pool, PoolInfo} from "../StakeTypes.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract DualPoolAdminModule is DualPoolRewardEngine, IDualPoolAdminModule {
     error WindowActive();
@@ -187,5 +188,57 @@ contract DualPoolAdminModule is DualPoolRewardEngine, IDualPoolAdminModule {
         poolInfo.lastUpdateTime = time;
 
         emit RewardScheduleCancelled(pool, remainingBudget, time);
+    }
+
+    function rebalanceBudgets(Pool from, Pool to, uint256 amt) external override {
+        if (emergencyMode || shutdownMode) revert WrongState();
+        if (from == to) revert SamePool();
+        if (amt == 0) revert ZeroAmount();
+
+        _updateGlobalA();
+        _updateGlobalB();
+
+        if (poolA.badDebt != 0 || poolB.badDebt != 0) revert BadDebtExists();
+
+        uint256 time = _effectiveTime();
+        PoolInfo storage poolFrom = _pool(from);
+        uint256 remaining = poolFrom.periodFinish > time ? poolFrom.periodFinish - time : 0;
+        uint256 committed = poolFrom.rewardRate * remaining;
+
+        if (poolFrom.availableRewards < committed) revert ScheduleUnderfunded();
+
+        uint256 freeBudget = poolFrom.availableRewards - committed;
+
+        if (amt > freeBudget) revert InsufficientFreeBudget();
+
+        poolFrom.availableRewards -= amt;
+        _pool(to).availableRewards += amt;
+
+        _assertInvariantB();
+
+        emit BudgetRebalanced(from, to, amt, time);
+    }
+
+    function recoverToken(IERC20 token, address to, uint256 amount) external {
+        if (amount == 0 || to == address(0) || to == address(this)) revert InvalidRecovery();
+
+        if (address(token) == address(poolA.stakingToken)) {
+            uint256 balance = token.balanceOf(address(this));
+            if (balance <= poolA.totalStaked) revert NoExcessTokenA();
+            if (amount > balance - poolA.totalStaked) revert CannotRecoverStakedTokenA();
+        } else if (address(token) == address(poolB.stakingToken)) {
+            _updateGlobalA();
+            _updateGlobalB();
+            if (poolA.badDebt != 0 || poolB.badDebt != 0) revert BadDebtExists();
+            uint256 balance = token.balanceOf(address(this));
+            uint256 required = _tokenBRequired();
+            if (balance <= required) revert NoExcessTokenB();
+            if (amount > balance - required) revert ExceedsExcess();
+        } else {
+            revert TokenRecoveryRestricted();
+        }
+        _transferGross(token, to, amount);
+
+        emit TokenRecovered(address(token), to, amount);
     }
 }
